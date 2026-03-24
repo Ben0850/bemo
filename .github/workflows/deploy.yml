@@ -1,0 +1,29 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /opt/bemo-verwaltung
+            git config --global --add safe.directory /opt/bemo-verwaltung
+            git pull origin main
+            docker compose up -d --build
+            echo "Warte auf Container-Start..."
+            sleep 10
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' bemo-app 2>/dev/null || echo "unknown")
+            echo "Container Health: $STATUS"
+            [ "$STATUS" = "healthy" ] || { echo "Health check failed!"; exit 1; }
+            echo "Deployment erfolgreich!"
