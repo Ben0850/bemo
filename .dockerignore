@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.claude
+.env
+.env.*
+!.env.example
+data/*.db
+*.md
+Briefpapier.pdf
+kalender.jpg
+bilder/
+docker-compose*.yml
+nginx/
+deploy.sh
+Makefile

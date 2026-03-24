@@ -1,0 +1,83 @@
+# ===== PRODUCTION docker-compose =====
+# Usage: docker compose up -d --build
+
+services:
+  # ===== Node.js Application =====
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bemo-app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - HOST=0.0.0.0
+    volumes:
+      - app-data:/app/data
+    networks:
+      - internal
+    expose:
+      - "3001"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ===== Nginx + ModSecurity WAF =====
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: bemo-nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - certbot-webroot:/var/www/certbot:ro
+      - nginx-logs:/var/log/nginx
+      - waf-logs:/var/log/modsecurity
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ===== Certbot (Let's Encrypt) =====
+  certbot:
+    image: certbot/certbot
+    container_name: bemo-certbot
+    volumes:
+      - ./nginx/ssl:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do sleep 12h & wait $${!}; certbot renew --webroot -w /var/www/certbot; done'"
+    depends_on:
+      - nginx
+
+  # ===== Watchtower (auto-restart on image update) =====
+  watchtower:
+    image: containrrr/watchtower
+    container_name: bemo-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_SCHEDULE=0 0 4 * * *
+      - WATCHTOWER_LABEL_ENABLE=false
+    command: bemo-app bemo-nginx
+
+volumes:
+  app-data:
+    name: bemo-app-data
+  certbot-webroot:
+  nginx-logs:
+  waf-logs:
+
+networks:
+  internal:
+    driver: bridge

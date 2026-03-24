@@ -1,0 +1,18 @@
+# ===== Development Dockerfile =====
+# Hot reload via nodemon
+FROM node:20-alpine
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci && npm install -g nodemon
+
+COPY . .
+RUN mkdir -p /app/data
+
+ENV NODE_ENV=development
+ENV PORT=3001
+
+EXPOSE 3001
+
+# Nodemon for auto-restart on file changes
+CMD ["nodemon", "--watch", "server.js", "--watch", "db.js", "server.js"]

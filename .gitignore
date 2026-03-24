@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Database (nicht ins Repo - wird auf dem Server per Volume persistiert)
+data/*.db
+
+# Environment files (Secrets!)
+.env
+.env.production
+.env.local
+
+# SSL certificates
+nginx/ssl/*.pem
+nginx/ssl/*.key
+nginx/ssl/*.crt
+
+# IDE / System
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Claude Code
+.claude/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+*.swp
+*.swo
+*~
+
+# Temp
+tmp/
+
+# GSD planning docs
+.planning/
+Testumgebung/
+testumgebung/

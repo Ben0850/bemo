@@ -1,0 +1,22 @@
+{
+  "name": "bemo-verwaltung",
+  "version": "1.0.0",
+  "description": "Bemo GmbH Verwaltungssoftware",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1015.0",
+    "@aws-sdk/s3-request-presigner": "^3.1015.0",
+    "@azure/msal-node": "^5.1.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "pdfkit": "^0.17.2",
+    "sql.js": "^1.11.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
+  }
+}

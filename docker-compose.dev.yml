@@ -1,0 +1,27 @@
+# ===== DEVELOPMENT docker-compose =====
+# Usage: docker compose -f docker-compose.dev.yml up --build
+#
+# Lokale Entwicklung OHNE WAF/SSL - nur die App mit Hot-Reload
+# Die App läuft auf http://localhost:3000
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: bemo-dev
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - HOST=0.0.0.0
+    volumes:
+      # Mount source code for hot reload
+      - ./server.js:/app/server.js
+      - ./db.js:/app/db.js
+      - ./public:/app/public
+      - ./package.json:/app/package.json
+      # Persistent DB in local data folder
+      - ./data:/app/data
+    restart: unless-stopped

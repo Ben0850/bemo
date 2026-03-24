@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <title>Bemo Verwaltung</title>
+  <link rel="stylesheet" href="/css/style.css?v=7">
+</head>
+<body>
+  <!-- Login Screen -->
+  <div class="login-screen" id="login-screen">
+    <div class="login-box">
+      <img src="/logo.jpg" alt="Bemo" class="login-logo">
+      <p class="login-subtitle">Verwaltungssystem</p>
+      <form id="login-form" onsubmit="doLogin(event)">
+        <div class="form-group">
+          <label>Benutzername</label>
+          <input type="text" id="login-username" placeholder="Benutzername eingeben" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label>Passwort</label>
+          <input type="password" id="login-password" placeholder="Passwort eingeben" autocomplete="current-password">
+        </div>
+        <div id="login-error" style="color:#e74c3c;font-size:13px;margin-bottom:12px;display:none;"></div>
+        <button type="submit" class="btn btn-primary" style="width:100%;">Anmelden</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="app" id="app-container" style="display:none;">
+    <!-- Mobile top bar -->
+    <div class="mobile-topbar" id="mobile-topbar">
+      <button class="hamburger-btn" id="hamburger-btn" onclick="toggleMobileMenu()">
+        <span></span><span></span><span></span>
+      </button>
+      <span class="mobile-topbar-title">Bemo-Verwaltung</span>
+    </div>
+    <div class="mobile-overlay" id="mobile-overlay" onclick="closeMobileMenu()"></div>
+    <nav class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <img src="/logo-white.png" alt="Bemo" class="sidebar-logo">
+      </div>
+      <ul class="nav-list">
+        <li><a href="#" data-page="dashboard" class="nav-link active">
+          <span class="nav-icon">&#9632;</span> Dashboard
+        </a></li>
+        <li><a href="#" data-page="customers" class="nav-link">
+          <span class="nav-icon">&#9824;</span> Kunden
+        </a></li>
+        <li><a href="#" data-page="calendar" class="nav-link">
+          <span class="nav-icon">&#9776;</span> Kalender
+        </a></li>
+        <li><a href="#" data-page="vacation" class="nav-link">
+          <span class="nav-icon">&#9728;</span> An-/Abwesenheitsplaner
+        </a></li>
+        <li><a href="#" data-page="fuhrpark" class="nav-link">
+          <span class="nav-icon">&#9854;</span> Fuhrpark
+        </a></li>
+        <li><a href="#" data-page="time-tracking" class="nav-link">
+          <span class="nav-icon">&#9201;</span> Zeiterfassung
+        </a></li>
+        <li><a href="#" data-page="testseite" class="nav-link">
+          <span class="nav-icon">&#128193;</span> Testseite
+        </a></li>
+        <li id="nav-buchhaltung" class="nav-item-has-submenu" style="display:none;">
+          <a href="#" class="nav-link nav-submenu-toggle">
+            <span class="nav-icon">&#9993;</span> Buchhaltung
+          </a>
+          <ul class="nav-submenu">
+            <li><a href="#" data-page="invoices" class="nav-link">Rechnungen</a></li>
+            <li><a href="#" data-page="gutschriften" class="nav-link">Gutschriften</a></li>
+          </ul>
+        </li>
+        <li id="nav-staff" style="display:none;"><a href="#" data-page="staff" class="nav-link">
+          <span class="nav-icon">&#9823;</span> Mitarbeiter
+        </a></li>
+        <li class="nav-item-has-submenu">
+          <a href="#" class="nav-link nav-submenu-toggle">
+            <span class="nav-icon">&#9998;</span> Programm
+          </a>
+          <ul class="nav-submenu">
+            <li><a href="#" data-page="changelog" class="nav-link">Programmversion</a></li>
+            <li><a href="#" data-page="tickets" class="nav-link">
+              Support-Tickets <span id="ticket-badge" class="nav-badge" style="display:none;"></span>
+            </a></li>
+            <li><a href="#" data-page="suggestions" class="nav-link">
+              Vorschläge <span id="suggestion-badge" class="nav-badge" style="display:none;"></span>
+            </a></li>
+          </ul>
+        </li>
+        <li id="nav-settings" class="nav-item-has-submenu" style="display:none;">
+          <a href="#" class="nav-link nav-submenu-toggle">
+            <span class="nav-icon">&#9881;</span> Einstellungen
+          </a>
+          <ul class="nav-submenu">
+            <li><a href="#" data-page="settings-company" class="nav-link">Firmendaten</a></li>
+            <li><a href="#" data-page="settings-program" class="nav-link">Programmdaten</a></li>
+          </ul>
+        </li>
+      </ul>
+      <div class="sidebar-footer">
+        <span id="sidebar-user" style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:8px;"></span>
+        <button class="btn btn-sm btn-secondary" onclick="doLogout()" style="width:100%;">Abmelden</button>
+      </div>
+    </nav>
+    <main class="content" id="main-content">
+      <!-- Dynamic content rendered here -->
+    </main>
+  </div>
+
+  <!-- Modal overlay -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal" id="modal">
+      <div class="modal-header">
+        <h2 id="modal-title"></h2>
+        <button class="modal-close" id="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+  <script src="/js/app.js?v=9"></script>
+</body>
+</html>
