@@ -20,10 +20,11 @@ jobs:
             cd /opt/bemo-verwaltung
             git config --global --add safe.directory /opt/bemo-verwaltung
             git pull origin main
-            docker compose up -d --build
+            docker compose up -d --build app
             echo "Warte auf Container-Start..."
             sleep 10
             STATUS=$(docker inspect --format='{{.State.Health.Status}}' bemo-app 2>/dev/null || echo "unknown")
             echo "Container Health: $STATUS"
             [ "$STATUS" = "healthy" ] || { echo "Health check failed!"; exit 1; }
+            docker network connect tuev-verwaltung_internal bemo-app 2>/dev/null || true
             echo "Deployment erfolgreich!"
