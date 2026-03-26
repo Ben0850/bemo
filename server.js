@@ -2691,13 +2691,72 @@ app.post('/api/akten', (req, res) => {
 });
 
 app.put('/api/akten/:id', (req, res) => {
+  // SEC-01: Permission guard
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const userId = Number(req.headers['x-user-id']);
   const existing = queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  const { aktennummer, datum, kunde, anwalt, vorlage, zahlungsstatus, vermittler, status, notizen } = req.body;
+
+  // DB-05: Audit trail — diff before update
+  const TRACKED_FIELDS = [
+    'aktennummer', 'datum', 'kunde', 'anwalt', 'vorlage', 'vermittler',
+    'customer_id', 'vermittler_id', 'versicherung_id', 'rental_id',
+    'unfalldatum', 'unfallort', 'polizei_vor_ort',
+    'mietart', 'wiedervorlage_datum',
+    'zahlungsstatus', 'status', 'notizen'
+  ];
+
+  // Normalize values: NULL/undefined/'' all become null for FK fields, '' for text fields
+  const FK_FIELDS = ['customer_id', 'vermittler_id', 'versicherung_id', 'rental_id'];
+  function norm(field, val) {
+    if (FK_FIELDS.includes(field)) {
+      return (val === null || val === undefined || val === '' || val === 0) ? null : val;
+    }
+    return (val === null || val === undefined) ? '' : String(val);
+  }
+
+  const now = `${berlinToday()} ${berlinTime()}`;
+
+  for (const field of TRACKED_FIELDS) {
+    if (req.body[field] === undefined) continue; // field not in request body — skip
+    const oldVal = norm(field, existing[field]);
+    const newVal = norm(field, req.body[field]);
+    if (String(oldVal ?? '') !== String(newVal ?? '')) {
+      execute(
+        `INSERT INTO akten_history (akte_id, changed_by, changed_at, field_name, old_value, new_value)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [Number(req.params.id), userId, now, field, String(oldVal ?? ''), String(newVal ?? '')]
+      );
+    }
+  }
+
+  // Perform the update with all columns
   execute(
-    `UPDATE akten SET aktennummer=?, datum=?, kunde=?, anwalt=?, vorlage=?, zahlungsstatus=?, vermittler=?, status=?, notizen=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-    [aktennummer || '', datum || '', kunde || '', anwalt || '', vorlage || '', zahlungsstatus || 'offen', vermittler || '', status || 'offen', notizen || '', Number(req.params.id)]
+    `UPDATE akten SET
+      aktennummer=?, datum=?, kunde=?, anwalt=?, vorlage=?, vermittler=?,
+      customer_id=?, vermittler_id=?, versicherung_id=?, rental_id=?,
+      unfalldatum=?, unfallort=?, polizei_vor_ort=?,
+      mietart=?, wiedervorlage_datum=?,
+      zahlungsstatus=?, status=?, notizen=?,
+      updated_at=CURRENT_TIMESTAMP
+     WHERE id=?`,
+    [
+      req.body.aktennummer || '', req.body.datum || '',
+      req.body.kunde || '', req.body.anwalt || '', req.body.vorlage || '', req.body.vermittler || '',
+      req.body.customer_id || null, req.body.vermittler_id || null,
+      req.body.versicherung_id || null, req.body.rental_id || null,
+      req.body.unfalldatum || '', req.body.unfallort || '',
+      req.body.polizei_vor_ort ? 1 : 0,
+      req.body.mietart || '', req.body.wiedervorlage_datum || '',
+      req.body.zahlungsstatus || 'offen', req.body.status || 'offen',
+      req.body.notizen || '',
+      Number(req.params.id)
+    ]
   );
+
   res.json(queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]));
 });
 
