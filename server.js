@@ -2658,9 +2658,35 @@ app.get('/api/akten', (req, res) => {
   }
 });
 
-app.get('/api/akten/:id', (req, res) => {
+app.get('/api/akten/:id', async (req, res) => {
   const row = queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]);
   if (!row) return res.status(404).json({ error: 'Not found' });
+
+  // Local FK joins (synchronous, in-memory SQLite)
+  if (row.customer_id) {
+    row.customer = queryOne(
+      'SELECT id, first_name, last_name, phone, email, company_name, customer_type FROM customers WHERE id = ?',
+      [row.customer_id]
+    ) || null;
+  }
+  if (row.rental_id) {
+    row.rental = queryOne(
+      `SELECT r.id, r.start_date, r.end_date, fv.license_plate, fv.manufacturer, fv.model
+       FROM rentals r
+       JOIN fleet_vehicles fv ON r.vehicle_id = fv.id
+       WHERE r.id = ?`,
+      [row.rental_id]
+    ) || null;
+  }
+
+  // External Stammdaten (parallel, non-blocking)
+  const [vermittlerData, versicherungData] = await Promise.all([
+    row.vermittler_id ? fetchStammdatenById(`/api/vermittler/${row.vermittler_id}`) : Promise.resolve(null),
+    row.versicherung_id ? fetchStammdatenById(`/api/insurances/${row.versicherung_id}`) : Promise.resolve(null)
+  ]);
+  row.vermittler_obj = vermittlerData;
+  row.versicherung_obj = versicherungData;
+
   res.json(row);
 });
 
@@ -2776,6 +2802,23 @@ app.delete('/api/akten/:id', (req, res) => {
 const STAMMDATEN_API_URL = process.env.STAMMDATEN_API_URL || 'http://localhost:3010';
 const http = require('http');
 const https = require('https');
+
+// Internal helper: fetch a single Stammdaten record by path (returns parsed JSON or null)
+async function fetchStammdatenById(urlPath) {
+  return new Promise((resolve) => {
+    const fullUrl = `${STAMMDATEN_API_URL}${urlPath}`;
+    const proto = fullUrl.startsWith('https') ? https : http;
+    let data = '';
+    const req = proto.get(fullUrl, (proxyRes) => {
+      proxyRes.on('data', chunk => data += chunk);
+      proxyRes.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch { resolve(null); }
+      });
+    });
+    req.on('error', () => resolve(null));
+  });
+}
 
 function proxyStammdatenRequest(req, res) {
   const url = `${STAMMDATEN_API_URL}${req.originalUrl}`;
