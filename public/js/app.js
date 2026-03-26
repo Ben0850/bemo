@@ -16,6 +16,7 @@ function customerDisplayName(c) {
 // ===== State =====
 let currentPage = 'dashboard';
 let currentCustomerId = null;
+let currentAkteId = null;
 let loggedInUser = null;
 let autoRefreshTimer = null;
 
@@ -189,6 +190,7 @@ function navigate(page, data) {
     case 'lawyers': renderLawyers(); break;
     case 'vermittler': renderVermittler(); break;
     case 'akten': renderAkten(); break;
+    case 'akte-detail': renderAkteDetail(data); break;
     case 'calendar': renderCalendar(); break;
     case 'vacation': renderVacation(); break;
     case 'vacation-requests': renderVacationRequests(); break;
@@ -9673,7 +9675,7 @@ function renderAktenTable() {
           <th>Aktionen</th>
         </tr></thead>
         <tbody>
-          ${data.map(a => `<tr style="cursor:pointer;" onclick="openAkteDetail(${a.id})">
+          ${data.map(a => `<tr style="cursor:pointer;" onclick="navigate('akte-detail', ${a.id})">
             <td><strong>${escapeHtml(a.aktennummer || '')}</strong></td>
             <td>${a.datum ? escapeHtml(a.datum.split('-').reverse().join('.')) : ''}</td>
             <td>${escapeHtml(a.kunde || '')}</td>
@@ -9683,13 +9685,181 @@ function renderAktenTable() {
             <td>${escapeHtml(a.vermittler || '')}</td>
             <td>${aktenStatusBadge(a.status)}</td>
             <td>
-              ${isAdmin() ? '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openAkteForm(' + a.id + ')">Bearbeiten</button> <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteAkte(' + a.id + ',\'' + escapeHtml(a.aktennummer || '').replace(/'/g, "\\'") + '\')">Löschen</button>' : '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();openAkteDetail(' + a.id + ')">Details</button>'}
+              ${isAdmin() ? '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openAkteForm(' + a.id + ')">Bearbeiten</button> <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteAkte(' + a.id + ',\'' + escapeHtml(a.aktennummer || '').replace(/'/g, "\\'") + '\')">Löschen</button>' : '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();navigate(\'akte-detail\', ' + a.id + ')">Details</button>'}
             </td>
           </tr>`).join('')}
         </tbody>
       </table>
     </div>
   `;
+}
+
+async function renderAkteDetail(id) {
+  const main = document.getElementById('main-content');
+  currentAkteId = id;
+  try {
+    const a = await api(`/api/akten/${id}`);
+
+    // Helper functions (same pattern as Vermittler detail)
+    const fmt = (val) => val && String(val).trim() ? escapeHtml(String(val)) : '<span style="color:var(--text-muted);">-</span>';
+    const fmtMail = (val) => val && val.includes('@') ? '<a href="mailto:' + escapeHtml(val.trim()) + '">' + escapeHtml(val.trim()) + '</a>' : fmt(val);
+    const fmtPhone = (val) => val && String(val).trim() ? '<a href="tel:' + escapeHtml(String(val).trim()) + '">' + escapeHtml(String(val)) + '</a>' : '<span style="color:var(--text-muted);">-</span>';
+    const cell = (label, val) => `<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">${escapeHtml(label)}</div><div style="font-size:14px;">${val}</div></div>`;
+
+    // Badge helpers
+    const badgeJa = '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;">Ja</span>';
+    const badgeNein = '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;background:var(--border);color:var(--text-muted);">Nein</span>';
+    const badgeNichtVerknuepft = '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:var(--border);color:var(--text-muted);">Nicht verkn\u00fcpft</span>';
+    const badgeLegacy = '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#fef3c7;color:#92400e;">nicht verkn\u00fcpft</span>';
+
+    // Mietdauer calculation
+    function mietdauerTage(startDate, endDate) {
+      if (!startDate || !endDate) return null;
+      const start = new Date(startDate + 'T00:00:00');
+      const end = new Date(endDate + 'T00:00:00');
+      return Math.max(0, Math.round((end - start) / 86400000));
+    }
+
+    // === Customer block ===
+    let kundenHtml;
+    if (a.customer) {
+      const c = a.customer;
+      const displayName = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt')
+        ? c.company_name : `${c.first_name} ${c.last_name}`;
+      kundenHtml = `
+        ${cell('Name', fmt(displayName))}
+        ${cell('Telefon', fmtPhone(c.phone))}
+        ${cell('E-Mail', fmtMail(c.email))}`;
+    } else if (a.kunde && a.kunde.trim()) {
+      kundenHtml = `${cell('Kunde (Altdaten)', escapeHtml(a.kunde) + ' ' + badgeLegacy)}`;
+    } else {
+      kundenHtml = `<div style="color:var(--text-muted);">Kein Kunde hinterlegt</div>`;
+    }
+
+    // === Unfall block ===
+    const unfallHtml = `
+      ${cell('Unfalldatum', a.unfalldatum ? fmt(formatDate(a.unfalldatum)) : fmt(''))}
+      ${cell('Unfallort', fmt(a.unfallort))}
+      ${cell('Polizei vor Ort', a.polizei_vor_ort ? badgeJa : badgeNein)}`;
+
+    // === Mietvorgang block ===
+    let mietvorgangHtml;
+    if (a.rental) {
+      const r = a.rental;
+      const dauer = mietdauerTage(r.start_date, r.end_date);
+      mietvorgangHtml = `
+        ${cell('Kennzeichen', fmt(r.license_plate))}
+        ${cell('Fahrzeug', fmt((r.manufacturer || '') + ' ' + (r.model || '')))}
+        ${cell('Mietbeginn', r.start_date ? fmt(formatDate(r.start_date)) : fmt(''))}
+        ${cell('Mietende', r.end_date ? fmt(formatDate(r.end_date)) : fmt(''))}
+        ${cell('Mietdauer', dauer !== null ? dauer + ' Tage' : fmt(''))}`;
+    } else {
+      mietvorgangHtml = `<div style="color:var(--text-muted);">Kein Mietvorgang verkn\u00fcpft</div>`;
+    }
+
+    // === Mietart + Wiedervorlage block ===
+    const aktendetailsHtml = `
+      ${cell('Mietart', a.mietart ? fmt(a.mietart) : fmt(''))}
+      ${cell('Wiedervorlagedatum', a.wiedervorlage_datum ? fmt(formatDate(a.wiedervorlage_datum)) : fmt(''))}
+      ${cell('Status', aktenStatusBadge(a.status))}
+      ${cell('Zahlungsstatus', aktenZahlungBadge(a.zahlungsstatus))}
+      ${cell('Anwalt', fmt(a.anwalt))}
+      ${cell('Vorlage', fmt(a.vorlage))}`;
+
+    // === Vermittler block ===
+    let vermittlerHtml;
+    if (a.vermittler_obj) {
+      const v = a.vermittler_obj;
+      vermittlerHtml = `
+        ${cell('Name', fmt(v.name))}
+        ${cell('Telefon', fmtPhone(v.telefon))}
+        ${cell('E-Mail', fmtMail(v.email))}
+        ${cell('Ansprechpartner', fmt(v.ansprechpartner))}`;
+    } else if (a.vermittler && a.vermittler.trim()) {
+      vermittlerHtml = `${cell('Vermittler (Altdaten)', escapeHtml(a.vermittler) + ' ' + badgeLegacy)}`;
+    } else {
+      vermittlerHtml = `<div style="color:var(--text-muted);">${badgeNichtVerknuepft}</div>`;
+    }
+
+    // === Versicherung block ===
+    let versicherungHtml;
+    if (a.versicherung_obj) {
+      const ins = a.versicherung_obj;
+      versicherungHtml = `
+        ${cell('Name', fmt(ins.name))}
+        ${cell('Telefon', fmtPhone(ins.telefon || ins.phone))}
+        ${cell('E-Mail', fmtMail(ins.email))}
+        ${cell('Ansprechpartner', fmt(ins.ansprechpartner || ins.contact_person))}`;
+    } else {
+      versicherungHtml = `<div style="color:var(--text-muted);">${badgeNichtVerknuepft}</div>`;
+    }
+
+    // === Assemble full page ===
+    main.innerHTML = `
+      <a class="back-link" onclick="navigate('akten')">&larr; Zur\u00fcck zur Aktenliste</a>
+      <div class="page-header">
+        <h2>Akte ${escapeHtml(a.aktennummer || '#' + a.id)}</h2>
+        <div>
+          ${(isAdmin() || isVerwaltung() || isBuchhaltung())
+            ? '<button class="btn btn-primary" onclick="openAkteForm(' + id + ')">Bearbeiten</button>' : ''}
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Kundendaten</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;">
+            ${kundenHtml}
+          </div>
+        </div>
+
+        <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Unfalldaten</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;">
+            ${unfallHtml}
+          </div>
+        </div>
+      </div>
+
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;margin-top:16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Mietvorgang</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;">
+          ${mietvorgangHtml}
+        </div>
+      </div>
+
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;margin-top:16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Aktendetails</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 24px;">
+          ${aktendetailsHtml}
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+        <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Vermittler</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;">
+            ${vermittlerHtml}
+          </div>
+        </div>
+
+        <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;">
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Versicherung</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;">
+            ${versicherungHtml}
+          </div>
+        </div>
+      </div>
+
+      ${a.notizen && a.notizen.trim() ? `
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;margin-top:16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Notizen</div>
+        <div style="white-space:pre-wrap;font-size:14px;">${escapeHtml(a.notizen)}</div>
+      </div>` : ''}
+    `;
+  } catch (err) {
+    main.innerHTML = '<div class="empty-state"><p>Fehler beim Laden: ' + escapeHtml(err.message) + '</p></div>';
+  }
 }
 
 function openAkteDetail(id) {
