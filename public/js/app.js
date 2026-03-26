@@ -185,6 +185,10 @@ function navigate(page, data) {
     case 'dashboard': renderDashboard(); break;
     case 'customers': renderCustomers(); break;
     case 'customer-detail': renderCustomerDetail(data); break;
+    case 'insurances': renderInsurances(); break;
+    case 'lawyers': renderLawyers(); break;
+    case 'vermittler': renderVermittler(); break;
+    case 'akten': renderAkten(); break;
     case 'calendar': renderCalendar(); break;
     case 'vacation': renderVacation(); break;
     case 'vacation-requests': renderVacationRequests(); break;
@@ -195,6 +199,7 @@ function navigate(page, data) {
     case 'changelog': renderChangelog(); break;
     case 'tickets': renderTickets(); break;
     case 'suggestions': renderSuggestions(); break;
+    case 'vermietung': renderVermietung(); break;
     case 'fuhrpark': renderFuhrpark(); break;
     case 'fuhrpark-detail': renderFuhrparkDetail(data); break;
     case 'time-tracking': renderTimeTracking(); break;
@@ -392,12 +397,6 @@ async function renderCustomers() {
           <label>Fahrgestellnummer</label>
           <input type="text" id="vehicle-search-vin" placeholder="z.B. WVWZZZ...">
         </div>
-        <div class="form-group">
-          <label>Letzte Filiale</label>
-          <select id="customer-station-filter">
-            <option value="">Alle Filialen</option>
-          </select>
-        </div>
         <button class="btn btn-primary" onclick="executeSearch()">Suchen</button>
         <button class="btn btn-secondary" onclick="clearCustomerSearch()">Zurücksetzen</button>
       </div>
@@ -416,78 +415,109 @@ async function renderCustomers() {
     el.addEventListener('keydown', e => { if (e.key === 'Enter') executeSearch(); });
   });
 
-  // Filialen-Filter laden
-  try {
-    const stations = await api('/api/stations');
-    const select = document.getElementById('customer-station-filter');
-    stations.forEach(s => {
-      const opt = document.createElement('option');
-      opt.value = s.name;
-      opt.textContent = s.name;
-      select.appendChild(opt);
-    });
-    select.addEventListener('change', () => executeSearch());
-  } catch(e) {}
-
   // Initial: alle Kunden laden
   loadCustomerTable('');
 }
 
+let _customerData = [];
+let _customerSort = { field: 'id', dir: 'asc' };
+
 async function loadCustomerTable(searchTerm) {
   const container = document.getElementById('customer-table-content');
   try {
-    const stationFilter = document.getElementById('customer-station-filter');
-    const station = stationFilter ? stationFilter.value : '';
     let url = searchTerm ? `/api/customers?search=${encodeURIComponent(searchTerm)}` : '/api/customers';
-    if (station) url += (url.includes('?') ? '&' : '?') + `station=${encodeURIComponent(station)}`;
-    const customers = await api(url);
-
-    if (customers.length > 0) {
-      container.innerHTML = `
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Nr.</th>
-                <th>Name</th>
-                <th>Ort</th>
-                <th>Telefon</th>
-                <th>E-Mail</th>
-                <th>Letzte Filiale</th>
-                <th>Erinnerung</th>
-                <th>Aktionen</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${customers.map(c => `
-                <tr class="clickable" onclick="navigate('customer-detail', ${c.id})">
-                  <td>${c.id}</td>
-                  <td><strong>${customerDisplayName(c)}</strong>${c.customer_type !== 'Privatkunde' ? ` <span class="badge badge-blue">${escapeHtml(c.customer_type)}</span>` : ''}</td>
-                  <td>${escapeHtml(c.zip)} ${escapeHtml(c.city)}</td>
-                  <td>${escapeHtml(c.phone)}</td>
-                  <td>${escapeHtml(c.email)}</td>
-                  <td>${c.last_station ? `<span class="badge badge-blue">${escapeHtml(c.last_station)}</span>` : '<span class="badge badge-gray">—</span>'}</td>
-                  <td>${c.reminder_asked
-                    ? `<span class="badge badge-green">Gefragt: ${escapeHtml(c.reminder_response) || 'Ja'}</span>`
-                    : '<span class="badge badge-gray">Nicht gefragt</span>'}</td>
-                  <td>
-                    <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); openCustomerForm(${c.id})">Bearbeiten</button>
-                    ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteCustomer(${c.id}, '${escapeHtml(c.last_name)}')">Löschen</button>` : ''}
-                  </td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>`;
-    } else {
-      container.innerHTML = `
-        <div class="empty-state">
-          <p>Keine Kunden gefunden.</p>
-          <button class="btn btn-primary" onclick="openCustomerForm()">Ersten Kunden anlegen</button>
-        </div>`;
-    }
+    _customerData = await api(url);
+    renderCustomerTable();
   } catch (err) {
     container.innerHTML = `<div class="empty-state"><p>Fehler: ${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
+function sortCustomers(field) {
+  if (_customerSort.field === field) {
+    _customerSort.dir = _customerSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _customerSort.field = field;
+    _customerSort.dir = 'asc';
+  }
+  renderCustomerTable();
+}
+
+function customerSortValue(c, field) {
+  switch(field) {
+    case 'id': return c.id;
+    case 'name': return customerDisplayName(c).toLowerCase();
+    case 'type': return (c.customer_type || '').toLowerCase();
+    case 'city': return (c.city || '').toLowerCase();
+    case 'zip': return c.zip || '';
+    case 'phone': return c.phone || '';
+    case 'email': return (c.email || '').toLowerCase();
+    default: return '';
+  }
+}
+
+function customerSortIcon(field) {
+  if (_customerSort.field !== field) return '<span style="opacity:0.3;">&#9650;</span>';
+  return _customerSort.dir === 'asc' ? '<span>&#9650;</span>' : '<span>&#9660;</span>';
+}
+
+function renderCustomerTable() {
+  const container = document.getElementById('customer-table-content');
+  if (!container) return;
+  const customers = [..._customerData];
+
+  customers.sort((a, b) => {
+    let va = customerSortValue(a, _customerSort.field);
+    let vb = customerSortValue(b, _customerSort.field);
+    if (typeof va === 'number') return _customerSort.dir === 'asc' ? va - vb : vb - va;
+    va = String(va); vb = String(vb);
+    return _customerSort.dir === 'asc' ? va.localeCompare(vb, 'de') : vb.localeCompare(va, 'de');
+  });
+
+  if (customers.length > 0) {
+    const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap;';
+    container.innerHTML = `
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th style="${thStyle}" onclick="sortCustomers('id')">Nr. ${customerSortIcon('id')}</th>
+              <th style="${thStyle}" onclick="sortCustomers('name')">Name ${customerSortIcon('name')}</th>
+              <th style="${thStyle}" onclick="sortCustomers('type')">Typ ${customerSortIcon('type')}</th>
+              <th style="${thStyle}" onclick="sortCustomers('zip')">PLZ ${customerSortIcon('zip')}</th>
+              <th style="${thStyle}" onclick="sortCustomers('city')">Ort ${customerSortIcon('city')}</th>
+              <th style="${thStyle}" onclick="sortCustomers('phone')">Telefon ${customerSortIcon('phone')}</th>
+              <th style="${thStyle}" onclick="sortCustomers('email')">E-Mail ${customerSortIcon('email')}</th>
+              <th>Aktionen</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${customers.map(c => `
+              <tr class="clickable" onclick="navigate('customer-detail', ${c.id})">
+                <td>${c.id}</td>
+                <td><strong>${customerDisplayName(c)}</strong></td>
+                <td>${c.customer_type !== 'Privatkunde' ? `<span class="badge badge-blue">${escapeHtml(c.customer_type)}</span>` : 'Privat'}</td>
+                <td>${escapeHtml(c.zip)}</td>
+                <td>${escapeHtml(c.city)}</td>
+                <td>${escapeHtml(c.phone)}</td>
+                <td>${escapeHtml(c.email)}</td>
+                <td>
+                  <div style="display:flex;gap:6px;white-space:nowrap;">
+                    <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); openCustomerForm(${c.id})">Bearbeiten</button>
+                    ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteCustomer(${c.id}, '${escapeHtml(c.last_name)}')">Löschen</button>` : ''}
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } else {
+    container.innerHTML = `
+      <div class="empty-state">
+        <p>Keine Kunden gefunden.</p>
+        <button class="btn btn-primary" onclick="openCustomerForm()">Ersten Kunden anlegen</button>
+      </div>`;
   }
 }
 
@@ -523,7 +553,6 @@ async function loadVehicleResults(plate, vin) {
                 <th>FIN</th>
                 <th>Kunde</th>
                 <th>Telefon</th>
-                <th>Nächster TÜV</th>
               </tr>
             </thead>
             <tbody>
@@ -535,10 +564,6 @@ async function loadVehicleResults(plate, vin) {
                   <td style="font-family:monospace;font-size:12px;">${escapeHtml(v.vin) || '-'}</td>
                   <td>${customerDisplayName(v)}</td>
                   <td>${v.phone ? `<a href="tel:${escapeHtml(v.phone)}" onclick="event.stopPropagation()">${escapeHtml(v.phone)}</a>` : '-'}</td>
-                  <td>
-                    ${formatMonthOnly(v.next_tuev_date)}
-                    ${(v.vehicle_type === 'LKW' || v.vehicle_type === 'Anhänger') && v.next_sp_date ? `<br><small>SP: ${formatMonthOnly(v.next_sp_date)}</small>` : ''}
-                  </td>
                 </tr>
               `).join('')}
             </tbody>
@@ -564,13 +589,12 @@ function clearCustomerSearch() {
   document.getElementById('customer-search').value = '';
   document.getElementById('vehicle-search-plate').value = '';
   document.getElementById('vehicle-search-vin').value = '';
-  document.getElementById('customer-station-filter').value = '';
   document.getElementById('vehicle-search-results').innerHTML = '';
   loadCustomerTable('');
 }
 
 async function openCustomerForm(id) {
-  let customer = { first_name: '', last_name: '', street: '', zip: '', city: '', phone: '', email: '', reminder_asked: 0, reminder_response: '', notes: '', customer_type: 'Privatkunde', company_name: '', contact_person: '', contact_phone: '' };
+  let customer = { first_name: '', last_name: '', street: '', zip: '', city: '', phone: '', email: '', notes: '', customer_type: 'Privatkunde', company_name: '', contact_person: '', contact_phone: '' };
 
   if (id) {
     try {
@@ -586,95 +610,44 @@ async function openCustomerForm(id) {
   const isCompany = customer.customer_type === 'Firmenkunde' || customer.customer_type === 'Werkstatt';
   const html = `
     <form id="customer-form" onsubmit="saveCustomer(event, ${id || 'null'})">
-      ${id ? `<div class="form-group" style="margin-bottom:10px;">
-        <label>Kundennummer</label>
-        <input type="text" value="${id}" disabled style="background:#f0f0f0;font-weight:bold;">
-      </div>` : ''}
-      <div class="form-group" style="margin-bottom:10px;">
-        <label>Kundentyp *</label>
-        <select name="customer_type" onchange="toggleCustomerTypeFields(this.value)">
-          ${CUSTOMER_TYPES.map(t => `<option value="${t}" ${customer.customer_type === t ? 'selected' : ''}>${t}</option>`).join('')}
-        </select>
-      </div>
-      <div id="company-name-group" style="display:${isCompany ? '' : 'none'};margin-bottom:10px;">
-        <div class="form-group">
-          <label>Firmenname *</label>
-          <input type="text" name="company_name" value="${escapeHtml(customer.company_name || '')}">
-        </div>
-        <div class="form-row" style="margin-top:8px;">
-          <div class="form-group">
-            <label>Ansprechpartner</label>
-            <input type="text" name="contact_person" value="${escapeHtml(customer.contact_person || '')}">
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Kundendaten</div>
+        <div style="display:grid;grid-template-columns:${id ? '100px ' : ''}1fr 1fr;gap:10px 16px;">
+          ${id ? `<div class="form-group"><label>Kd.-Nr.</label><input type="text" value="${id}" disabled style="background:#f0f0f0;font-weight:bold;"></div>` : ''}
+          <div class="form-group"><label>Kundentyp *</label>
+            <select name="customer_type" onchange="toggleCustomerTypeFields(this.value)">
+              ${CUSTOMER_TYPES.map(t => `<option value="${t}" ${customer.customer_type === t ? 'selected' : ''}>${t}</option>`).join('')}
+            </select>
           </div>
-          <div class="form-group">
-            <label>Telefon Ansprechpartner</label>
-            <input type="text" name="contact_phone" value="${escapeHtml(customer.contact_phone || '')}">
+        </div>
+        <div id="company-name-group" style="display:${isCompany ? '' : 'none'};">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px;">
+            <div class="form-group"><label>Firmenname *</label><input type="text" name="company_name" value="${escapeHtml(customer.company_name || '')}"></div>
+            <div class="form-group"><label>Ansprechpartner</label><input type="text" name="contact_person" value="${escapeHtml(customer.contact_person || '')}"></div>
+            <div class="form-group"><label>Tel. Ansprechpartner</label><input type="text" name="contact_phone" value="${escapeHtml(customer.contact_phone || '')}"></div>
+          </div>
+        </div>
+        <div id="private-name-group" style="display:${isCompany ? 'none' : ''};">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;">
+            <div class="form-group"><label>Vorname *</label><input type="text" name="first_name" value="${escapeHtml(customer.first_name)}"></div>
+            <div class="form-group"><label>Nachname *</label><input type="text" name="last_name" value="${escapeHtml(customer.last_name)}"></div>
           </div>
         </div>
       </div>
-      <div id="private-name-group" style="display:${isCompany ? 'none' : ''};margin-bottom:10px;">
-        <div class="form-row">
-          <div class="form-group">
-            <label>Vorname *</label>
-            <input type="text" name="first_name" value="${escapeHtml(customer.first_name)}">
-          </div>
-          <div class="form-group">
-            <label>Nachname *</label>
-            <input type="text" name="last_name" value="${escapeHtml(customer.last_name)}">
-          </div>
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Kontaktdaten</div>
+        <div style="display:grid;grid-template-columns:1fr 90px 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Straße</label><input type="text" name="street" value="${escapeHtml(customer.street)}"></div>
+          <div class="form-group"><label>PLZ</label><input type="text" name="zip" value="${escapeHtml(customer.zip)}"></div>
+          <div class="form-group"><label>Ort</label><input type="text" name="city" value="${escapeHtml(customer.city)}"></div>
         </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Telefon/Handy</label><input type="text" name="phone" value="${escapeHtml(customer.phone)}"></div>
+          <div class="form-group"><label>E-Mail</label><input type="email" name="email" value="${escapeHtml(customer.email)}"></div>
+        </div>
+        <div class="form-group"><label>Notizen</label><textarea name="notes" rows="2">${escapeHtml(customer.notes)}</textarea></div>
       </div>
-      <div class="customer-form-grid">
-        <div class="form-group full-width">
-          <label>Straße</label>
-          <input type="text" name="street" value="${escapeHtml(customer.street)}">
-        </div>
-        <div class="form-group" style="max-width:120px;">
-          <label>PLZ</label>
-          <input type="text" name="zip" value="${escapeHtml(customer.zip)}">
-        </div>
-        <div class="form-group">
-          <label>Ort</label>
-          <input type="text" name="city" value="${escapeHtml(customer.city)}">
-        </div>
-        <div class="form-group">
-          <label>Telefon/Handy</label>
-          <input type="text" name="phone" value="${escapeHtml(customer.phone)}">
-        </div>
-        <div class="form-group">
-          <label>E-Mail</label>
-          <input type="email" name="email" value="${escapeHtml(customer.email)}">
-        </div>
-        <div class="form-group">
-          <label>Erinnerung</label>
-          <select name="reminder_response">
-            <option value="" ${!customer.reminder_response ? 'selected' : ''}>-- Nicht gefragt --</option>
-            <option value="Ja, bitte erinnern" ${customer.reminder_response === 'Ja, bitte erinnern' ? 'selected' : ''}>Ja, bitte erinnern</option>
-            <option value="Nein, keine Erinnerung" ${customer.reminder_response === 'Nein, keine Erinnerung' ? 'selected' : ''}>Nein, keine Erinnerung</option>
-            <option value="Nur per SMS" ${customer.reminder_response === 'Nur per SMS' ? 'selected' : ''}>Nur per SMS</option>
-            <option value="Nur per E-Mail" ${customer.reminder_response === 'Nur per E-Mail' ? 'selected' : ''}>Nur per E-Mail</option>
-            <option value="Nur per Anruf" ${customer.reminder_response === 'Nur per Anruf' ? 'selected' : ''}>Nur per Anruf</option>
-          </select>
-        </div>
-        <div class="form-group" style="display:flex;align-items:flex-end;">
-          <div class="form-check" style="padding-bottom:8px;">
-            <input type="checkbox" name="reminder_asked" id="reminder_asked" ${customer.reminder_asked ? 'checked' : ''}>
-            <label for="reminder_asked">Erinnerung gefragt</label>
-          </div>
-        </div>
-        <div class="form-group full-width">
-          <label>Notizen</label>
-          <textarea name="notes" rows="2">${escapeHtml(customer.notes)}</textarea>
-        </div>
-        <div class="form-group full-width" style="border-top:1px solid var(--border);padding-top:8px;">
-          <div class="form-check">
-            <input type="checkbox" name="reminder_blocked" id="reminder_blocked" ${customer.reminder_blocked ? 'checked' : ''}
-              onchange="handleReminderBlockToggle(this, ${id || 'null'})">
-            <label for="reminder_blocked" style="color:var(--danger);font-weight:600;">Erinnerungssperre — Kunde möchte nicht erinnert werden</label>
-          </div>
-        </div>
-      </div>
-      <div class="form-actions" style="margin-top:12px;">
+      <div style="display:flex;gap:10px;margin-top:16px;">
         <button type="submit" class="btn btn-primary">${id ? 'Speichern' : 'Anlegen'}</button>
         <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
       </div>
@@ -722,9 +695,6 @@ async function saveCustomer(e, id) {
     city: form.city.value.trim(),
     phone: form.phone.value.trim(),
     email: form.email.value.trim(),
-    reminder_asked: form.reminder_asked.checked ? 1 : 0,
-    reminder_response: form.reminder_response.value,
-    reminder_blocked: form.reminder_blocked.checked ? 1 : 0,
     notes: form.notes.value.trim(),
     contact_person: form.contact_person.value.trim(),
     contact_phone: form.contact_phone.value.trim(),
@@ -749,24 +719,6 @@ async function saveCustomer(e, id) {
   }
 }
 
-function handleReminderBlockToggle(checkbox, customerId) {
-  if (!checkbox.checked) {
-    // Only admin can remove the block
-    if (!isAdmin()) {
-      checkbox.checked = true;
-      showToast('Nur Admins dürfen die Erinnerungssperre aufheben', 'error');
-      return;
-    }
-    if (customerId) {
-      api(`/api/customers/${customerId}/reminder-block`, { method: 'PUT', body: { blocked: false } })
-        .then(() => showToast('Erinnerungssperre aufgehoben'))
-        .catch(err => {
-          checkbox.checked = true;
-          showToast(err.message, 'error');
-        });
-    }
-  }
-}
 
 async function deleteCustomer(id, name) {
   if (!confirm(`Kunde "${name}" wirklich löschen? Alle zugehörigen Fahrzeuge und Prüfungen werden ebenfalls gelöscht.`)) return;
@@ -1127,13 +1079,6 @@ async function renderCustomerDetail(id) {
       <div class="card">
         <div class="card-header">
           <h3>Kundendaten</h3>
-          <div style="display:flex;gap:8px;align-items:center;">
-            ${customer.reminder_blocked
-              ? '<span class="badge badge-red">Erinnerungssperre aktiv</span>'
-              : `<span class="${customer.reminder_asked ? 'badge badge-green' : 'badge badge-gray'}">
-                  ${customer.reminder_asked ? 'Erinnerung: ' + escapeHtml(customer.reminder_response || 'Ja') : 'Erinnerung: Nicht gefragt'}
-                </span>`}
-          </div>
         </div>
         <div class="customer-info-grid">
           <div class="info-item">
@@ -1185,17 +1130,12 @@ async function renderCustomerDetail(id) {
                 <th>Bauart</th>
                 <th>FIN</th>
                 <th>Erstzulassung</th>
-                <th>Nächster TÜV</th>
-                <th>Letzte Prüfstelle</th>
                 <th>Angelegt am</th>
                 <th>Aktionen</th>
               </tr>
             </thead>
             <tbody>
               ${customer.vehicles.map(v => {
-                const currentM = new Date().toISOString().slice(0, 7);
-                const isOverdue = v.next_tuev_date && v.next_tuev_date < currentM;
-                const isSpOverdue = v.next_sp_date && v.next_sp_date < currentM;
                 return `
                 <tr>
                   <td><strong>${escapeHtml(v.license_plate) || '-'}</strong></td>
@@ -1204,11 +1144,6 @@ async function renderCustomerDetail(id) {
                   <td>${escapeHtml(v.vehicle_type) || '-'}</td>
                   <td style="font-family:monospace;font-size:12px;">${escapeHtml(v.vin) || '-'}</td>
                   <td>${formatDate(v.first_registration)}</td>
-                  <td>
-                    <span class="${isOverdue ? 'badge badge-red' : 'badge badge-green'}">${formatMonthOnly(v.next_tuev_date)}</span>
-                    ${(v.vehicle_type === 'LKW' || v.vehicle_type === 'Anhänger') && v.next_sp_date ? `<br><span class="${isSpOverdue ? 'badge badge-red' : 'badge badge-green'}" style="margin-top:2px;">SP: ${formatMonthOnly(v.next_sp_date)}</span>` : ''}
-                  </td>
-                  <td>${escapeHtml(v.last_station) || '-'}</td>
                   <td style="font-size:12px;color:var(--text-muted);">${v.created_at ? formatDate(v.created_at) : '-'}</td>
                   <td>
                     <button class="btn btn-sm btn-secondary" onclick="openVehicleForm(${id}, ${v.id})">Bearbeiten</button>
@@ -1230,54 +1165,9 @@ async function renderCustomerDetail(id) {
   }
 }
 
-function handleVehicleTypeChange(value, spGroupId) {
-  const spGroup = document.getElementById(spGroupId);
-  if (!spGroup) return;
-  if (value === 'LKW') {
-    spGroup.style.display = '';
-  } else if (value === 'Anhänger') {
-    handleAnhaengerSp(spGroupId);
-  } else {
-    spGroup.style.display = 'none';
-  }
-}
-
-function handleAnhaengerSp(spGroupId) {
-  const spGroup = document.getElementById(spGroupId);
-  if (!spGroup) return;
-  spGroup.style.display = 'none';
-
-  // Inline confirmation overlay (doesn't replace the current modal)
-  const existing = document.getElementById('sp-confirm-overlay');
-  if (existing) existing.remove();
-
-  const overlay = document.createElement('div');
-  overlay.id = 'sp-confirm-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
-  overlay.innerHTML = `
-    <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:360px;width:90%;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,0.25);">
-      <h3 style="margin:0 0 12px;font-size:17px;">SP-Pflicht</h3>
-      <p style="margin:0 0 20px;color:#555;font-size:14px;">Ist dieser Anhänger SP-pflichtig?</p>
-      <div style="display:flex;gap:10px;justify-content:center;">
-        <button class="btn btn-secondary" id="sp-confirm-no">Nein</button>
-        <button class="btn btn-primary" id="sp-confirm-yes">Ja, SP-pflichtig</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-
-  document.getElementById('sp-confirm-yes').onclick = () => {
-    document.getElementById(spGroupId).style.display = '';
-    overlay.remove();
-  };
-  document.getElementById('sp-confirm-no').onclick = () => {
-    document.getElementById(spGroupId).style.display = 'none';
-    overlay.remove();
-  };
-}
 
 async function openVehicleForm(customerId, vehicleId) {
-  let vehicle = { manufacturer: '', model: '', vehicle_type: '', vin: '', license_plate: '', first_registration: '', next_tuev_date: '', next_sp_date: '' };
+  let vehicle = { manufacturer: '', model: '', vehicle_type: '', vin: '', license_plate: '', first_registration: '' };
 
   if (vehicleId) {
     try {
@@ -1304,7 +1194,7 @@ async function openVehicleForm(customerId, vehicleId) {
       </div>
       <div class="form-group">
         <label>Bauart *</label>
-        <select name="vehicle_type" required onchange="handleVehicleTypeChange(this.value, 'sp-date-group')">
+        <select name="vehicle_type" required>
           <option value="">-- Auswählen --</option>
           ${VEHICLE_TYPES.map(t => `<option value="${t}" ${vehicle.vehicle_type === t ? 'selected' : ''}>${t}</option>`).join('')}
         </select>
@@ -1324,21 +1214,6 @@ async function openVehicleForm(customerId, vehicleId) {
           <label>Erstzulassung</label>
           <input type="date" name="first_registration" value="${vehicle.first_registration || ''}">
         </div>
-        <div class="form-group">
-          <label>Nächster TÜV fällig (Monat/Jahr) *</label>
-          <input type="month" name="next_tuev_date" value="${(vehicle.next_tuev_date || '').slice(0, 7)}" required>
-        </div>
-      </div>
-      <div class="form-group" id="sp-date-group" style="display:${(vehicle.vehicle_type === 'LKW' || vehicle.vehicle_type === 'Anhänger') ? '' : 'none'};">
-        <label>Nächste SP fällig (Monat/Jahr)</label>
-        <input type="month" name="next_sp_date" value="${(vehicle.next_sp_date || '').slice(0, 7)}">
-      </div>
-      <div class="form-group">
-        <label>Letzte Prüfstelle</label>
-        <select name="last_station">
-          <option value="">-- Keine --</option>
-          ${STATIONS.map(s => `<option value="${s}" ${vehicle.last_station === s ? 'selected' : ''}>${s}</option>`).join('')}
-        </select>
       </div>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">${vehicleId ? 'Speichern' : 'Hinzufügen'}</button>
@@ -1356,10 +1231,6 @@ async function saveVehicle(e, customerId, vehicleId) {
     showToast('Bitte Bauart auswählen', 'error');
     return;
   }
-  if (!form.next_tuev_date.value) {
-    showToast('Nächster TÜV fällig ist ein Pflichtfeld', 'error');
-    return;
-  }
   const data = {
     manufacturer: form.manufacturer.value.trim(),
     model: form.model.value.trim(),
@@ -1367,15 +1238,7 @@ async function saveVehicle(e, customerId, vehicleId) {
     vin: form.vin.value.trim(),
     license_plate: form.license_plate.value.trim(),
     first_registration: form.first_registration.value,
-    next_tuev_date: form.next_tuev_date.value,
-    next_sp_date: (form.vehicle_type.value === 'LKW' || form.vehicle_type.value === 'Anhänger') ? (form.next_sp_date?.value || '') : '',
-    last_station: form.last_station.value,
   };
-
-  // Hinweis wenn LKW/Anhänger ohne SP-Datum
-  if ((data.vehicle_type === 'LKW' || data.vehicle_type === 'Anhänger') && !data.next_sp_date) {
-    if (!confirm(`Achtung: ${data.vehicle_type} ohne SP-Datum!\n\nOhne SP-Datum wird dieses Fahrzeug nicht in den SP-Erinnerungen erscheinen.\n\nTrotzdem speichern?`)) return;
-  }
 
   try {
     if (vehicleId) {
@@ -3543,6 +3406,54 @@ async function deleteVacRequest(id) {
 // ===== TESTSEITE: S3 File Browser =====
 
 let _s3CurrentPath = '';
+let _s3SelectedFiles = new Set();
+
+function s3FileIcon(ext) {
+  const i = {
+    // PDF — Acrobat-Stil: rotes Dokument mit weißem PDF
+    pdf: '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 1h10l5 5v14a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="#fff" stroke="#ccc" stroke-width=".7"/><path d="M13 1v5h5" fill="#e8e8e8" stroke="#ccc" stroke-width=".7"/><rect x="3" y="11" width="15" height="8" rx="1" fill="#e2574c"/><text x="10.5" y="17.5" text-anchor="middle" font-size="5.5" font-weight="700" fill="#fff" font-family="Arial">PDF</text></svg>',
+    // Word — blaues W
+    doc: '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 1h10l5 5v14a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="#fff" stroke="#ccc" stroke-width=".7"/><path d="M13 1v5h5" fill="#e8e8e8" stroke="#ccc" stroke-width=".7"/><rect x="3" y="11" width="15" height="8" rx="1" fill="#2b579a"/><text x="10.5" y="17.5" text-anchor="middle" font-size="6" font-weight="700" fill="#fff" font-family="Arial">W</text></svg>',
+    // Excel — grünes X
+    xls: '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 1h10l5 5v14a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="#fff" stroke="#ccc" stroke-width=".7"/><path d="M13 1v5h5" fill="#e8e8e8" stroke="#ccc" stroke-width=".7"/><rect x="3" y="11" width="15" height="8" rx="1" fill="#217346"/><text x="10.5" y="17.5" text-anchor="middle" font-size="6" font-weight="700" fill="#fff" font-family="Arial">X</text></svg>',
+    // PowerPoint — oranges P
+    ppt: '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 1h10l5 5v14a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="#fff" stroke="#ccc" stroke-width=".7"/><path d="M13 1v5h5" fill="#e8e8e8" stroke="#ccc" stroke-width=".7"/><rect x="3" y="11" width="15" height="8" rx="1" fill="#d24726"/><text x="10.5" y="17.5" text-anchor="middle" font-size="6" font-weight="700" fill="#fff" font-family="Arial">P</text></svg>',
+    // Bild — weißes Blatt mit Berglandschaft
+    img: '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 1h10l5 5v14a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="#fff" stroke="#ccc" stroke-width=".7"/><path d="M13 1v5h5" fill="#e8e8e8" stroke="#ccc" stroke-width=".7"/><circle cx="8" cy="9" r="2" fill="#f4c542"/><path d="M3 17l4-5 3 3 3-4 5 6H3z" fill="#4a90d9" opacity=".6"/></svg>',
+    // Video — Filmklappe
+    vid: '<svg width="22" height="22" viewBox="0 0 22 22"><rect x="2" y="4" width="18" height="14" rx="2" fill="#fff" stroke="#8e44ad" stroke-width="1.2"/><rect x="2" y="4" width="18" height="3" fill="#8e44ad"/><path d="M5 4l2 3M9 4l2 3M13 4l2 3M17 4l2 3" stroke="#fff" stroke-width=".8"/><path d="M9 11v4l4-2z" fill="#8e44ad"/></svg>',
+    // Audio — Musiknote
+    aud: '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 1h10l5 5v14a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="#fff" stroke="#ccc" stroke-width=".7"/><path d="M13 1v5h5" fill="#e8e8e8" stroke="#ccc" stroke-width=".7"/><path d="M9 15V7l6-2v8" fill="none" stroke="#e67e22" stroke-width="1.3"/><circle cx="7.5" cy="15" r="1.8" fill="#e67e22"/><circle cx="13.5" cy="13" r="1.8" fill="#e67e22"/></svg>',
+    // Zip — Ordner mit Reißverschluss
+    zip: '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M2 7V4.5A1.5 1.5 0 013.5 3H8l2 2h8.5A1.5 1.5 0 0120 6.5V18a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 012 18V7z" fill="#f4c542" stroke="#c9a20a" stroke-width=".7"/><rect x="10" y="6" width="2" height="2" fill="#c9a20a" opacity=".5"/><rect x="10" y="10" width="2" height="2" fill="#c9a20a" opacity=".5"/><rect x="10" y="14" width="2" height="2" fill="#c9a20a" opacity=".5"/></svg>',
+    // Text — weißes Blatt mit Zeilen
+    txt: '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 1h10l5 5v14a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="#fff" stroke="#ccc" stroke-width=".7"/><path d="M13 1v5h5" fill="#e8e8e8" stroke="#ccc" stroke-width=".7"/><line x1="5" y1="10" x2="16" y2="10" stroke="#bbb" stroke-width=".8"/><line x1="5" y1="12.5" x2="14" y2="12.5" stroke="#bbb" stroke-width=".8"/><line x1="5" y1="15" x2="16" y2="15" stroke="#bbb" stroke-width=".8"/><line x1="5" y1="17.5" x2="11" y2="17.5" stroke="#bbb" stroke-width=".8"/></svg>',
+    // Code — weißes Blatt mit <>
+    code: '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 1h10l5 5v14a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="#fff" stroke="#ccc" stroke-width=".7"/><path d="M13 1v5h5" fill="#e8e8e8" stroke="#ccc" stroke-width=".7"/><text x="10.5" y="15" text-anchor="middle" font-size="8" font-weight="700" fill="#3178c6" font-family="monospace">&lt;/&gt;</text></svg>',
+    // EXE/Programm
+    exe: '<svg width="22" height="22" viewBox="0 0 22 22"><rect x="3" y="3" width="16" height="16" rx="3" fill="#fff" stroke="#555" stroke-width=".7"/><rect x="5" y="5" width="12" height="8" rx="1" fill="#1a56db"/><rect x="9" y="15" width="4" height="2" rx=".5" fill="#555"/></svg>',
+    // Datenbank
+    db: '<svg width="22" height="22" viewBox="0 0 22 22"><ellipse cx="11" cy="5" rx="8" ry="3" fill="#fff" stroke="#7f8c8d" stroke-width="1"/><path d="M3 5v12c0 1.7 3.6 3 8 3s8-1.3 8-3V5" fill="none" stroke="#7f8c8d" stroke-width="1"/><path d="M3 11c0 1.7 3.6 3 8 3s8-1.3 8-3" fill="none" stroke="#7f8c8d" stroke-width=".8"/></svg>',
+    // E-Mail
+    eml: '<svg width="22" height="22" viewBox="0 0 22 22"><rect x="2" y="4" width="18" height="14" rx="2" fill="#fff" stroke="#3498db" stroke-width="1"/><path d="M2 6l9 5 9-5" fill="none" stroke="#3498db" stroke-width="1"/></svg>',
+    // Unbekannt — leeres Blatt
+    default: '<svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 1h10l5 5v14a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z" fill="#fff" stroke="#ccc" stroke-width=".7"/><path d="M13 1v5h5" fill="#e8e8e8" stroke="#ccc" stroke-width=".7"/></svg>',
+  };
+  // Aliase
+  i.docx = i.doc; i.odt = i.doc; i.rtf = i.doc;
+  i.xlsx = i.xls; i.csv = i.xls; i.ods = i.xls;
+  i.pptx = i.ppt; i.odp = i.ppt;
+  i.jpg = i.img; i.jpeg = i.img; i.png = i.img; i.gif = i.img; i.webp = i.img; i.svg = i.img; i.bmp = i.img; i.ico = i.img;
+  i.mp4 = i.vid; i.webm = i.vid; i.mov = i.vid; i.avi = i.vid; i.mkv = i.vid;
+  i.mp3 = i.aud; i.wav = i.aud; i.ogg = i.aud; i.flac = i.aud; i.aac = i.aud;
+  i.rar = i.zip; i['7z'] = i.zip; i.tar = i.zip; i.gz = i.zip;
+  i.log = i.txt; i.md = i.txt; i.json = i.txt; i.xml = i.txt;
+  i.js = i.code; i.ts = i.code; i.py = i.code; i.html = i.code; i.css = i.code; i.php = i.code;
+  i.msi = i.exe; i.dmg = i.exe;
+  i.sql = i.db; i.sqlite = i.db;
+  i.msg = i.eml;
+  return i[ext] || i.default;
+}
 
 async function renderTestseite() {
   const main = document.getElementById('main-content');
@@ -3570,7 +3481,8 @@ async function renderTestseite() {
 
     <div class="card" style="padding:0;margin-top:12px;">
       <div id="s3-breadcrumb" style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;gap:4px;font-size:13px;flex-wrap:wrap;"></div>
-      <div id="s3-file-list" style="min-height:200px;"></div>
+      <div id="s3-selection-bar" style="display:none;padding:8px 16px;background:#eef2ff;border-bottom:1px solid var(--border);display:none;align-items:center;gap:10px;font-size:13px;"></div>
+      <div id="s3-file-list" style="min-height:200px;" onclick="if(event.target===this){s3DeselectAll();}"></div>
     </div>
   `;
 
@@ -3589,11 +3501,14 @@ async function renderTestseite() {
 
 async function s3LoadFolder(folder) {
   _s3CurrentPath = folder;
+  _s3SelectedFiles.clear();
   const listEl = document.getElementById('s3-file-list');
   const breadcrumbEl = document.getElementById('s3-breadcrumb');
   if (!listEl) return;
 
   listEl.innerHTML = '<div style="padding:20px;color:var(--text-muted);text-align:center;">Laden...</div>';
+  const selBar = document.getElementById('s3-selection-bar');
+  if (selBar) selBar.style.display = 'none';
 
   // Breadcrumb
   const parts = folder ? folder.split('/').filter(Boolean) : [];
@@ -3621,23 +3536,21 @@ async function s3LoadFolder(folder) {
       const parentParts = parts.slice(0, -1);
       const parent = parentParts.join('/');
       html += '<div class="s3-row s3-folder-row" onclick="s3LoadFolder(\'' + escapeHtml(parent) + '\')">';
-      html += '<span class="s3-icon">&#128281;</span>';
+      html += '<span class="s3-icon"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M2 6V4a2 2 0 012-2h4l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" fill="#f39c12" opacity="0.3" stroke="#f39c12" stroke-width="1.5"/><path d="M6 10l4-4 4 4" fill="none" stroke="#f39c12" stroke-width="1.5" stroke-linecap="round"/></svg></span>';
       html += '<span class="s3-name">..</span>';
       html += '<span class="s3-size"></span>';
       html += '<span class="s3-date"></span>';
-      html += '<span class="s3-actions"></span>';
       html += '</div>';
     }
 
     // Folders
     result.folders.forEach(f => {
       const fullPath = folder ? folder + '/' + f : f;
-      html += '<div class="s3-row s3-folder-row" onclick="s3LoadFolder(\'' + escapeHtml(fullPath) + '\')">';
-      html += '<span class="s3-icon">&#128193;</span>';
+      html += '<div class="s3-row s3-folder-row" onclick="s3LoadFolder(\'' + escapeHtml(fullPath) + '\')" oncontextmenu="event.preventDefault();s3FolderContextMenu(event,\'' + escapeHtml(fullPath) + '\')">';
+      html += '<span class="s3-icon"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M2 6V4a2 2 0 012-2h4l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" fill="#f39c12" opacity="0.3" stroke="#f39c12" stroke-width="1.5"/></svg></span>';
       html += '<span class="s3-name" style="font-weight:600;">' + escapeHtml(f) + '</span>';
       html += '<span class="s3-size">—</span>';
       html += '<span class="s3-date">—</span>';
-      html += '<span class="s3-actions"><button class="btn btn-sm btn-danger" onclick="event.stopPropagation();s3DeleteFolder(\'' + escapeHtml(fullPath) + '\')">Löschen</button></span>';
       html += '</div>';
     });
 
@@ -3647,17 +3560,15 @@ async function s3LoadFolder(folder) {
       const sizeStr = f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size / 1024).toFixed(1) + ' KB' : (f.size / 1048576).toFixed(1) + ' MB';
       const dateStr = f.modified ? new Date(f.modified).toLocaleString('de-DE') : '—';
       const ext = (f.name.split('.').pop() || '').toLowerCase();
-      const icon = ['pdf'].includes(ext) ? '&#128196;' : ['jpg','jpeg','png','gif','webp'].includes(ext) ? '&#128247;' : ['doc','docx'].includes(ext) ? '&#128209;' : ['xls','xlsx','csv'].includes(ext) ? '&#128202;' : '&#128196;';
+      const icon = s3FileIcon(ext);
 
-      html += '<div class="s3-row">';
+      const fKey = escapeHtml(f.key);
+      const fName = escapeHtml(f.name);
+      html += '<div class="s3-row s3-file-row" data-key="' + fKey + '" data-name="' + fName + '" onclick="s3FileClick(event,\'' + fKey + '\',\'' + fName + '\')" oncontextmenu="event.preventDefault();s3ContextMenu(event,\'' + fKey + '\',\'' + fName + '\')">';
       html += '<span class="s3-icon">' + icon + '</span>';
-      html += '<span class="s3-name">' + escapeHtml(f.name) + '</span>';
+      html += '<span class="s3-name">' + fName + '</span>';
       html += '<span class="s3-size">' + sizeStr + '</span>';
       html += '<span class="s3-date">' + dateStr + '</span>';
-      html += '<span class="s3-actions">';
-      html += '<button class="btn btn-sm btn-secondary" onclick="s3Download(\'' + escapeHtml(f.key) + '\', \'' + escapeHtml(f.name) + '\')">Download</button> ';
-      html += '<button class="btn btn-sm btn-danger" onclick="s3DeleteFile(\'' + escapeHtml(f.key) + '\')">Löschen</button>';
-      html += '</span>';
       html += '</div>';
     });
 
@@ -3720,6 +3631,182 @@ function fileToBase64(file) {
   });
 }
 
+let _s3LastClickedKey = null;
+
+function s3FileClick(e, key, filename) {
+  if (e.detail === 2) {
+    // Doppelklick = Vorschau öffnen
+    s3Preview(key, filename);
+    return;
+  }
+
+  if (e.ctrlKey || e.metaKey) {
+    // Ctrl+Klick = einzeln dazu/weg
+    if (_s3SelectedFiles.has(key)) _s3SelectedFiles.delete(key);
+    else _s3SelectedFiles.add(key);
+  } else if (e.shiftKey && _s3LastClickedKey) {
+    // Shift+Klick = Bereich selektieren
+    const rows = Array.from(document.querySelectorAll('.s3-file-row[data-key]'));
+    const keys = rows.map(r => r.dataset.key);
+    const startIdx = keys.indexOf(_s3LastClickedKey);
+    const endIdx = keys.indexOf(key);
+    if (startIdx !== -1 && endIdx !== -1) {
+      const from = Math.min(startIdx, endIdx);
+      const to = Math.max(startIdx, endIdx);
+      for (let i = from; i <= to; i++) _s3SelectedFiles.add(keys[i]);
+    }
+  } else {
+    // Normaler Klick = nur diese Datei selektieren
+    _s3SelectedFiles.clear();
+    _s3SelectedFiles.add(key);
+  }
+
+  _s3LastClickedKey = key;
+  s3UpdateSelection();
+}
+
+function s3SelectAll() {
+  const rows = document.querySelectorAll('.s3-file-row[data-key]');
+  rows.forEach(r => _s3SelectedFiles.add(r.dataset.key));
+  s3UpdateSelection();
+}
+
+function s3DeselectAll() {
+  _s3SelectedFiles.clear();
+  s3UpdateSelection();
+}
+
+function s3UpdateSelection() {
+  document.querySelectorAll('.s3-file-row[data-key]').forEach(row => {
+    row.classList.toggle('s3-selected', _s3SelectedFiles.has(row.dataset.key));
+  });
+  // Update action bar
+  const bar = document.getElementById('s3-selection-bar');
+  if (!bar) return;
+  if (_s3SelectedFiles.size > 0) {
+    bar.style.display = '';
+    bar.innerHTML = '<span style="font-weight:600;">' + _s3SelectedFiles.size + ' ausgewählt</span>'
+      + ' <button class="btn btn-sm btn-secondary" onclick="s3DownloadSelected()">Download</button>'
+      + ' <button class="btn btn-sm btn-danger" onclick="s3DeleteSelected()">Löschen</button>'
+      + ' <button class="btn btn-sm" style="color:var(--text-muted);" onclick="s3DeselectAll()">Auswahl aufheben</button>';
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+async function s3DownloadSelected() {
+  for (const key of _s3SelectedFiles) {
+    const name = key.split('/').pop();
+    await s3Download(key, name);
+  }
+}
+
+async function s3DeleteSelected() {
+  for (const key of _s3SelectedFiles) {
+    try { await api('/api/files/' + key, { method: 'DELETE' }); } catch(e) {}
+  }
+  _s3SelectedFiles.clear();
+  showToast('Dateien gelöscht');
+  await s3LoadFolder(_s3CurrentPath);
+}
+
+function s3FolderContextMenu(e, folderPath) {
+  const old = document.getElementById('s3-ctx-menu');
+  if (old) old.remove();
+  const menu = document.createElement('div');
+  menu.id = 's3-ctx-menu';
+  menu.className = 's3-context-menu';
+  menu.innerHTML = '<div class="s3-ctx-item s3-ctx-danger" onclick="s3DeleteFolder(\'' + escapeHtml(folderPath) + '\');s3CloseCtx();"><span style="width:20px;text-align:center;">&#10006;</span> Ordner löschen</div>';
+  menu.style.left = e.pageX + 'px';
+  menu.style.top = e.pageY + 'px';
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (e.pageX - rect.width) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (e.pageY - rect.height) + 'px';
+  setTimeout(() => document.addEventListener('click', s3CloseCtx, { once: true }), 0);
+}
+
+function s3ContextMenu(e, key, filename) {
+  // Rechtsklick selektiert die Datei (wie im Explorer), außer sie ist schon selektiert
+  if (!_s3SelectedFiles.has(key)) {
+    _s3SelectedFiles.clear();
+    _s3SelectedFiles.add(key);
+    s3UpdateSelection();
+  }
+  const old = document.getElementById('s3-ctx-menu');
+  if (old) old.remove();
+
+  const menu = document.createElement('div');
+  menu.id = 's3-ctx-menu';
+  menu.className = 's3-context-menu';
+  menu.innerHTML = `
+    <div class="s3-ctx-item" onclick="s3Download('${escapeHtml(key)}','${escapeHtml(filename)}');s3CloseCtx();">
+      <span style="width:20px;text-align:center;">&#11015;</span> Download
+    </div>
+    <div class="s3-ctx-divider"></div>
+    <div class="s3-ctx-item s3-ctx-danger" onclick="s3DeleteFile('${escapeHtml(key)}');s3CloseCtx();">
+      <span style="width:20px;text-align:center;">&#10006;</span> Löschen
+    </div>
+  `;
+
+  // Position
+  menu.style.left = e.pageX + 'px';
+  menu.style.top = e.pageY + 'px';
+  document.body.appendChild(menu);
+
+  // Rand-Korrektur
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (e.pageX - rect.width) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (e.pageY - rect.height) + 'px';
+
+  // Klick außerhalb schließt
+  setTimeout(() => document.addEventListener('click', s3CloseCtx, { once: true }), 0);
+}
+
+function s3CloseCtx() {
+  const m = document.getElementById('s3-ctx-menu');
+  if (m) m.remove();
+}
+
+async function s3Preview(key, filename) {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  try {
+    const result = await api('/api/files/download?key=' + encodeURIComponent(key));
+    const url = result.url;
+
+    let contentHtml = '';
+    if (['jpg','jpeg','png','gif','webp','svg','bmp'].includes(ext)) {
+      contentHtml = '<img src="' + url + '" style="max-width:100%;max-height:75vh;border-radius:8px;">';
+    } else if (ext === 'pdf') {
+      contentHtml = '<iframe src="' + url + '" style="width:100%;height:75vh;border:none;border-radius:8px;"></iframe>';
+    } else if (['mp4','webm','mov'].includes(ext)) {
+      contentHtml = '<video controls style="max-width:100%;max-height:75vh;border-radius:8px;"><source src="' + url + '"></video>';
+    } else if (['mp3','wav','ogg'].includes(ext)) {
+      contentHtml = '<audio controls style="width:100%;"><source src="' + url + '"></audio>';
+    } else if (['txt','log','csv','json','xml','html','css','js','md'].includes(ext)) {
+      try {
+        const resp = await fetch(url);
+        const text = await resp.text();
+        contentHtml = '<pre style="max-height:75vh;overflow:auto;padding:16px;background:var(--bg);border-radius:8px;font-size:13px;white-space:pre-wrap;word-break:break-all;">' + escapeHtml(text) + '</pre>';
+      } catch(e) {
+        contentHtml = '<p style="color:var(--text-muted);">Textvorschau nicht möglich.</p>';
+      }
+    } else {
+      contentHtml = '<div style="text-align:center;padding:40px;color:var(--text-muted);"><div style="font-size:48px;margin-bottom:16px;">&#128196;</div><p>Keine Vorschau für diesen Dateityp verfügbar.</p></div>';
+    }
+
+    openModal(filename, `
+      <div style="text-align:center;">${contentHtml}</div>
+      <div class="form-actions" style="margin-top:16px;justify-content:center;">
+        <button class="btn btn-primary" onclick="s3Download('${escapeHtml(key)}', '${escapeHtml(filename)}')">Download</button>
+        <button class="btn btn-secondary" onclick="closeModal()">Schließen</button>
+      </div>
+    `, 'modal-preview');
+  } catch (err) {
+    showToast('Vorschau fehlgeschlagen: ' + err.message, 'error');
+  }
+}
+
 async function s3Download(key, filename) {
   try {
     const result = await api('/api/files/download?key=' + encodeURIComponent(key));
@@ -3736,7 +3823,6 @@ async function s3Download(key, filename) {
 }
 
 async function s3DeleteFile(key) {
-  if (!confirm('Datei wirklich löschen?')) return;
   try {
     await api('/api/files/' + key, { method: 'DELETE' });
     showToast('Datei gelöscht');
@@ -3747,7 +3833,6 @@ async function s3DeleteFile(key) {
 }
 
 async function s3DeleteFolder(folderPath) {
-  if (!confirm('Ordner "' + folderPath + '" und alle Inhalte wirklich löschen?')) return;
   try {
     // List all files in folder recursively and delete them
     const result = await api('/api/files/list?folder=' + encodeURIComponent(folderPath));
@@ -4725,27 +4810,10 @@ function showScanResults(parsed) {
       </div>
       <div class="scan-result-field span-1">
         <label>Bauart *</label>
-        <select id="scan-vehicle-type" required onchange="handleVehicleTypeChange(this.value, 'scan-sp-date-group')">
+        <select id="scan-vehicle-type" required>
           <option value="">-- Wählen --</option>
           ${VEHICLE_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}
         </select>
-      </div>
-      <div class="scan-result-field span-1">
-        <label>Prüfstelle</label>
-        <select id="scan-station">
-          <option value="">-- Wählen --</option>
-          ${ALL_STATIONS.map(s => `<option value="${s.name}" ${loggedInUser && loggedInUser.default_station_id === s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}
-        </select>
-      </div>
-      <div class="scan-result-field span-1">
-        <label>TÜV fällig *</label>
-        <input type="month" id="scan-next-tuev" value="" required>
-      </div>
-    </div>
-    <div class="scan-grid" id="scan-sp-date-group" style="display:none;margin-top:6px;">
-      <div class="scan-result-field span-1">
-        <label>SP fällig *</label>
-        <input type="month" id="scan-next-sp" value="" required>
       </div>
     </div>
 
@@ -4843,7 +4911,7 @@ function getScanFormData() {
       city: document.getElementById('scan-city').value.trim(),
       phone: document.getElementById('scan-phone').value.trim(),
       email: document.getElementById('scan-email').value.trim(),
-      reminder_asked: 0, reminder_response: '', notes: '',
+      notes: '',
     },
     vehicle: {
       manufacturer: document.getElementById('scan-manufacturer').value.trim() || '-',
@@ -4852,9 +4920,6 @@ function getScanFormData() {
       vin: document.getElementById('scan-vin').value.trim(),
       license_plate: document.getElementById('scan-plate').value.trim(),
       first_registration: document.getElementById('scan-registration').value,
-      next_tuev_date: document.getElementById('scan-next-tuev').value || '',
-      next_sp_date: (document.getElementById('scan-vehicle-type').value === 'LKW' || document.getElementById('scan-vehicle-type').value === 'Anhänger') ? (document.getElementById('scan-next-sp').value || '') : '',
-      last_station: document.getElementById('scan-station').value || '',
     }
   };
 }
@@ -4870,7 +4935,7 @@ async function startScanDuplicateCheck() {
   const { customer, vehicle } = getScanFormData();
 
   // Reset all field markers
-  ['scan-company-name','scan-first-name','scan-last-name','scan-vehicle-type','scan-next-tuev'].forEach(id => markScanField(id, false));
+  ['scan-company-name','scan-first-name','scan-last-name','scan-vehicle-type'].forEach(id => markScanField(id, false));
 
   const isCompany = customer.customer_type === 'Firmenkunde' || customer.customer_type === 'Werkstatt';
   let hasError = false;
@@ -4888,34 +4953,9 @@ async function startScanDuplicateCheck() {
     markScanField('scan-vehicle-type', true);
     hasError = true;
   }
-  if (!vehicle.next_tuev_date) {
-    markScanField('scan-next-tuev', true);
-    hasError = true;
-  }
-
   if (hasError) {
     showToast('Bitte alle Pflichtfelder ausfüllen', 'error');
     return;
-  }
-
-  // Hinweis wenn LKW/Anhänger ohne SP-Datum
-  if ((vehicle.vehicle_type === 'LKW' || vehicle.vehicle_type === 'Anhänger') && !vehicle.next_sp_date) {
-    if (!confirm(`Achtung: ${vehicle.vehicle_type} ohne SP-Datum!\n\nOhne SP-Datum wird dieses Fahrzeug nicht in den SP-Erinnerungen erscheinen.\n\nTrotzdem fortfahren?`)) return;
-  }
-
-  // Hinweis wenn Telefon/Email fehlen
-  if (!customer.phone && !customer.email) {
-    if (!confirm('⚠️ Telefon und E-Mail sind nicht ausgefüllt!\n\nOhne Kontaktdaten kann der Kunde nicht für TÜV-Erinnerungen kontaktiert werden.\n\nTrotzdem fortfahren?')) {
-      return;
-    }
-  } else if (!customer.phone) {
-    if (!confirm('⚠️ Telefonnummer ist nicht ausgefüllt!\n\nTrotzdem fortfahren?')) {
-      return;
-    }
-  } else if (!customer.email) {
-    if (!confirm('⚠️ E-Mail-Adresse ist nicht ausgefüllt!\n\nTrotzdem fortfahren?')) {
-      return;
-    }
   }
 
   if (!isCompany) {
@@ -6655,7 +6695,7 @@ function getFleetWarnings(v) {
   const warnings = [];
   const today = new Date().toISOString().slice(0, 10);
   const currentMonth = today.slice(0, 7);
-  // TÜV fällig: Monat ist aktuell oder vergangen
+  // TÜV fällig
   if (v.next_tuev_date && v.next_tuev_date <= currentMonth) {
     warnings.push('tuev');
   }
@@ -6684,20 +6724,24 @@ async function renderFuhrpark() {
   const main = document.getElementById('main-content');
   try {
     const vehicles = await api('/api/fleet-vehicles');
+    const kurzzeit = vehicles.filter(v => v.rental_type !== 'lang');
+    const langzeit = vehicles.filter(v => v.rental_type === 'lang');
+
     let html = `
       <div class="page-header">
         <h2>Fuhrpark</h2>
         ${isVerwaltung() ? '<button class="btn btn-primary" onclick="openFleetVehicleForm()">Neues Fahrzeug</button>' : ''}
       </div>`;
 
-    if (vehicles.length === 0) {
-      html += '<div class="empty-state"><p>Keine Fahrzeuge vorhanden.</p></div>';
+    // Kurzzeit-Tabelle
+    html += '<div class="card"><div class="card-header"><h3>Kurzzeitvermietung</h3></div>';
+    if (kurzzeit.length === 0) {
+      html += '<div class="empty-state"><p>Keine Kurzzeit-Fahrzeuge vorhanden.</p></div>';
     } else {
-      html += `<div class="card"><table class="data-table">
-        <thead><tr>
-          <th>Kennzeichen</th><th>Hersteller</th><th>Modell</th><th>Typ</th><th>KM-Stand</th><th>Nächster TÜV</th><th>Nächste Wartung</th><th>Zugewiesen an</th><th>Status</th><th>Aktionen</th>
-        </tr></thead><tbody>`;
-      vehicles.forEach(v => {
+      html += '<table class="data-table"><thead><tr>';
+      html += '<th>Kennzeichen</th><th>Hersteller</th><th>Modell</th><th>Typ</th><th>KM-Stand</th><th>Nächster TÜV</th><th>Nächste Wartung</th><th>Status</th><th>Aktionen</th>';
+      html += '</tr></thead><tbody>';
+      kurzzeit.forEach(v => {
         const warnings = getFleetWarnings(v);
         const rowStyle = warnings.length > 0 ? 'background:rgba(231,76,60,0.08);' : '';
         const maintInfo = [];
@@ -6711,7 +6755,6 @@ async function renderFuhrpark() {
           <td>${v.latest_km ? Number(v.latest_km).toLocaleString('de-DE') + ' km' : '-'}</td>
           <td>${formatDate(v.next_tuev_date)}</td>
           <td>${maintInfo.length > 0 ? maintInfo.join(' / ') : '-'}</td>
-          <td>${escapeHtml(v.staff_name || '-')}</td>
           <td>${fleetWarningBadges(warnings) || '<span style="color:var(--text-muted);font-size:12px;">OK</span>'}</td>
           <td onclick="event.stopPropagation();">
             <button class="btn btn-sm btn-secondary" onclick="openFleetKmUpdate(${v.id}, ${v.latest_km || 0})">KM</button>
@@ -6719,8 +6762,40 @@ async function renderFuhrpark() {
           </td>
         </tr>`;
       });
-      html += '</tbody></table></div>';
+      html += '</tbody></table>';
     }
+    html += '</div>';
+
+    // Langzeit-Tabelle
+    html += '<div class="card" style="margin-top:20px;"><div class="card-header"><h3>Langzeitvermietung</h3></div>';
+    if (langzeit.length === 0) {
+      html += '<div class="empty-state"><p>Keine Langzeit-Fahrzeuge vorhanden.</p></div>';
+    } else {
+      html += '<table class="data-table"><thead><tr>';
+      html += '<th>Kennzeichen</th><th>Hersteller</th><th>Modell</th><th>Typ</th><th>Zugewiesen an</th><th>KM-Stand</th><th>Nächster TÜV</th><th>Status</th><th>Aktionen</th>';
+      html += '</tr></thead><tbody>';
+      langzeit.forEach(v => {
+        const warnings = getFleetWarnings(v);
+        const rowStyle = warnings.length > 0 ? 'background:rgba(231,76,60,0.08);' : '';
+        html += `<tr style="cursor:pointer;${rowStyle}" onclick="navigate('fuhrpark-detail', ${v.id})">
+          <td><strong>${escapeHtml(v.license_plate || '-')}</strong></td>
+          <td>${escapeHtml(v.manufacturer)}</td>
+          <td>${escapeHtml(v.model)}</td>
+          <td>${escapeHtml(v.vehicle_type || '-')}</td>
+          <td><strong>${escapeHtml(v.assigned_customer_name || '-')}</strong></td>
+          <td>${v.latest_km ? Number(v.latest_km).toLocaleString('de-DE') + ' km' : '-'}</td>
+          <td>${formatDate(v.next_tuev_date)}</td>
+          <td>${fleetWarningBadges(warnings) || '<span style="color:var(--text-muted);font-size:12px;">OK</span>'}</td>
+          <td onclick="event.stopPropagation();">
+            <button class="btn btn-sm btn-secondary" onclick="openFleetKmUpdate(${v.id}, ${v.latest_km || 0})">KM</button>
+            ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteFleetVehicle(${v.id})">Löschen</button>` : ''}
+          </td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+
     main.innerHTML = html;
   } catch (err) {
     main.innerHTML = `<div class="empty-state"><p>Fehler: ${escapeHtml(err.message)}</p></div>`;
@@ -6751,7 +6826,8 @@ async function renderFuhrparkDetail(id) {
           <div><strong>FIN:</strong> ${escapeHtml(data.vin || '-')}</div>
           <div><strong>Erstzulassung:</strong> ${formatDate(data.first_registration)}</div>
           <div><strong>Nächster TÜV:</strong> ${formatDate(data.next_tuev_date)}</div>
-          <div><strong>Zugewiesen an:</strong> ${escapeHtml(data.staff_name || '-')}</div>
+          <div><strong>Mietart:</strong> ${data.rental_type === 'lang' ? '<span class="badge badge-yellow">Langzeit</span>' : '<span class="badge badge-green">Kurzzeit</span>'}</div>
+          ${data.rental_type === 'lang' && data.assigned_customer_name ? '<div><strong>Zugewiesen an:</strong> ' + escapeHtml(data.assigned_customer_name) + (data.assigned_contact_person ? ' (Fahrer: ' + escapeHtml(data.assigned_contact_person) + ')' : '') + '</div>' : ''}
           <div><strong>Notizen:</strong> ${escapeHtml(data.notes || '-')}</div>
           ${(() => { const w = getFleetWarnings(data); return w.length > 0 ? '<div style="grid-column:1/-1;margin-top:4px;">' + fleetWarningBadges(w) + '</div>' : ''; })()}
         </div>
@@ -6777,7 +6853,7 @@ async function renderFuhrparkDetail(id) {
 }
 
 async function openFleetVehicleForm(id) {
-  let vehicle = { manufacturer: '', model: '', vehicle_type: '', vin: '', license_plate: '', first_registration: '', next_tuev_date: '', assigned_staff_id: null, notes: '' };
+  let vehicle = { manufacturer: '', model: '', vehicle_type: '', vin: '', license_plate: '', first_registration: '', next_tuev_date: '', notes: '', rental_type: 'kurz', assigned_customer_id: null, assigned_customer_name: '', assigned_contact_person: '' };
   let staffList = [];
 
   try {
@@ -6839,11 +6915,24 @@ async function openFleetVehicleForm(id) {
           <input type="month" name="next_tuev_date" value="${vehicle.next_tuev_date || ''}">
         </div>
         <div class="form-group">
-          <label>Zugewiesener Mitarbeiter</label>
-          <select name="assigned_staff_id">
-            <option value="">-- Keiner --</option>
-            ${staffList.map(s => `<option value="${s.id}" ${vehicle.assigned_staff_id == s.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}
+          <label>Mietart</label>
+          <select name="rental_type" onchange="document.getElementById('fleet-assigned-to-group').style.display=this.value==='lang'?'':'none';">
+            <option value="kurz" ${vehicle.rental_type !== 'lang' ? 'selected' : ''}>Kurzzeitvermietung</option>
+            <option value="lang" ${vehicle.rental_type === 'lang' ? 'selected' : ''}>Langzeitvermietung</option>
           </select>
+        </div>
+      </div>
+      <div id="fleet-assigned-to-group" style="${vehicle.rental_type === 'lang' ? '' : 'display:none;'}">
+        <div class="form-group" style="position:relative;">
+          <label>Zugewiesen an (Kunde) *</label>
+          <input type="text" id="fleet-customer-search" placeholder="Kunde suchen..." autocomplete="off" oninput="searchFleetCustomer(this.value)" onkeydown="fleetCustomerKeydown(event)" value="${escapeHtml(vehicle.assigned_customer_name || '')}" ${vehicle.assigned_customer_id ? 'style="display:none;"' : ''}>
+          <input type="hidden" name="assigned_customer_id" id="fleet-assigned-customer-id" value="${vehicle.assigned_customer_id || ''}">
+          <div class="search-dropdown" id="fleet-customer-dropdown"></div>
+          ${vehicle.assigned_customer_id ? `<div id="fleet-customer-selected" class="search-selected"><span>${escapeHtml(vehicle.assigned_customer_name || '')}</span><button type="button" class="btn btn-sm btn-secondary" onclick="clearFleetCustomer()">Ändern</button></div>` : '<div id="fleet-customer-selected" style="display:none;"></div>'}
+        </div>
+        <div class="form-group" id="fleet-contact-person-group" style="${vehicle.assigned_customer_id ? '' : 'display:none;'}">
+          <label>Zugewiesener Fahrer <small style="color:var(--text-muted);font-weight:normal;">(optional)</small></label>
+          <input type="text" name="assigned_contact_person" value="${escapeHtml(vehicle.assigned_contact_person || '')}" placeholder="z.B. Max Mustermann">
         </div>
       </div>
       <div class="form-group">
@@ -6858,6 +6947,87 @@ async function openFleetVehicleForm(id) {
   openModal(title, html, 'modal-wide');
 }
 
+let _fleetDropdownIdx = -1;
+
+async function searchFleetCustomer(term) {
+  const dropdown = document.getElementById('fleet-customer-dropdown');
+  _fleetDropdownIdx = -1;
+  if (!term || term.length < 2) { dropdown.style.display = 'none'; return; }
+  try {
+    const customers = await api('/api/customers?search=' + encodeURIComponent(term));
+    if (customers.length === 0) {
+      dropdown.innerHTML = '<div class="search-dropdown-item" style="color:var(--text-muted);">Keine Kunden gefunden</div>';
+    } else {
+      dropdown.innerHTML = customers.slice(0, 10).map((c, idx) => {
+        const name = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? c.company_name : c.last_name + ', ' + c.first_name;
+        const sub = c.city ? ' — ' + c.city : '';
+        const isFirma = c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt';
+        return '<div class="search-dropdown-item" data-idx="' + idx + '" data-id="' + c.id + '" data-name="' + escapeHtml(name + sub) + '" data-firma="' + isFirma + '" onclick="selectFleetCustomer(' + c.id + ',\'' + escapeHtml(name) + escapeHtml(sub) + '\',' + isFirma + ')" onmouseenter="_fleetDropdownIdx=' + idx + ';fleetHighlightDropdown()">' + escapeHtml(name) + escapeHtml(sub) + (isFirma ? ' <span class="badge badge-blue">Firma</span>' : '') + '</div>';
+      }).join('');
+    }
+    dropdown.style.display = 'block';
+  } catch (e) { dropdown.style.display = 'none'; }
+}
+
+function fleetCustomerKeydown(e) {
+  const dropdown = document.getElementById('fleet-customer-dropdown');
+  if (!dropdown || dropdown.style.display === 'none') return;
+  const items = dropdown.querySelectorAll('.search-dropdown-item[data-id]');
+  if (items.length === 0) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _fleetDropdownIdx = Math.min(_fleetDropdownIdx + 1, items.length - 1);
+    fleetHighlightDropdown();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _fleetDropdownIdx = Math.max(_fleetDropdownIdx - 1, 0);
+    fleetHighlightDropdown();
+  } else if (e.key === 'Enter' && _fleetDropdownIdx >= 0 && _fleetDropdownIdx < items.length) {
+    e.preventDefault();
+    const item = items[_fleetDropdownIdx];
+    selectFleetCustomer(Number(item.dataset.id), item.dataset.name, item.dataset.firma === 'true');
+  } else if (e.key === 'Tab' && dropdown.style.display !== 'none' && items.length > 0) {
+    e.preventDefault();
+    if (_fleetDropdownIdx < 0) _fleetDropdownIdx = 0;
+    fleetHighlightDropdown();
+  } else if (e.key === 'Escape') {
+    dropdown.style.display = 'none';
+    _fleetDropdownIdx = -1;
+  }
+}
+
+function fleetHighlightDropdown() {
+  const dropdown = document.getElementById('fleet-customer-dropdown');
+  if (!dropdown) return;
+  const items = dropdown.querySelectorAll('.search-dropdown-item[data-id]');
+  items.forEach((item, i) => {
+    item.style.background = i === _fleetDropdownIdx ? 'var(--primary-light)' : '';
+  });
+  if (_fleetDropdownIdx >= 0 && items[_fleetDropdownIdx]) {
+    items[_fleetDropdownIdx].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function selectFleetCustomer(id, displayName, isFirma) {
+  document.getElementById('fleet-customer-dropdown').style.display = 'none';
+  document.getElementById('fleet-customer-search').style.display = 'none';
+  document.getElementById('fleet-assigned-customer-id').value = id;
+  document.getElementById('fleet-customer-selected').style.display = '';
+  document.getElementById('fleet-customer-selected').innerHTML = '<span>' + displayName + '</span> <button type="button" class="btn btn-sm btn-secondary" onclick="clearFleetCustomer()">Ändern</button>';
+  document.getElementById('fleet-contact-person-group').style.display = isFirma ? '' : 'none';
+}
+
+function clearFleetCustomer() {
+  document.getElementById('fleet-assigned-customer-id').value = '';
+  document.getElementById('fleet-customer-selected').style.display = 'none';
+  const search = document.getElementById('fleet-customer-search');
+  search.style.display = '';
+  search.value = '';
+  search.focus();
+  document.getElementById('fleet-contact-person-group').style.display = 'none';
+}
+
 async function saveFleetVehicle(e, id) {
   e.preventDefault();
   const form = e.target;
@@ -6869,7 +7039,9 @@ async function saveFleetVehicle(e, id) {
     license_plate: form.license_plate.value.trim(),
     first_registration: form.first_registration.value,
     next_tuev_date: form.next_tuev_date.value,
-    assigned_staff_id: form.assigned_staff_id.value || null,
+    rental_type: form.rental_type.value,
+    assigned_customer_id: document.getElementById('fleet-assigned-customer-id').value || null,
+    assigned_contact_person: form.assigned_contact_person ? form.assigned_contact_person.value.trim() : '',
     notes: form.notes.value.trim(),
   };
   try {
@@ -8439,8 +8611,1424 @@ async function deleteTimeEntry(entryId, staffId, dateStr) {
   }
 }
 
+// ===== PAGE: Vermietung (Rental) =====
+const RENTAL_VEHICLE_COLORS = ['#2563eb','#dc2626','#059669','#d97706','#7c3aed','#db2777','#0891b2','#65a30d','#c026d3','#ea580c'];
+let rentalCurrentYear = new Date().getFullYear();
+let rentalCurrentMonth = new Date().getMonth(); // 0-11
+let rentalSelectedVehicle = 'alle';
+let rentalDragStartDate = null;
+let rentalDragEndDate = null;
+let rentalDragging = false;
+
+async function renderVermietung() {
+  if (rentalSelectedVehicle === 'alle') {
+    renderVermietungOverview();
+  } else {
+    renderVermietungSingle();
+  }
+}
+
+async function renderVermietungOverview() {
+  const main = document.getElementById('main-content');
+  try {
+    const allVehicles = await api('/api/fleet-vehicles');
+    const vehicleList = allVehicles.filter(v => v.rental_type !== 'lang');
+    const year = rentalCurrentYear;
+    const month = rentalCurrentMonth;
+    const monthNames = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+    const dayNames = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const holidays = getNRWHolidays(year);
+
+    // Load rentals for this month
+    const monthStr = String(month + 1).padStart(2, '0');
+    const monthStart = year + '-' + monthStr + '-01';
+    const monthEnd = year + '-' + monthStr + '-' + String(daysInMonth).padStart(2, '0');
+    const allRentals = await api('/api/rentals?year=' + year);
+    // Filter to rentals that overlap with this month
+    const monthRentals = allRentals.filter(r => r.start_date <= monthEnd && r.end_date >= monthStart);
+
+    // Build per-vehicle day map
+    const vehicleDayMap = {};
+    vehicleList.forEach(v => { vehicleDayMap[v.id] = {}; });
+    monthRentals.forEach(r => {
+      if (!vehicleDayMap[r.vehicle_id]) return;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = year + '-' + monthStr + '-' + String(d).padStart(2, '0');
+        if (dateStr >= r.start_date && dateStr <= r.end_date) {
+          vehicleDayMap[r.vehicle_id][dateStr] = r;
+        }
+      }
+    });
+
+    // Build table in vac-calendar style
+    let tableHtml = '<table class="rental-calendar"><tbody>';
+
+    // Header row with day numbers
+    tableHtml += '<tr><td class="vac-month-cell" style="font-weight:600;">Fahrzeug</td>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = year + '-' + monthStr + '-' + String(d).padStart(2, '0');
+      const dt = new Date(dateStr + 'T12:00:00');
+      const dow = dt.getDay();
+      const isWeekend = dow === 0 || dow === 6;
+      const isHoliday = holidays.has(dateStr);
+      let cls = 'vac-day-cell';
+      let style = 'font-weight:600;font-size:10px;line-height:1.1;';
+      if (isHoliday) { cls += ' vac-holiday'; }
+      else if (isWeekend) { cls += ' vac-weekend'; }
+      tableHtml += '<td class="' + cls + '" style="' + style + '" title="' + (isHoliday ? escapeHtml(holidays.get(dateStr)) : dayNames[dow]) + '"><div style="color:var(--text-muted);">' + dayNames[dow] + '</div>' + d + '</td>';
+    }
+    tableHtml += '</tr>';
+
+    // Vehicle rows
+    vehicleList.forEach(v => {
+      const label = escapeHtml((v.license_plate || '?') + ' — ' + (v.manufacturer || '') + ' ' + (v.model || ''));
+      tableHtml += '<tr>';
+      tableHtml += '<td class="vac-month-cell" style="cursor:pointer;white-space:nowrap;" onclick="rentalSelectVehicle(\'' + v.id + '\')" title="Klicken für Jahresansicht">' + label + '</td>';
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = year + '-' + monthStr + '-' + String(d).padStart(2, '0');
+        const dt = new Date(dateStr + 'T12:00:00');
+        const dow = dt.getDay();
+        const isWeekend = dow === 0 || dow === 6;
+        const isHoliday = holidays.has(dateStr);
+        const rental = vehicleDayMap[v.id][dateStr];
+
+        let cls = 'vac-day-cell';
+        let cellStyle = '';
+        let title = '';
+        if (rental) {
+          if (isHoliday) {
+            cellStyle = 'background:#6ee7b7;color:#065f46;cursor:pointer;';
+          } else if (isWeekend) {
+            cellStyle = 'background:#6ee7b7;color:#065f46;cursor:pointer;';
+          } else {
+            cellStyle = 'background:#059669;color:#fff;cursor:pointer;';
+          }
+          title = escapeHtml(rental.customer_name || 'Vermietet');
+        } else if (isHoliday) {
+          cls += ' vac-holiday';
+          title = escapeHtml(holidays.get(dateStr));
+        } else if (isWeekend) {
+          cls += ' vac-weekend';
+        }
+        tableHtml += '<td class="' + cls + '" style="' + cellStyle + '" title="' + title + '"' + (rental ? ' onclick="openRentalForm(' + rental.id + ')"' : '') + '></td>';
+      }
+      tableHtml += '</tr>';
+    });
+    tableHtml += '</tbody></table>';
+
+    // Month navigation
+    const prevMonth = month === 0 ? 11 : month - 1;
+    const prevYear = month === 0 ? year - 1 : year;
+    const nextMonth = month === 11 ? 0 : month + 1;
+    const nextYear = month === 11 ? year + 1 : year;
+
+    main.innerHTML = `
+      <div class="page-header">
+        <h2>Vermietung — Übersicht</h2>
+        ${isAdmin() ? '<button class="btn btn-primary" onclick="openRentalForm()">Vermietung eintragen</button>' : ''}
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+        <button class="cal-nav-btn" onclick="rentalCurrentMonth=${prevMonth};rentalCurrentYear=${prevYear};renderVermietung();">\u25C0</button>
+        <h3 style="margin:0;min-width:180px;text-align:center;">${monthNames[month]} ${year}</h3>
+        <button class="cal-nav-btn" onclick="rentalCurrentMonth=${nextMonth};rentalCurrentYear=${nextYear};renderVermietung();">\u25B6</button>
+        <div class="form-group" style="margin:0;margin-left:20px;">
+          <select id="rental-vehicle-select" onchange="rentalSelectVehicle(this.value)" style="padding:6px 10px;">
+            <option value="alle" selected>Alle Fahrzeuge</option>
+            ${vehicleList.map(v => `<option value="${v.id}">${escapeHtml(v.license_plate || '')} - ${escapeHtml(v.manufacturer)} ${escapeHtml(v.model)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#059669;display:inline-block;"></span> Vermietet</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#a8896a;display:inline-block;"></span> Wochenende</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#facc15;display:inline-block;"></span> Feiertag</span>
+        <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">Klicke links auf ein Fahrzeug für die Jahresansicht</span>
+      </div>
+      <div style="overflow-x:auto;">
+        ${tableHtml}
+      </div>
+    `;
+  } catch (err) {
+    main.innerHTML = '<p class="error">Fehler: ' + escapeHtml(err.message) + '</p>';
+  }
+}
+
+async function renderVermietungSingle() {
+  const main = document.getElementById('main-content');
+  try {
+    const [entries, allVehicles] = await Promise.all([
+      api('/api/rentals?year=' + rentalCurrentYear),
+      api('/api/fleet-vehicles')
+    ]);
+    const vehicleList = allVehicles.filter(v => v.rental_type !== 'lang');
+    const holidays = getNRWHolidays(rentalCurrentYear);
+    const months = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+
+    const visibleEntries = entries.filter(e => e.vehicle_id === Number(rentalSelectedVehicle));
+    const selectedVeh = allVehicles.find(v => v.id === Number(rentalSelectedVehicle));
+    const vehicleLabel = selectedVeh ? (selectedVeh.license_plate || '') + ' — ' + selectedVeh.manufacturer + ' ' + selectedVeh.model : '';
+
+    // Build day map
+    const dayMap = {};
+    visibleEntries.forEach(e => {
+      const days = getVacationDaysInRange(e.start_date, e.end_date, holidays);
+      days.forEach(d => {
+        if (!dayMap[d]) dayMap[d] = [];
+        dayMap[d].push(e);
+      });
+    });
+
+    // Build calendar table
+    let tableHtml = '<table class="rental-calendar"><tbody>';
+    for (let m = 0; m < 12; m++) {
+      const daysInMonth = new Date(rentalCurrentYear, m + 1, 0).getDate();
+      tableHtml += '<tr><td class="vac-month-cell">' + months[m] + '</td>';
+      for (let d = 1; d <= 31; d++) {
+        if (d > daysInMonth) { tableHtml += '<td class="vac-day-cell vac-empty"></td>'; continue; }
+        const dateStr = rentalCurrentYear + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        const dt = new Date(dateStr + 'T12:00:00');
+        const dow = dt.getDay();
+        const isWeekend = dow === 0 || dow === 6;
+        const isHoliday = holidays.has(dateStr);
+        const dayEntries = dayMap[dateStr] || [];
+
+        let cellClass = 'vac-day-cell';
+        let cellStyle = '';
+        let cellTitle = '';
+        if (isHoliday) { cellClass += ' vac-holiday'; cellTitle = holidays.get(dateStr); }
+        else if (isWeekend) { cellClass += ' vac-weekend'; }
+        if (dayEntries.length > 0) {
+          if (isHoliday || isWeekend) {
+            cellStyle = 'background:#6ee7b7;color:#065f46;';
+          } else {
+            cellStyle = 'background:#059669;color:#fff;';
+          }
+          cellTitle = dayEntries[0].customer_name || 'Vermietet';
+        }
+
+        if (isAdmin()) {
+          tableHtml += '<td class="' + cellClass + '" style="' + cellStyle + 'cursor:pointer;user-select:none;" title="' + escapeHtml(cellTitle) + '" data-rdate="' + dateStr + '" onmousedown="rentalDragStart(\'' + dateStr + '\', event)" onmouseover="rentalDragOver(\'' + dateStr + '\')">' + d + '</td>';
+        } else {
+          tableHtml += '<td class="' + cellClass + '" style="' + cellStyle + '" title="' + escapeHtml(cellTitle) + '">' + d + '</td>';
+        }
+      }
+      tableHtml += '</tr>';
+    }
+    tableHtml += '</tbody></table>';
+
+    main.innerHTML = `
+      <div class="page-header">
+        <h2>Vermietung — ${escapeHtml(vehicleLabel)}</h2>
+        ${isAdmin() ? '<button class="btn btn-primary" onclick="openRentalForm()">Vermietung eintragen</button>' : ''}
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+        <button class="cal-nav-btn" onclick="rentalChangeYear(-1)">\u25C0</button>
+        <h3 style="margin:0;min-width:60px;text-align:center;">${rentalCurrentYear}</h3>
+        <button class="cal-nav-btn" onclick="rentalChangeYear(1)">\u25B6</button>
+        <div class="form-group" style="margin:0;margin-left:20px;">
+          <select id="rental-vehicle-select" onchange="rentalSelectVehicle(this.value)" style="padding:6px 10px;">
+            <option value="alle">Alle Fahrzeuge</option>
+            ${vehicleList.map(v => `<option value="${v.id}" ${rentalSelectedVehicle == v.id ? 'selected' : ''}>${escapeHtml(v.license_plate || '')} - ${escapeHtml(v.manufacturer)} ${escapeHtml(v.model)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px;align-items:center;">
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#059669;display:inline-block;"></span> Vermietet</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#a8896a;display:inline-block;"></span> Wochenende</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#facc15;display:inline-block;"></span> Feiertag</span>
+      </div>
+      <div style="overflow-x:auto;">
+        ${tableHtml}
+      </div>
+      ${isAdmin() ? renderRentalList(visibleEntries) : ''}
+    `;
+  } catch (err) {
+    main.innerHTML = '<p class="error">Fehler: ' + escapeHtml(err.message) + '</p>';
+  }
+}
+
+function renderRentalList(entries) {
+  if (!entries.length) return '';
+  return `
+    <div class="card" style="margin-top:20px;">
+      <div class="card-header"><h3>Vermietungen ${rentalCurrentYear}</h3></div>
+      <table class="data-table">
+        <thead><tr>
+          <th>Fahrzeug</th><th>Kunde</th><th>Von</th><th>Bis</th><th>Notizen</th><th>Aktionen</th>
+        </tr></thead>
+        <tbody>
+          ${entries.map(e => {
+            return `<tr>
+              <td>${escapeHtml((e.license_plate || '') + ' - ' + (e.manufacturer || '') + ' ' + (e.model || ''))}</td>
+              <td>${escapeHtml(e.customer_name || '')}</td>
+              <td>${formatDate(e.start_date)}</td>
+              <td>${formatDate(e.end_date)}</td>
+              <td>${escapeHtml(e.notes || '')}</td>
+              <td>
+                <button class="btn btn-sm btn-secondary" onclick="openRentalForm(${e.id})">Bearbeiten</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteRental(${e.id})">L\u00f6schen</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function rentalChangeYear(offset) {
+  const currentYear = new Date().getFullYear();
+  const newYear = rentalCurrentYear + offset;
+  if (newYear < currentYear - 5 || newYear > currentYear + 2) return;
+  rentalCurrentYear = newYear;
+  renderVermietung();
+}
+
+function rentalSelectVehicle(val) {
+  rentalSelectedVehicle = val;
+  renderVermietung();
+}
+
+function rentalDragStart(dateStr, e) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  rentalDragging = true;
+  rentalDragStartDate = dateStr;
+  rentalDragEndDate = dateStr;
+  rentalHighlightRange(dateStr, dateStr);
+}
+
+function rentalDragOver(dateStr) {
+  if (!rentalDragging) return;
+  rentalDragEndDate = dateStr;
+  rentalHighlightRange(rentalDragStartDate, rentalDragEndDate);
+}
+
+async function rentalDragEnd() {
+  if (!rentalDragging) return;
+  rentalDragging = false;
+  const start = rentalDragStartDate <= rentalDragEndDate ? rentalDragStartDate : rentalDragEndDate;
+  const end = rentalDragStartDate <= rentalDragEndDate ? rentalDragEndDate : rentalDragStartDate;
+  rentalClearHighlight();
+
+  // Check if there's an existing rental overlapping this range
+  try {
+    const entries = await api(`/api/rentals?year=${rentalCurrentYear}`);
+    const vehicleFilter = rentalSelectedVehicle !== 'alle' ? Number(rentalSelectedVehicle) : null;
+    const match = entries.find(e => {
+      if (vehicleFilter && e.vehicle_id !== vehicleFilter) return false;
+      return e.start_date <= end && e.end_date >= start;
+    });
+    if (match) {
+      openRentalForm(match.id, start, end);
+      return;
+    }
+  } catch (e) {}
+
+  openRentalForm(null, start, end);
+}
+
+function rentalHighlightRange(from, to) {
+  const start = from <= to ? from : to;
+  const end = from <= to ? to : from;
+  document.querySelectorAll('.rental-calendar td[data-rdate]').forEach(td => {
+    const d = td.dataset.rdate;
+    if (d >= start && d <= end) {
+      td.classList.add('rental-selecting');
+    } else {
+      td.classList.remove('rental-selecting');
+    }
+  });
+}
+
+function rentalClearHighlight() {
+  document.querySelectorAll('.rental-selecting').forEach(td => td.classList.remove('rental-selecting'));
+}
+
+async function openRentalForm(editId, presetStart, presetEnd) {
+  const vehicleList = await api('/api/fleet-vehicles');
+  let entry = { vehicle_id: rentalSelectedVehicle !== 'alle' ? Number(rentalSelectedVehicle) : '', customer_name: '', start_date: presetStart || '', end_date: presetEnd || presetStart || '', notes: '' };
+
+  let displayStart = presetStart || '';
+  let displayEnd = presetEnd || presetStart || '';
+
+  if (editId) {
+    try {
+      const all = await api(`/api/rentals?year=${rentalCurrentYear}`);
+      const found = all.find(e => e.id === editId);
+      if (found) {
+        entry = found;
+        if (presetStart) {
+          displayStart = presetStart;
+          displayEnd = presetEnd || presetStart;
+        } else {
+          displayStart = entry.start_date;
+          displayEnd = entry.end_date;
+        }
+      }
+    } catch (e) {}
+  } else {
+    displayStart = presetStart || '';
+    displayEnd = presetEnd || presetStart || '';
+  }
+
+  const title = editId ? 'Vermietung bearbeiten' : 'Vermietung eintragen';
+  const html = `
+    <form onsubmit="saveRental(event, ${editId || 'null'})">
+      <div class="form-group">
+        <label>Fahrzeug *</label>
+        <select id="rental-vehicle" required>
+          <option value="">-- Auswählen --</option>
+          ${vehicleList.map(v => `<option value="${v.id}" ${entry.vehicle_id == v.id ? 'selected' : ''}>${escapeHtml(v.license_plate || '')} - ${escapeHtml(v.manufacturer)} ${escapeHtml(v.model)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Kundenname</label>
+        <input type="text" id="rental-customer" value="${escapeHtml(entry.customer_name || '')}">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Von *</label>
+          <input type="date" id="rental-start" value="${displayStart}" required>
+        </div>
+        <div class="form-group">
+          <label>Bis *</label>
+          <input type="date" id="rental-end" value="${displayEnd}" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Notizen</label>
+        <textarea id="rental-notes" rows="2">${escapeHtml(entry.notes || '')}</textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">${editId ? 'Speichern' : 'Eintragen'}</button>
+        ${editId ? `<button type="button" class="btn btn-danger" onclick="deleteRental(${editId})">L\u00f6schen</button>` : ''}
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `;
+  openModal(title, html);
+}
+
+async function saveRental(e, id) {
+  e.preventDefault();
+  const data = {
+    vehicle_id: document.getElementById('rental-vehicle').value,
+    customer_name: document.getElementById('rental-customer').value.trim(),
+    start_date: document.getElementById('rental-start').value,
+    end_date: document.getElementById('rental-end').value,
+    notes: document.getElementById('rental-notes').value.trim(),
+  };
+  if (!data.vehicle_id || !data.start_date || !data.end_date) {
+    showToast('Bitte alle Pflichtfelder ausf\u00fcllen', 'error');
+    return;
+  }
+  if (data.start_date > data.end_date) {
+    showToast('Enddatum muss nach Startdatum liegen', 'error');
+    return;
+  }
+  try {
+    if (id) {
+      await api(`/api/rentals/${id}`, { method: 'PUT', body: data });
+      showToast('Vermietung aktualisiert');
+    } else {
+      await api('/api/rentals', { method: 'POST', body: data });
+      showToast('Vermietung erstellt');
+    }
+    closeModal();
+    renderVermietung();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteRental(id) {
+  if (!confirm('Vermietung wirklich l\u00f6schen?')) return;
+  try {
+    await api(`/api/rentals/${id}`, { method: 'DELETE' });
+    showToast('Vermietung gel\u00f6scht');
+    closeModal();
+    renderVermietung();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ===== PAGE: Anwälte (Lawyers) =====
+let _lawyerData = [];
+let _lawyerSort = { field: 'name', dir: 'asc' };
+
+async function renderLawyers() {
+  const main = document.getElementById('main-content');
+  main.innerHTML = `
+    <div class="page-header">
+      <h2>Anwälte</h2>
+      ${isAdmin() ? '<button class="btn btn-primary" onclick="openLawyerForm()">+ Neuer Anwalt</button>' : ''}
+    </div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="filter-bar">
+        <div class="form-group" style="flex:1;min-width:250px;">
+          <label>Suche (Name, Kanzlei, Ort, Fachgebiet)</label>
+          <input type="text" id="lawyer-search" placeholder="z.B. Müller" oninput="filterLawyers()">
+        </div>
+        <button class="btn btn-secondary" onclick="document.getElementById('lawyer-search').value='';filterLawyers()">Zurücksetzen</button>
+      </div>
+    </div>
+    <div class="card">
+      <div id="lawyer-table-content"><div class="loading">Laden...</div></div>
+    </div>
+  `;
+  try {
+    _lawyerData = await api('/api/lawyers');
+    renderLawyerTable();
+  } catch (err) {
+    document.getElementById('lawyer-table-content').innerHTML = '<div class="empty-state"><p>Fehler: ' + escapeHtml(err.message) + '</p></div>';
+  }
+}
+
+function filterLawyers() {
+  renderLawyerTable();
+}
+
+function sortLawyers(field) {
+  if (_lawyerSort.field === field) {
+    _lawyerSort.dir = _lawyerSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _lawyerSort.field = field;
+    _lawyerSort.dir = 'asc';
+  }
+  renderLawyerTable();
+}
+
+function lawyerSortIcon(field) {
+  if (_lawyerSort.field !== field) return '<span style="opacity:0.3;">&#9650;</span>';
+  return _lawyerSort.dir === 'asc' ? '<span>&#9650;</span>' : '<span>&#9660;</span>';
+}
+
+function renderLawyerTable() {
+  const container = document.getElementById('lawyer-table-content');
+  if (!container) return;
+  let data = [..._lawyerData];
+  const term = (document.getElementById('lawyer-search')?.value || '').toLowerCase().trim();
+
+  if (term) {
+    data = data.filter(l => [l.name, l.kanzlei, l.ort, l.email, l.telefon1].join(' ').toLowerCase().includes(term));
+  }
+
+  data.sort((a, b) => {
+    const f = _lawyerSort.field;
+    if (f === 'id') return _lawyerSort.dir === 'asc' ? a.id - b.id : b.id - a.id;
+    let va = (a[f] || '').toString().toLowerCase();
+    let vb = (b[f] || '').toString().toLowerCase();
+    return _lawyerSort.dir === 'asc' ? va.localeCompare(vb, 'de') : vb.localeCompare(va, 'de');
+  });
+
+  if (data.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>Keine Anwälte gefunden.</p></div>';
+    return;
+  }
+
+  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap;';
+  container.innerHTML = `
+    <div style="padding:8px 16px;color:var(--text-muted);font-size:13px;">${data.length} Anwalt${data.length !== 1 ? '\u0308e' : ''}</div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr>
+          <th style="${thStyle}" onclick="sortLawyers('name')">Name ${lawyerSortIcon('name')}</th>
+          <th style="${thStyle}" onclick="sortLawyers('kanzlei')">Kanzlei ${lawyerSortIcon('kanzlei')}</th>
+          <th style="${thStyle}" onclick="sortLawyers('ort')">Ort ${lawyerSortIcon('ort')}</th>
+          <th style="${thStyle}" onclick="sortLawyers('telefon1')">Telefon ${lawyerSortIcon('telefon1')}</th>
+          <th style="${thStyle}" onclick="sortLawyers('email')">E-Mail ${lawyerSortIcon('email')}</th>
+          <th>Aktionen</th>
+        </tr></thead>
+        <tbody>
+          ${data.map(l => `<tr style="cursor:pointer;" onclick="openLawyerDetail(${l.id})">
+            <td><strong>${escapeHtml(l.name || '')}</strong></td>
+            <td>${escapeHtml(l.kanzlei || '')}</td>
+            <td>${escapeHtml(l.plz ? l.plz + ' ' + (l.ort || '') : l.ort || '')}</td>
+            <td>${escapeHtml(l.telefon1 || '')}</td>
+            <td>${l.email ? '<a href="mailto:' + escapeHtml(l.email) + '" onclick="event.stopPropagation();">' + escapeHtml(l.email) + '</a>' : ''}</td>
+            <td>
+              ${isAdmin() ? '<div style="display:flex;gap:6px;white-space:nowrap;"><button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openLawyerForm(' + l.id + ')">Bearbeiten</button><button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteLawyer(' + l.id + ',\'' + escapeHtml(l.name || '').replace(/'/g, "\\'") + '\')">Löschen</button></div>' : '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();openLawyerDetail(' + l.id + ')">Details</button>'}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openLawyerDetail(id) {
+  const l = _lawyerData.find(x => x.id === id);
+  if (!l) return;
+  const fields = [
+    ['Anrede', l.anrede],
+    ['Name', l.name],
+    ['Kanzlei', l.kanzlei],
+    ['Straße', l.strasse],
+    ['PLZ / Ort', (l.plz || '') + ' ' + (l.ort || '')],
+    ['Telefon 1', l.telefon1],
+    ['Telefon 2', l.telefon2],
+    ['Mobil', l.mobil],
+    ['Fax', l.fax],
+    ['E-Mail', l.email],
+    ['E-Mail 2', l.email2],
+    ['Webseite', l.webseite],
+    ['Kommentar', l.kommentar]
+  ];
+  openModal(l.name || 'Anwalt', `
+    <table style="width:100%;">
+      ${fields.filter(([, v]) => v && v.trim()).map(([label, val]) => `
+        <tr>
+          <td style="padding:6px 12px 6px 0;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-muted);">${escapeHtml(label)}</td>
+          <td style="padding:6px 0;white-space:pre-wrap;">${label.includes('Mail') && val.includes('@') ? '<a href="mailto:' + escapeHtml(val.trim()) + '">' + escapeHtml(val.trim()) + '</a>' : label === 'Webseite' && val.trim() ? '<a href="' + (val.trim().startsWith('http') ? '' : 'https://') + escapeHtml(val.trim()) + '" target="_blank">' + escapeHtml(val.trim()) + '</a>' : escapeHtml(val)}</td>
+        </tr>
+      `).join('')}
+    </table>
+    <div style="margin-top:20px;display:flex;gap:10px;">
+      ${isAdmin() ? '<button class="btn btn-primary" onclick="closeModal();openLawyerForm(' + l.id + ')">Bearbeiten</button>' : ''}
+      <button class="btn btn-secondary" onclick="closeModal()">Schließen</button>
+    </div>
+  `);
+}
+
+async function openLawyerForm(editId) {
+  let l = { anrede: '', name: '', kanzlei: '', strasse: '', plz: '', ort: '', telefon1: '', telefon2: '', mobil: '', fax: '', email: '', email2: '', webseite: '', fachgebiet: '', kommentar: '' };
+  if (editId) {
+    try { l = await api('/api/lawyers/' + editId); } catch { showToast('Anwalt nicht gefunden', 'error'); return; }
+  }
+  openModal(editId ? 'Anwalt bearbeiten' : 'Neuer Anwalt', `
+    <form onsubmit="saveLawyer(event, ${editId || 'null'})">
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Stammdaten</div>
+        <div style="display:grid;grid-template-columns:100px 1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Anrede</label>
+            <select id="law-anrede">
+              ${['', 'Herr', 'Frau', 'Dr.', 'Prof.', 'Prof. Dr.'].map(a => '<option value="' + a + '" ' + (l.anrede === a ? 'selected' : '') + '>' + (a || '(keine)') + '</option>').join('')}
+            </select>
+          </div>
+          <div class="form-group"><label>Name *</label><input type="text" id="law-name" value="${escapeHtml(l.name)}" required></div>
+          <div class="form-group"><label>Kanzlei</label><input type="text" id="law-kanzlei" value="${escapeHtml(l.kanzlei)}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 90px 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Straße</label><input type="text" id="law-strasse" value="${escapeHtml(l.strasse)}"></div>
+          <div class="form-group"><label>PLZ</label><input type="text" id="law-plz" value="${escapeHtml(l.plz)}"></div>
+          <div class="form-group"><label>Ort</label><input type="text" id="law-ort" value="${escapeHtml(l.ort)}"></div>
+        </div>
+      </div>
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Kontaktdaten</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Telefon 1</label><input type="text" id="law-telefon1" value="${escapeHtml(l.telefon1)}"></div>
+          <div class="form-group"><label>Telefon 2</label><input type="text" id="law-telefon2" value="${escapeHtml(l.telefon2)}"></div>
+          <div class="form-group"><label>Mobil</label><input type="text" id="law-mobil" value="${escapeHtml(l.mobil)}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>E-Mail</label><input type="email" id="law-email" value="${escapeHtml(l.email)}"></div>
+          <div class="form-group"><label>E-Mail 2</label><input type="email" id="law-email2" value="${escapeHtml(l.email2)}"></div>
+          <div class="form-group"><label>Fax</label><input type="text" id="law-fax" value="${escapeHtml(l.fax)}"></div>
+          <div class="form-group"><label>Webseite</label><input type="text" id="law-webseite" value="${escapeHtml(l.webseite)}"></div>
+        </div>
+        <div class="form-group"><label>Kommentar</label><textarea id="law-kommentar" rows="2">${escapeHtml(l.kommentar)}</textarea></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">${editId ? 'Speichern' : 'Anlegen'}</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `);
+}
+
+async function saveLawyer(e, editId) {
+  e.preventDefault();
+  const data = {
+    anrede: document.getElementById('law-anrede').value,
+    name: document.getElementById('law-name').value,
+    kanzlei: document.getElementById('law-kanzlei').value,
+    strasse: document.getElementById('law-strasse').value,
+    plz: document.getElementById('law-plz').value,
+    ort: document.getElementById('law-ort').value,
+    telefon1: document.getElementById('law-telefon1').value,
+    telefon2: document.getElementById('law-telefon2').value,
+    mobil: document.getElementById('law-mobil').value,
+    fax: document.getElementById('law-fax').value,
+    email: document.getElementById('law-email').value,
+    email2: document.getElementById('law-email2').value,
+    webseite: document.getElementById('law-webseite').value,
+    kommentar: document.getElementById('law-kommentar').value
+  };
+  try {
+    if (editId) {
+      await api('/api/lawyers/' + editId, { method: 'PUT', body: data });
+      showToast('Anwalt aktualisiert');
+    } else {
+      await api('/api/lawyers', { method: 'POST', body: data });
+      showToast('Anwalt angelegt');
+    }
+    closeModal();
+    renderLawyers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteLawyer(id, name) {
+  if (!confirm('Anwalt "' + name + '" wirklich löschen?')) return;
+  try {
+    await api('/api/lawyers/' + id, { method: 'DELETE' });
+    showToast('Anwalt gelöscht');
+    renderLawyers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ===== PAGE: Vermittler =====
+let _vermittlerData = [];
+let _vermittlerSort = { field: 'name', dir: 'asc' };
+
+async function renderVermittler() {
+  const main = document.getElementById('main-content');
+  main.innerHTML = `
+    <div class="page-header">
+      <h2>Vermittler</h2>
+      ${isAdmin() ? '<button class="btn btn-primary" onclick="openVermittlerForm()">+ Neuer Vermittler</button>' : ''}
+    </div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="filter-bar">
+        <div class="form-group" style="flex:1;min-width:250px;">
+          <label>Suche (Name, Ort, Branche, E-Mail)</label>
+          <input type="text" id="vermittler-search" placeholder="z.B. Werkstatt" oninput="filterVermittler()">
+        </div>
+        <div class="form-group" style="min-width:150px;">
+          <label>Branche</label>
+          <select id="vermittler-filter-typ" onchange="filterVermittler()">
+            <option value="">Alle</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" onclick="document.getElementById('vermittler-search').value='';document.getElementById('vermittler-filter-typ').value='';filterVermittler()">Zurücksetzen</button>
+      </div>
+    </div>
+    <div class="card">
+      <div id="vermittler-table-content"><div class="loading">Laden...</div></div>
+    </div>
+  `;
+  try {
+    _vermittlerData = await api('/api/vermittler');
+    // Populate typ filter
+    const typs = [...new Set(_vermittlerData.map(v => v.typ).filter(Boolean))].sort();
+    const sel = document.getElementById('vermittler-filter-typ');
+    if (sel) typs.forEach(t => { const o = document.createElement('option'); o.value = t; o.textContent = t; sel.appendChild(o); });
+    renderVermittlerTable();
+  } catch (err) {
+    document.getElementById('vermittler-table-content').innerHTML = '<div class="empty-state"><p>Fehler: ' + escapeHtml(err.message) + '</p></div>';
+  }
+}
+
+function filterVermittler() { renderVermittlerTable(); }
+
+function sortVermittler(field) {
+  if (_vermittlerSort.field === field) {
+    _vermittlerSort.dir = _vermittlerSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _vermittlerSort.field = field;
+    _vermittlerSort.dir = field === 'id' ? 'desc' : 'asc';
+  }
+  renderVermittlerTable();
+}
+
+function vermittlerSortIcon(field) {
+  if (_vermittlerSort.field !== field) return '<span style="opacity:0.3;">&#9650;</span>';
+  return _vermittlerSort.dir === 'asc' ? '<span>&#9650;</span>' : '<span>&#9660;</span>';
+}
+
+function renderVermittlerTable() {
+  const container = document.getElementById('vermittler-table-content');
+  if (!container) return;
+  let data = [..._vermittlerData];
+  const term = (document.getElementById('vermittler-search')?.value || '').toLowerCase().trim();
+  const typFilter = document.getElementById('vermittler-filter-typ')?.value || '';
+
+  if (term) data = data.filter(v => [v.name, v.ort, v.typ, v.email, v.ansprechpartner, v.telefon].join(' ').toLowerCase().includes(term));
+  if (typFilter) data = data.filter(v => v.typ === typFilter);
+
+  data.sort((a, b) => {
+    const f = _vermittlerSort.field;
+    if (f === 'id') return _vermittlerSort.dir === 'asc' ? a.id - b.id : b.id - a.id;
+    let va = (a[f] || '').toString().toLowerCase();
+    let vb = (b[f] || '').toString().toLowerCase();
+    return _vermittlerSort.dir === 'asc' ? va.localeCompare(vb, 'de') : vb.localeCompare(va, 'de');
+  });
+
+  if (data.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>Keine Vermittler gefunden.</p></div>';
+    return;
+  }
+
+  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap;';
+  container.innerHTML = `
+    <div style="padding:8px 16px;color:var(--text-muted);font-size:13px;">${data.length} Vermittler</div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr>
+          <th style="${thStyle}" onclick="sortVermittler('id')">Nr. ${vermittlerSortIcon('id')}</th>
+          <th style="${thStyle}" onclick="sortVermittler('name')">Name ${vermittlerSortIcon('name')}</th>
+          <th style="${thStyle}" onclick="sortVermittler('typ')">Branche ${vermittlerSortIcon('typ')}</th>
+          <th style="${thStyle}" onclick="sortVermittler('ort')">Ort ${vermittlerSortIcon('ort')}</th>
+          <th style="${thStyle}" onclick="sortVermittler('telefon')">Telefon ${vermittlerSortIcon('telefon')}</th>
+          <th style="${thStyle}" onclick="sortVermittler('email')">E-Mail ${vermittlerSortIcon('email')}</th>
+          <th style="${thStyle}" onclick="sortVermittler('ansprechpartner')">Ansprechpartner ${vermittlerSortIcon('ansprechpartner')}</th>
+          <th>Aktionen</th>
+        </tr></thead>
+        <tbody>
+          ${data.map(v => `<tr style="cursor:pointer;" onclick="openVermittlerDetail(${v.id})">
+            <td>${v.id}</td>
+            <td><strong>${escapeHtml(v.name || '')}</strong></td>
+            <td>${escapeHtml(v.typ || '')}</td>
+            <td>${escapeHtml(v.plz ? v.plz + ' ' + (v.ort || '') : v.ort || '')}</td>
+            <td>${escapeHtml(v.telefon || '')}</td>
+            <td>${v.email ? '<a href="mailto:' + escapeHtml(v.email) + '" onclick="event.stopPropagation();">' + escapeHtml(v.email) + '</a>' : ''}</td>
+            <td>${escapeHtml(v.ansprechpartner || '')}</td>
+            <td>
+              ${isAdmin() ? '<div style="display:flex;gap:6px;white-space:nowrap;"><button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openVermittlerForm(' + v.id + ')">Bearbeiten</button><button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteVermittler(' + v.id + ',\'' + escapeHtml(v.name || '').replace(/'/g, "\\'") + '\')">Löschen</button></div>' : '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();openVermittlerDetail(' + v.id + ')">Details</button>'}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openVermittlerDetail(id) {
+  const v = _vermittlerData.find(x => x.id === id);
+  if (!v) return;
+  const fmt = (val) => val && String(val).trim() ? escapeHtml(String(val)) : '<span style="color:var(--text-muted);">-</span>';
+  const fmtMail = (val) => val && val.includes('@') ? '<a href="mailto:' + escapeHtml(val.trim()) + '">' + escapeHtml(val.trim()) + '</a>' : fmt(val);
+  const fmtPhone = (val) => val && String(val).trim() ? '<a href="tel:' + escapeHtml(String(val).trim()) + '">' + escapeHtml(String(val)) + '</a>' : '<span style="color:var(--text-muted);">-</span>';
+  const cell = (label, val) => `<div><div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">${escapeHtml(label)}</div><div style="font-size:14px;">${val}</div></div>`;
+  openModal(v.name || 'Vermittler', `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+      <div style="width:42px;height:42px;border-radius:50%;background:var(--primary-light);color:var(--primary);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;flex-shrink:0;">${escapeHtml((v.name || '?')[0].toUpperCase())}</div>
+      <div>
+        <div style="font-size:16px;font-weight:600;">${escapeHtml(v.name || '')}</div>
+        <div style="font-size:13px;color:var(--text-muted);">${v.typ ? escapeHtml(v.typ) : 'Keine Branche'}${v.anrede ? ' · ' + escapeHtml(v.anrede) : ''}</div>
+      </div>
+    </div>
+    <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;">
+      <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Stammdaten</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;">
+        ${cell('Straße', fmt(v.strasse))}
+        ${cell('PLZ / Ort', fmt((v.plz || '') + (v.plz && v.ort ? ' ' : '') + (v.ort || '')))}
+        ${cell('Telefon', fmtPhone(v.telefon))}
+        ${cell('Telefon 2', fmtPhone(v.telefon2))}
+        ${cell('E-Mail', fmtMail(v.email))}
+        ${cell('Ansprechpartner', fmt(v.ansprechpartner))}
+        ${cell('Steuernummer', fmt(v.steuernummer))}
+        ${cell('Entfernung', fmt(v.entfernung))}
+        ${cell('Akquiriert', fmt(v.akquiriert))}
+      </div>
+      ${v.kommentar && v.kommentar.trim() ? '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">' + cell('Kommentar', '<span style="white-space:pre-wrap;">' + escapeHtml(v.kommentar) + '</span>') + '</div>' : ''}
+    </div>
+    <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;">
+      <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Reparaturdaten</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 24px;">
+        ${cell('Stunden 1', fmt(v.stunden1))}
+        ${cell('Stunden 2', fmt(v.stunden2))}
+        ${cell('Stunden 3', fmt(v.stunden3))}
+        ${cell('Hagel', fmt(v.hagel))}
+        ${cell('Lackaufschlag', fmt(v.lackaufschlag))}
+        ${cell('Teileaufschlag', fmt(v.teileaufschlag))}
+        ${cell('Verbringung', fmt(v.verbringung))}
+        ${cell('Verbringung Achse', fmt(v.verbringung_achse))}
+        ${cell('DEKRA/DRS', v.dekra_drs === 'true' || v.dekra_drs === true ? '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;background:#d1fae5;color:#065f46;">Ja</span>' : '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;background:var(--border);color:var(--text-muted);">Nein</span>')}
+      </div>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:10px;">
+      ${isAdmin() ? '<button class="btn btn-primary" onclick="closeModal();openVermittlerForm(' + v.id + ')">Bearbeiten</button>' : ''}
+      <button class="btn btn-secondary" onclick="closeModal()">Schließen</button>
+    </div>
+  `);
+}
+
+async function openVermittlerForm(editId) {
+  let v = { anrede:'Firma', name:'', strasse:'', plz:'', ort:'', ansprechpartner:'', telefon:'', telefon2:'', email:'', typ:'', stunden1:'', stunden2:'', stunden3:'', hagel:'', lackaufschlag:'', verbringung:'', verbringung_achse:'', teileaufschlag:'', kommentar:'', akquiriert:'', steuernummer:'', entfernung:'', dekra_drs:'' };
+  if (editId) {
+    try { v = await api('/api/vermittler/' + editId); } catch { showToast('Vermittler nicht gefunden', 'error'); return; }
+  }
+  openModal(editId ? 'Vermittler bearbeiten' : 'Neuer Vermittler', `
+    <form onsubmit="saveVermittler(event, ${editId || 'null'})">
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Stammdaten</div>
+        <div style="display:grid;grid-template-columns:100px 1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Anrede</label>
+            <select id="verm-anrede">${['Firma','Herr','Frau',''].map(a => '<option value="'+a+'" '+(v.anrede===a?'selected':'')+'>'+(a||'(keine)')+'</option>').join('')}</select>
+          </div>
+          <div class="form-group"><label>Name *</label><input type="text" id="verm-name" value="${escapeHtml(v.name)}" required></div>
+          <div class="form-group"><label>Branche</label>
+            <select id="verm-typ">${['','Privatperson','Lackiererei','Werkstatt','Reifenhandel','Taxi','Autohaus','Händler','Vermittler','Anwalt'].map(t => '<option value="'+t+'" '+(v.typ===t?'selected':'')+'>'+(t||'(keine)')+'</option>').join('')}</select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 90px 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Straße</label><input type="text" id="verm-strasse" value="${escapeHtml(v.strasse)}"></div>
+          <div class="form-group"><label>PLZ</label><input type="text" id="verm-plz" value="${escapeHtml(v.plz)}"></div>
+          <div class="form-group"><label>Ort</label><input type="text" id="verm-ort" value="${escapeHtml(v.ort)}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Telefon</label><input type="text" id="verm-telefon" value="${escapeHtml(v.telefon)}"></div>
+          <div class="form-group"><label>Telefon 2</label><input type="text" id="verm-telefon2" value="${escapeHtml(v.telefon2)}"></div>
+          <div class="form-group"><label>E-Mail</label><input type="text" id="verm-email" value="${escapeHtml(v.email)}"></div>
+          <div class="form-group"><label>Ansprechpartner</label><input type="text" id="verm-ansprechpartner" value="${escapeHtml(v.ansprechpartner)}"></div>
+          <div class="form-group"><label>Steuernummer</label><input type="text" id="verm-steuernummer" value="${escapeHtml(v.steuernummer)}"></div>
+          <div class="form-group"><label>Entfernung</label><input type="text" id="verm-entfernung" value="${escapeHtml(v.entfernung)}"></div>
+          <div class="form-group"><label>Akquiriert</label><input type="text" id="verm-akquiriert" value="${escapeHtml(v.akquiriert)}"></div>
+        </div>
+        <div class="form-group"><label>Kommentar</label><textarea id="verm-kommentar" rows="2">${escapeHtml(v.kommentar)}</textarea></div>
+      </div>
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Reparaturdaten</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Stunden 1</label><input type="text" id="verm-stunden1" value="${escapeHtml(v.stunden1)}"></div>
+          <div class="form-group"><label>Stunden 2</label><input type="text" id="verm-stunden2" value="${escapeHtml(v.stunden2)}"></div>
+          <div class="form-group"><label>Stunden 3</label><input type="text" id="verm-stunden3" value="${escapeHtml(v.stunden3)}"></div>
+          <div class="form-group"><label>Hagel</label><input type="text" id="verm-hagel" value="${escapeHtml(v.hagel)}"></div>
+          <div class="form-group"><label>Lackaufschlag</label><input type="text" id="verm-lackaufschlag" value="${escapeHtml(v.lackaufschlag)}"></div>
+          <div class="form-group"><label>Teileaufschlag</label><input type="text" id="verm-teileaufschlag" value="${escapeHtml(v.teileaufschlag)}"></div>
+          <div class="form-group"><label>Verbringung</label><input type="text" id="verm-verbringung" value="${escapeHtml(v.verbringung)}"></div>
+          <div class="form-group"><label>Verbr. Achse</label><input type="text" id="verm-verbringung_achse" value="${escapeHtml(v.verbringung_achse)}"></div>
+          <div class="form-group" style="display:flex;align-items:center;gap:8px;padding-top:22px;"><input type="checkbox" id="verm-dekra_drs" ${v.dekra_drs === 'true' || v.dekra_drs === true ? 'checked' : ''} style="width:auto;margin:0;"><label for="verm-dekra_drs" style="margin:0;cursor:pointer;">DEKRA/DRS</label></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">${editId ? 'Speichern' : 'Anlegen'}</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `, 'modal-wide');
+}
+
+async function saveVermittler(e, editId) {
+  e.preventDefault();
+  const fields = ['anrede','name','strasse','plz','ort','ansprechpartner','telefon','telefon2','email','typ','stunden1','stunden2','stunden3','hagel','lackaufschlag','verbringung','verbringung_achse','teileaufschlag','kommentar','akquiriert','steuernummer','entfernung','dekra_drs'];
+  const data = {};
+  fields.forEach(f => {
+    const el = document.getElementById('verm-' + f);
+    if (!el) { data[f] = ''; return; }
+    data[f] = el.type === 'checkbox' ? String(el.checked) : (el.value || '');
+  });
+  try {
+    if (editId) {
+      await api('/api/vermittler/' + editId, { method: 'PUT', body: data });
+      showToast('Vermittler aktualisiert');
+    } else {
+      await api('/api/vermittler', { method: 'POST', body: data });
+      showToast('Vermittler angelegt');
+    }
+    closeModal();
+    renderVermittler();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteVermittler(id, name) {
+  if (!confirm('Vermittler "' + name + '" wirklich löschen?')) return;
+  try {
+    await api('/api/vermittler/' + id, { method: 'DELETE' });
+    showToast('Vermittler gelöscht');
+    renderVermittler();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ===== PAGE: Akten (Case Files) =====
+const AKTEN_STATUS = ['offen', 'in Bearbeitung', 'abgeschlossen', 'storniert'];
+const AKTEN_ZAHLUNGSSTATUS = ['offen', 'teilweise bezahlt', 'bezahlt', 'Mahnung', 'storniert'];
+
+let _aktenData = [];
+let _aktenSort = { field: 'id', dir: 'desc' };
+
+async function renderAkten() {
+  const main = document.getElementById('main-content');
+  main.innerHTML = `
+    <div class="page-header">
+      <h2>Akten</h2>
+      ${isAdmin() ? '<button class="btn btn-primary" onclick="openAkteForm()">+ Neue Akte</button>' : ''}
+    </div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="filter-bar">
+        <div class="form-group" style="flex:1;min-width:250px;">
+          <label>Suche (Aktennr., Kunde, Anwalt, Vermittler)</label>
+          <input type="text" id="akten-search" placeholder="z.B. AK-2026-001" oninput="filterAkten()">
+        </div>
+        <div class="form-group" style="min-width:150px;">
+          <label>Status</label>
+          <select id="akten-filter-status" onchange="filterAkten()">
+            <option value="">Alle</option>
+            ${AKTEN_STATUS.map(s => '<option value="' + s + '">' + s + '</option>').join('')}
+          </select>
+        </div>
+        <div class="form-group" style="min-width:150px;">
+          <label>Zahlungsstatus</label>
+          <select id="akten-filter-zahlung" onchange="filterAkten()">
+            <option value="">Alle</option>
+            ${AKTEN_ZAHLUNGSSTATUS.map(s => '<option value="' + s + '">' + s + '</option>').join('')}
+          </select>
+        </div>
+        <button class="btn btn-secondary" onclick="clearAktenFilter()">Zurücksetzen</button>
+      </div>
+    </div>
+    <div class="card">
+      <div id="akten-table-content"><div class="loading">Laden...</div></div>
+    </div>
+  `;
+  try {
+    _aktenData = await api('/api/akten');
+    renderAktenTable();
+  } catch (err) {
+    document.getElementById('akten-table-content').innerHTML = '<div class="empty-state"><p>Fehler: ' + escapeHtml(err.message) + '</p></div>';
+  }
+}
+
+function clearAktenFilter() {
+  const s = document.getElementById('akten-search'); if (s) s.value = '';
+  const st = document.getElementById('akten-filter-status'); if (st) st.value = '';
+  const z = document.getElementById('akten-filter-zahlung'); if (z) z.value = '';
+  filterAkten();
+}
+
+function filterAkten() {
+  renderAktenTable();
+}
+
+function sortAkten(field) {
+  if (_aktenSort.field === field) {
+    _aktenSort.dir = _aktenSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _aktenSort.field = field;
+    _aktenSort.dir = field === 'id' ? 'desc' : 'asc';
+  }
+  renderAktenTable();
+}
+
+function aktenSortIcon(field) {
+  if (_aktenSort.field !== field) return '<span style="opacity:0.3;">&#9650;</span>';
+  return _aktenSort.dir === 'asc' ? '<span>&#9650;</span>' : '<span>&#9660;</span>';
+}
+
+function aktenStatusBadge(status) {
+  const colors = { 'offen': '#3b82f6', 'in Bearbeitung': '#f59e0b', 'abgeschlossen': '#10b981', 'storniert': '#6b7280' };
+  const bg = colors[status] || '#6b7280';
+  return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:#fff;background:' + bg + ';">' + escapeHtml(status) + '</span>';
+}
+
+function aktenZahlungBadge(status) {
+  const colors = { 'offen': '#ef4444', 'teilweise bezahlt': '#f59e0b', 'bezahlt': '#10b981', 'Mahnung': '#dc2626', 'storniert': '#6b7280' };
+  const bg = colors[status] || '#6b7280';
+  return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:#fff;background:' + bg + ';">' + escapeHtml(status) + '</span>';
+}
+
+function renderAktenTable() {
+  const container = document.getElementById('akten-table-content');
+  if (!container) return;
+  let data = [..._aktenData];
+
+  const searchTerm = (document.getElementById('akten-search')?.value || '').toLowerCase().trim();
+  const statusFilter = document.getElementById('akten-filter-status')?.value || '';
+  const zahlungFilter = document.getElementById('akten-filter-zahlung')?.value || '';
+
+  if (searchTerm) {
+    data = data.filter(a => [a.aktennummer, a.kunde, a.anwalt, a.vermittler].join(' ').toLowerCase().includes(searchTerm));
+  }
+  if (statusFilter) data = data.filter(a => a.status === statusFilter);
+  if (zahlungFilter) data = data.filter(a => a.zahlungsstatus === zahlungFilter);
+
+  data.sort((a, b) => {
+    const f = _aktenSort.field;
+    let va = (a[f] || '').toString().toLowerCase();
+    let vb = (b[f] || '').toString().toLowerCase();
+    if (f === 'id') { return _aktenSort.dir === 'asc' ? a.id - b.id : b.id - a.id; }
+    return _aktenSort.dir === 'asc' ? va.localeCompare(vb, 'de') : vb.localeCompare(va, 'de');
+  });
+
+  if (data.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>Keine Akten gefunden.</p></div>';
+    return;
+  }
+
+  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap;';
+  container.innerHTML = `
+    <div style="padding:8px 16px;color:var(--text-muted);font-size:13px;">${data.length} Akte${data.length !== 1 ? 'n' : ''}</div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr>
+          <th style="${thStyle}" onclick="sortAkten('aktennummer')">Aktennr. ${aktenSortIcon('aktennummer')}</th>
+          <th style="${thStyle}" onclick="sortAkten('datum')">vom ${aktenSortIcon('datum')}</th>
+          <th style="${thStyle}" onclick="sortAkten('kunde')">Kunde ${aktenSortIcon('kunde')}</th>
+          <th style="${thStyle}" onclick="sortAkten('anwalt')">Anwalt ${aktenSortIcon('anwalt')}</th>
+          <th style="${thStyle}" onclick="sortAkten('vorlage')">Vorlage ${aktenSortIcon('vorlage')}</th>
+          <th style="${thStyle}" onclick="sortAkten('zahlungsstatus')">Zahlungsstatus ${aktenSortIcon('zahlungsstatus')}</th>
+          <th style="${thStyle}" onclick="sortAkten('vermittler')">Vermittler ${aktenSortIcon('vermittler')}</th>
+          <th style="${thStyle}" onclick="sortAkten('status')">Status ${aktenSortIcon('status')}</th>
+          <th>Aktionen</th>
+        </tr></thead>
+        <tbody>
+          ${data.map(a => `<tr style="cursor:pointer;" onclick="openAkteDetail(${a.id})">
+            <td><strong>${escapeHtml(a.aktennummer || '')}</strong></td>
+            <td>${a.datum ? escapeHtml(a.datum.split('-').reverse().join('.')) : ''}</td>
+            <td>${escapeHtml(a.kunde || '')}</td>
+            <td>${escapeHtml(a.anwalt || '')}</td>
+            <td>${escapeHtml(a.vorlage || '')}</td>
+            <td>${aktenZahlungBadge(a.zahlungsstatus)}</td>
+            <td>${escapeHtml(a.vermittler || '')}</td>
+            <td>${aktenStatusBadge(a.status)}</td>
+            <td>
+              ${isAdmin() ? '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openAkteForm(' + a.id + ')">Bearbeiten</button> <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteAkte(' + a.id + ',\'' + escapeHtml(a.aktennummer || '').replace(/'/g, "\\'") + '\')">Löschen</button>' : '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();openAkteDetail(' + a.id + ')">Details</button>'}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openAkteDetail(id) {
+  const a = _aktenData.find(x => x.id === id);
+  if (!a) return;
+  const fields = [
+    ['Aktennummer', a.aktennummer],
+    ['Datum', a.datum ? a.datum.split('-').reverse().join('.') : ''],
+    ['Kunde', a.kunde],
+    ['Anwalt', a.anwalt],
+    ['Vorlage', a.vorlage],
+    ['Zahlungsstatus', a.zahlungsstatus],
+    ['Vermittler', a.vermittler],
+    ['Status', a.status],
+    ['Notizen', a.notizen]
+  ];
+  openModal('Akte ' + (a.aktennummer || '#' + a.id), `
+    <table style="width:100%;">
+      ${fields.filter(([, v]) => v && v.trim()).map(([label, val]) => `
+        <tr>
+          <td style="padding:6px 12px 6px 0;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-muted);">${escapeHtml(label)}</td>
+          <td style="padding:6px 0;white-space:pre-wrap;">${escapeHtml(val)}</td>
+        </tr>
+      `).join('')}
+    </table>
+    <div style="margin-top:20px;display:flex;gap:10px;">
+      ${isAdmin() ? '<button class="btn btn-primary" onclick="closeModal();openAkteForm(' + a.id + ')">Bearbeiten</button>' : ''}
+      <button class="btn btn-secondary" onclick="closeModal()">Schließen</button>
+    </div>
+  `);
+}
+
+async function openAkteForm(editId) {
+  let a = { aktennummer: '', datum: '', kunde: '', anwalt: '', vorlage: '', zahlungsstatus: 'offen', vermittler: '', status: 'offen', notizen: '' };
+  if (editId) {
+    try { a = await api('/api/akten/' + editId); } catch { showToast('Akte nicht gefunden', 'error'); return; }
+  }
+  openModal(editId ? 'Akte bearbeiten' : 'Neue Akte', `
+    <form onsubmit="saveAkte(event, ${editId || 'null'})">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group"><label>Aktennummer *</label><input type="text" id="akte-nummer" value="${escapeHtml(a.aktennummer)}" required></div>
+        <div class="form-group"><label>Datum</label><input type="date" id="akte-datum" value="${escapeHtml(a.datum)}"></div>
+      </div>
+      <div class="form-group"><label>Kunde</label><input type="text" id="akte-kunde" value="${escapeHtml(a.kunde)}"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group"><label>Anwalt</label><input type="text" id="akte-anwalt" value="${escapeHtml(a.anwalt)}"></div>
+        <div class="form-group"><label>Vermittler</label><input type="text" id="akte-vermittler" value="${escapeHtml(a.vermittler)}"></div>
+      </div>
+      <div class="form-group"><label>Vorlage</label><input type="text" id="akte-vorlage" value="${escapeHtml(a.vorlage)}"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group"><label>Zahlungsstatus</label>
+          <select id="akte-zahlungsstatus">
+            ${AKTEN_ZAHLUNGSSTATUS.map(s => '<option value="' + s + '" ' + (a.zahlungsstatus === s ? 'selected' : '') + '>' + s + '</option>').join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>Status</label>
+          <select id="akte-status">
+            ${AKTEN_STATUS.map(s => '<option value="' + s + '" ' + (a.status === s ? 'selected' : '') + '>' + s + '</option>').join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Notizen</label><textarea id="akte-notizen" rows="3">${escapeHtml(a.notizen)}</textarea></div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">${editId ? 'Speichern' : 'Anlegen'}</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `);
+}
+
+async function saveAkte(e, editId) {
+  e.preventDefault();
+  const data = {
+    aktennummer: document.getElementById('akte-nummer').value,
+    datum: document.getElementById('akte-datum').value,
+    kunde: document.getElementById('akte-kunde').value,
+    anwalt: document.getElementById('akte-anwalt').value,
+    vorlage: document.getElementById('akte-vorlage').value,
+    zahlungsstatus: document.getElementById('akte-zahlungsstatus').value,
+    vermittler: document.getElementById('akte-vermittler').value,
+    status: document.getElementById('akte-status').value,
+    notizen: document.getElementById('akte-notizen').value
+  };
+  try {
+    if (editId) {
+      await api('/api/akten/' + editId, { method: 'PUT', body: data });
+      showToast('Akte aktualisiert');
+    } else {
+      await api('/api/akten', { method: 'POST', body: data });
+      showToast('Akte angelegt');
+    }
+    closeModal();
+    renderAkten();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteAkte(id, name) {
+  if (!confirm('Akte "' + name + '" wirklich löschen?')) return;
+  try {
+    await api('/api/akten/' + id, { method: 'DELETE' });
+    showToast('Akte gelöscht');
+    renderAkten();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ===== PAGE: Versicherungen (Insurance) =====
+let _insuranceData = [];
+let _insuranceSort = { field: 'name', dir: 'asc' };
+
+async function renderInsurances() {
+  const main = document.getElementById('main-content');
+  main.innerHTML = `
+    <div class="page-header">
+      <h2>Versicherungen</h2>
+      ${isAdmin() ? '<button class="btn btn-primary" onclick="openInsuranceForm()">+ Neue Versicherung</button>' : ''}
+    </div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="filter-bar">
+        <div class="form-group" style="flex:1;min-width:250px;">
+          <label>Suche (Name, Ort, E-Mail, Telefon)</label>
+          <input type="text" id="insurance-search" placeholder="z.B. Allianz" oninput="filterInsurances()">
+        </div>
+        <button class="btn btn-secondary" onclick="document.getElementById('insurance-search').value='';filterInsurances()">Zurücksetzen</button>
+      </div>
+    </div>
+    <div class="card">
+      <div id="insurance-table-content"><div class="loading">Laden...</div></div>
+    </div>
+  `;
+  try {
+    _insuranceData = await api('/api/insurances');
+    renderInsuranceTable();
+  } catch (err) {
+    document.getElementById('insurance-table-content').innerHTML = '<div class="empty-state"><p>Fehler: ' + escapeHtml(err.message) + '</p></div>';
+  }
+}
+
+function filterInsurances() {
+  const term = (document.getElementById('insurance-search')?.value || '').toLowerCase().trim();
+  renderInsuranceTable(term);
+}
+
+function sortInsurances(field) {
+  if (_insuranceSort.field === field) {
+    _insuranceSort.dir = _insuranceSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _insuranceSort.field = field;
+    _insuranceSort.dir = 'asc';
+  }
+  filterInsurances();
+}
+
+function insuranceSortIcon(field) {
+  if (_insuranceSort.field !== field) return '<span style="opacity:0.3;">&#9650;</span>';
+  return _insuranceSort.dir === 'asc' ? '<span>&#9650;</span>' : '<span>&#9660;</span>';
+}
+
+function renderInsuranceTable(searchTerm) {
+  const container = document.getElementById('insurance-table-content');
+  if (!container) return;
+  let data = [..._insuranceData];
+
+  if (searchTerm) {
+    data = data.filter(ins => {
+      const hay = [ins.name, ins.ort, ins.email, ins.email2, ins.telefon1, ins.telefon2, ins.ansprechpartner, ins.plz].join(' ').toLowerCase();
+      return hay.includes(searchTerm);
+    });
+  }
+
+  // Sort
+  data.sort((a, b) => {
+    const f = _insuranceSort.field;
+    let va = (a[f] || '').toString().toLowerCase();
+    let vb = (b[f] || '').toString().toLowerCase();
+    if (f === 'id') { va = a.id; vb = b.id; return _insuranceSort.dir === 'asc' ? va - vb : vb - va; }
+    return _insuranceSort.dir === 'asc' ? va.localeCompare(vb, 'de') : vb.localeCompare(va, 'de');
+  });
+
+  if (data.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>Keine Versicherungen gefunden.</p></div>';
+    return;
+  }
+
+  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap;';
+  container.innerHTML = `
+    <div style="padding:8px 16px;color:var(--text-muted);font-size:13px;">${data.length} Versicherung${data.length !== 1 ? 'en' : ''}</div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr>
+          <th style="${thStyle}" onclick="sortInsurances('id')">Nr. ${insuranceSortIcon('id')}</th>
+          <th style="${thStyle}" onclick="sortInsurances('name')">Name ${insuranceSortIcon('name')}</th>
+          <th style="${thStyle}" onclick="sortInsurances('ort')">Ort ${insuranceSortIcon('ort')}</th>
+          <th style="${thStyle}" onclick="sortInsurances('telefon1')">Telefon ${insuranceSortIcon('telefon1')}</th>
+          <th style="${thStyle}" onclick="sortInsurances('email')">E-Mail ${insuranceSortIcon('email')}</th>
+          <th>Ansprechpartner</th>
+          <th>Aktionen</th>
+        </tr></thead>
+        <tbody>
+          ${data.map(ins => `<tr style="cursor:pointer;" onclick="openInsuranceDetail(${ins.id})">
+            <td>${ins.id}</td>
+            <td><strong>${escapeHtml(ins.name || '')}</strong></td>
+            <td>${escapeHtml(ins.plz ? ins.plz + ' ' + (ins.ort || '') : ins.ort || '')}</td>
+            <td>${escapeHtml(ins.telefon1 || '')}</td>
+            <td>${ins.email ? '<a href="mailto:' + escapeHtml(ins.email) + '" onclick="event.stopPropagation();">' + escapeHtml(ins.email) + '</a>' : ''}</td>
+            <td>${escapeHtml(ins.ansprechpartner || '')}</td>
+            <td>
+              ${isAdmin() ? '<div style="display:flex;gap:6px;white-space:nowrap;"><button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openInsuranceForm(' + ins.id + ')">Bearbeiten</button><button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteInsurance(' + ins.id + ',\'' + escapeHtml(ins.name || '').replace(/'/g, "\\'") + '\')">Löschen</button></div>' : '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();openInsuranceDetail(' + ins.id + ')">Details</button>'}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openInsuranceDetail(id) {
+  const ins = _insuranceData.find(i => i.id === id);
+  if (!ins) return;
+  const fields = [
+    ['Anrede', ins.anrede],
+    ['Name', ins.name],
+    ['Straße', ins.strasse],
+    ['PLZ / Ort', (ins.plz || '') + ' ' + (ins.ort || '')],
+    ['Ansprechpartner', ins.ansprechpartner],
+    ['Telefon 1', ins.telefon1],
+    ['Telefon 2', ins.telefon2],
+    ['Mobil', ins.mobil],
+    ['E-Mail', ins.email],
+    ['E-Mail 2', ins.email2],
+    ['Kommentar', ins.kommentar]
+  ];
+  openModal(ins.name || 'Versicherung', `
+    <table style="width:100%;">
+      ${fields.filter(([, v]) => v && v.trim()).map(([label, val]) => `
+        <tr>
+          <td style="padding:6px 12px 6px 0;font-weight:600;white-space:nowrap;vertical-align:top;color:var(--text-muted);">${escapeHtml(label)}</td>
+          <td style="padding:6px 0;white-space:pre-wrap;">${label.includes('Mail') && val.includes('@') ? '<a href="mailto:' + escapeHtml(val.trim()) + '">' + escapeHtml(val.trim()) + '</a>' : escapeHtml(val)}</td>
+        </tr>
+      `).join('')}
+    </table>
+    <div style="margin-top:20px;display:flex;gap:10px;">
+      ${isAdmin() ? '<button class="btn btn-primary" onclick="closeModal();openInsuranceForm(' + ins.id + ')">Bearbeiten</button>' : ''}
+      <button class="btn btn-secondary" onclick="closeModal()">Schließen</button>
+    </div>
+  `);
+}
+
+async function openInsuranceForm(editId) {
+  let ins = { anrede: 'Versicherungsgesellschaft', name: '', strasse: '', plz: '', ort: '', ansprechpartner: '', telefon1: '', telefon2: '', mobil: '', email: '', email2: '', kommentar: '' };
+  if (editId) {
+    try { ins = await api('/api/insurances/' + editId); } catch { showToast('Versicherung nicht gefunden', 'error'); return; }
+  }
+  openModal(editId ? 'Versicherung bearbeiten' : 'Neue Versicherung', `
+    <form onsubmit="saveInsurance(event, ${editId || 'null'})">
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Stammdaten</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Anrede</label>
+            <select id="ins-anrede">
+              ${['Versicherungsgesellschaft', 'Firma', 'Gericht', ''].map(a => '<option value="' + a + '" ' + (ins.anrede === a ? 'selected' : '') + '>' + (a || '(keine)') + '</option>').join('')}
+            </select>
+          </div>
+          <div class="form-group"><label>Name *</label><input type="text" id="ins-name" value="${escapeHtml(ins.name)}" required></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 90px 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Straße</label><input type="text" id="ins-strasse" value="${escapeHtml(ins.strasse)}"></div>
+          <div class="form-group"><label>PLZ</label><input type="text" id="ins-plz" value="${escapeHtml(ins.plz)}"></div>
+          <div class="form-group"><label>Ort</label><input type="text" id="ins-ort" value="${escapeHtml(ins.ort)}"></div>
+        </div>
+      </div>
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Kontaktdaten</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Ansprechpartner</label><input type="text" id="ins-ansprechpartner" value="${escapeHtml(ins.ansprechpartner)}"></div>
+          <div class="form-group"><label>Mobil</label><input type="text" id="ins-mobil" value="${escapeHtml(ins.mobil)}"></div>
+          <div class="form-group"><label>Telefon 1</label><input type="text" id="ins-telefon1" value="${escapeHtml(ins.telefon1)}"></div>
+          <div class="form-group"><label>Telefon 2</label><input type="text" id="ins-telefon2" value="${escapeHtml(ins.telefon2)}"></div>
+          <div class="form-group"><label>E-Mail</label><input type="email" id="ins-email" value="${escapeHtml(ins.email)}"></div>
+          <div class="form-group"><label>E-Mail 2</label><input type="email" id="ins-email2" value="${escapeHtml(ins.email2)}"></div>
+        </div>
+        <div class="form-group"><label>Kommentar</label><textarea id="ins-kommentar" rows="2">${escapeHtml(ins.kommentar)}</textarea></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">${editId ? 'Speichern' : 'Anlegen'}</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `);
+}
+
+async function saveInsurance(e, editId) {
+  e.preventDefault();
+  const data = {
+    anrede: document.getElementById('ins-anrede').value,
+    name: document.getElementById('ins-name').value,
+    strasse: document.getElementById('ins-strasse').value,
+    plz: document.getElementById('ins-plz').value,
+    ort: document.getElementById('ins-ort').value,
+    ansprechpartner: document.getElementById('ins-ansprechpartner').value,
+    telefon1: document.getElementById('ins-telefon1').value,
+    telefon2: document.getElementById('ins-telefon2').value,
+    mobil: document.getElementById('ins-mobil').value,
+    email: document.getElementById('ins-email').value,
+    email2: document.getElementById('ins-email2').value,
+    kommentar: document.getElementById('ins-kommentar').value
+  };
+  try {
+    if (editId) {
+      await api('/api/insurances/' + editId, { method: 'PUT', body: data });
+      showToast('Versicherung aktualisiert');
+    } else {
+      await api('/api/insurances', { method: 'POST', body: data });
+      showToast('Versicherung angelegt');
+    }
+    closeModal();
+    renderInsurances();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteInsurance(id, name) {
+  if (!confirm('Versicherung "' + name + '" wirklich löschen?')) return;
+  try {
+    await api('/api/insurances/' + id, { method: 'DELETE' });
+    showToast('Versicherung gelöscht');
+    renderInsurances();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 // ===== Initialization =====
 document.addEventListener('DOMContentLoaded', () => {
   initLogin();
   document.addEventListener('mouseup', vacDragEnd);
+  document.addEventListener('mouseup', rentalDragEnd);
 });
