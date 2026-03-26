@@ -1,17 +1,17 @@
 # Project Research Summary
 
-**Project:** Bemo Verwaltungssystem
-**Domain:** Car rental management (Autovermietung) — Unfallersatz / accident replacement vehicles
+**Project:** Bemo Verwaltungssystem — Akten-Modul (v1.0)
+**Domain:** Case file management for insurance-replacement car rental (Unfallersatz)
 **Researched:** 2026-03-26
 **Confidence:** HIGH
 
 ## Executive Summary
 
-Bemo is a single-tenant internal management system for a German car rental company specializing in Unfallersatz (accident replacement vehicles). The system is already in production with most foundational modules complete. The current milestone has two tracks: (1) infrastructure and security hardening of the existing stack, and (2) completing the Akten module — a case file system that tracks the full insurance/legal/rental workflow around each accident claim. The core insight from domain research is that the Akten module is not a simple rental record; it is a legal case container linking a customer, a rental vehicle, a damaged vehicle, an insurer, a lawyer, and a broker — and it carries compliance obligations (GoBD) that require an immutable audit trail from day one.
+The Akten-Modul is not a general-purpose document manager — it is a case file system built around the German Unfallersatz workflow: every rental is tied to an insurance claim, a repair shop, and often a lawyer. An "Akte" is a legal case container that groups all parties (customer, Versicherung, Anwalt, Vermittler) and the rental record into one traceable unit. The existing module scaffold is further along than it appears — a full CRUD API, list page, and form exist in `server.js` and `app.js` — but it has critical gaps: all relational fields are stored as free text with no foreign keys, there is no audit trail, write endpoints have no permission checks, and the detail view is a limited modal rather than a full-page record.
 
-The recommended approach is additive and low-risk: replace the critical sql.js database layer with better-sqlite3 (eliminating data-loss-on-crash risk), upgrade Express to v5, add Zod validation and security middleware, and then build out the Akten module on the improved foundation. The existing Akten scaffold is further along than it appears — CRUD API, list page, and form all exist — but it has architectural gaps: all relational fields (customer, lawyer, broker) are stored as free text with no foreign keys, there is no audit trail, and Aktennummer generation has a race condition. These gaps must be closed before the module handles production case files.
+The recommended approach is strictly additive and zero-new-dependencies: add nullable FK columns alongside the existing text columns (preserving production data), build an enriched `GET /api/akten/:id` that assembles all related entities server-side before responding, and replace the detail modal with a full-page view using the `navigate()` / `renderXDetail()` pattern already established by `renderCustomerDetail`, `renderFuhrparkDetail`, and `renderInvoiceDetail`. All required capabilities — FK migrations, cross-entity data loading, full-page navigation, Stammdaten sub-requests — are achievable with the existing stack. The work is SQL schema additions, two new/modified server.js endpoints, and frontend wiring in `app.js`.
 
-The principal risks are data integrity and security. The sql.js in-memory-flush architecture can lose writes on crash; permission authorization relies entirely on a spoofable HTTP header rather than server-side sessions; and the Akten module currently has no audit log despite operating in a legally sensitive insurance context. The recommended mitigation sequence is: fix the database layer first (foundation), apply security hardening (auth and validation), then build Akten features on the solid base. Skipping the infrastructure phase to move faster on features would leave a production system with known data-loss and authorization vulnerabilities.
+The two non-negotiable requirements that must be in Phase 1 before any UI ships are: (a) an `akten_history` audit table with diff-on-PUT logic, because GoBD requires traceable history on insurance case files from the first production record, and (b) permission guards on all Akten write endpoints, because the current POST/PUT/DELETE handlers have no authorization check whatsoever. Skipping either in favor of speed leaves a legally sensitive module with no accountability trail and open to unauthorized modification by any user role.
 
 ---
 
@@ -19,137 +19,129 @@ The principal risks are data integrity and security. The sql.js in-memory-flush 
 
 ### Recommended Stack
 
-The existing stack (Node 20 / Express 4 / sql.js / PDFKit / AWS S3 / Azure MSAL / Vanilla JS) is sound except for sql.js, which is the highest-priority replacement. All other changes are incremental improvements, not rewrites. No frameworks, ORMs, TypeScript, or build tools should be introduced — the project constraints are firm and the cost/benefit is negative.
+Zero new npm dependencies are required for this milestone. Every capability the Akten-Modul needs is already present or is a pure code pattern. The only gap is a missing `GET /api/rentals/:id` endpoint (only the list endpoint exists), which must be added so the detail page can fetch a single rental's vehicle data. The existing stack is fully locked for this milestone.
 
 **Core technologies:**
-- **better-sqlite3 @ 12.8.0** (replaces sql.js) — native SQLite bindings; eliminates data-loss-on-crash, 2x performance improvement, simpler synchronous API; requires switching Docker base from `node:20-alpine` to `node:20-slim`
-- **express @ 5.2.1** (upgrade from 4.21.0) — async route errors auto-propagate to error middleware; removes dozens of manual try/catch wrappers; low migration risk
-- **zod @ 3.25.x** (new) — schema validation middleware for all write endpoints; prevents malformed data reaching the database; v3 not v4 (v4 is breaking change)
-- **helmet @ 8.x** (new) — one-line HTTP security header hardening; zero performance cost
-- **express-rate-limit @ 7.x** (new) — brute-force protection on auth endpoints; memory store sufficient for single-instance deployment
-- **pdfkit @ 0.18.0** (upgrade from 0.17.2) — minor bump only; no architectural change
+- **sql.js (SQLite WASM) 1.11.0** — schema migration via 9x `ALTER TABLE ADD COLUMN` (additive, no FK constraints in ALTER TABLE); `PRAGMA foreign_keys` behavior verified against official SQLite docs; existing `queryAll` / `queryOne` / `execute` helpers used throughout
+- **Express.js 4.21.0** — new `fetchStammdatenById()` async helper for internal Stammdaten sub-requests (the existing `proxyStammdatenRequest` writes directly to `res` and cannot be reused server-side); enriched async `GET /api/akten/:id` handler
+- **Vanilla JS `api()` + `navigate()`** — `Promise.all` for parallel picker loads in `openAkteForm()`; single enriched API call in `renderAkteDetail()`; no new routing library; no additional client-side libraries
 
-See `.planning/research/STACK.md` for full version matrix and migration notes.
+See [STACK.md](.planning/research/STACK.md) for the complete ALTER TABLE migration code, the `fetchStammdatenById()` helper pattern, and the explicit list of rejected libraries with rationale.
 
 ### Expected Features
 
-The Akten module is the main new deliverable. It models the German Unfallersatz workflow: one Akte represents one accident claim and links the rental vehicle, the damaged vehicle, the insurer (Versicherung), the lawyer (Anwalt), the broker (Vermittler), and the customer into a single case file.
+The Akten module is the primary deliverable. The hard dependency chain is: Customer + Stammdaten entities (exist) → Rental record (basic structure exists) → Akte (case file) → Invoice (exists, needs Akte link). The Akte is the integrating container for all prior work.
 
 **Must have (table stakes):**
-- Akte as case container with all linked parties (customer, Versicherung, Anwalt, Vermittler)
-- Schadensfahrzeug (damaged vehicle) reference — distinct from rental car, needed for claim tracking
-- Kostenübernahme-Typ — who pays (gegnerische Haftpflicht / Kasko / Selbstzahler); determines billing
-- Status workflow per Akte (Neu → In Bearbeitung → Ausgegeben → Reparatur abgeschlossen → Rechnung gestellt → Abgeschlossen)
-- Notes/Verlauf (case history log) with timestamps and author
-- Full Mietvertrag data model (pickup/return times, mileage, fuel level, deposit, driver's license)
-- Rental status states (Angebot / Gebucht / Ausgegeben / Zurückgegeben / Abgerechnet / Storniert)
-- Rental linked to Akte and to Invoice — closes the billing loop
-- Übergabeprotokoll and Rückgabeprotokoll fields (required for damage dispute protection under DE law)
-- PDF generation for rental contract and handover protocol (pdfkit pattern already exists for invoices)
+- Akte as case container linking customer, rental vehicle, Versicherung, Anwalt, Vermittler — the primary deliverable
+- Schadensfahrzeug reference (damaged vehicle distinct from the rental car) — fundamental to Unfallersatz documentation
+- Kostenübernahme-Typ (who pays: gegnerische Haftpflicht / Kasko / Selbstzahler) — determines billing address and rate
+- Unfalldaten block (Unfalldatum, Unfallort, Polizei vor Ort) — required for insurance claim documentation
+- Status workflow per Akte (Neu, In Bearbeitung, Fahrzeug ausgegeben, Reparatur abgeschlossen, Rechnung gestellt, Abgeschlossen)
+- Notes / Verlauf (timestamped case history log with author)
+- Full-page detail view replacing the current read-only modal
+- Search and filter on the Akten list view
+- Audit trail (akten_history table) — legally required under GoBD from day one
 
-**Should have (differentiators vs. manual processes):**
-- Akte → Invoice generation in one click (eliminates re-entry of data)
-- Document attachments per Akte via existing S3 integration (using `akten/{id}/` folder convention)
-- Customer detail view shows linked Akten inline
-- Rental calendar integration (vehicle availability visible alongside rental dates)
-- Audit trail (akten_history table) for GoBD compliance
+**Should have (operational value):**
+- Akte → Invoice link with one-click generation (eliminates re-entry, highest-value integration in the system)
+- Wiedervorlage (follow-up date) field — already in schema plan, low effort
+- Status badges on list rows (pattern already exists on invoices)
+- Customer detail view showing linked Akten inline
 
-**Defer (v2+):**
-- Schadenskarte (SVG damage diagram) — high complexity; photo upload + notes is sufficient for now
-- Cross-module search — build after all modules have stable data models
-- Email notifications on Akte status changes — infrastructure exists (O365), but adds complexity; defer until core workflow is stable
-- Dashboard KPIs — low effort, but not blocking
+**Defer to v2+:**
+- Schadenskarte (SVG damage diagram) — high complexity; photo upload + notes is sufficient for v1
+- Übergabeprotokoll / Rückgabeprotokoll PDF — depends on completing the full rental data model first
+- Cross-module search — build after all module data models are stable
+- Email notifications on Akte status change — infrastructure exists (O365), but adds complexity; not blocking
+- Dashboard KPIs — low effort but not blocking core workflow
 
-See `.planning/research/FEATURES.md` for full feature table with complexity ratings and dependency graph.
+See [FEATURES.md](.planning/research/FEATURES.md) for the full feature dependency graph and the Unfallersatz-specific context.
 
 ### Architecture Approach
 
-The Akten module has a working scaffold (CRUD API at server.js:2647, list page renderAkten(), detail modal, and create/edit form in app.js). The architectural work is connecting the dots: adding FK columns alongside existing text columns (non-breaking migration), replacing free-text inputs with typed selects loaded from Stammdaten API, and reusing the existing S3 upload/list endpoints with an `akten/{id}/` folder convention. No new backend services, no extracted route files, no changes to the monolith pattern.
+The Akten detail page follows the monolithic SPA pattern established by `renderCustomerDetail`, `renderFuhrparkDetail`, and `renderInvoiceDetail` exactly: list row click triggers `navigate('akte-detail', id)`, which calls a single enriched `GET /api/akten/:id`. The backend assembles the full response — local SQLite JOINs for customer and rental, parallel `fetchStammdatenById()` calls for Vermittler and Versicherung — before responding. The frontend renders all data blocks from one JSON response. No multiple frontend API calls, no URL routing, no new client-side libraries.
 
 **Major components:**
-1. **db.js schema migration** — add `customer_id`, `anwalt_id`, `vermittler_id`, `fahrzeug_id` FK columns via ALTER TABLE; add `akten_history` table; keep existing text columns as display fallback for legacy records
-2. **server.js Akten routes** — extend existing GET /api/akten to accept `?customer_id=X` filter; add diff-and-log logic to PUT handler for akten_history; no new route files
-3. **app.js Akten frontend** — upgrade form inputs from free-text to select dropdowns fed from /api/lawyers and /api/vermittler; add customer typeahead; add file attachment widget reusing /api/files endpoints; add history log display in detail view
-4. **S3 folder convention** — `akten/{akte_id}/{timestamp}_{filename}` for per-case file storage; no schema changes needed
+1. **db.js** — 9 new `ALTER TABLE ADD COLUMN` migrations (customer_id, rental_id, vermittler_id, versicherung_id, mietart, wiedervorlage, unfallDatum, unfallOrt, polizei) + new `akten_history` table; UNIQUE constraint on aktennummer
+2. **server.js** — `fetchStammdatenById()` async helper; enriched async `GET /api/akten/:id`; extended `PUT /api/akten/:id` with audit diff-and-insert; `GET /api/rentals/:id` (new); permission guards added to all Akten write endpoints
+3. **app.js** — `renderAkteDetail(id)` full-page renderer (new); extended `openAkteForm()` with parallel picker loads for customer / rental / Vermittler / Versicherung; extended `saveAkte()` with new FK fields; list row click changed from modal to `navigate('akte-detail', id)`; `openAkteDetail()` modal removed after verification
 
-See `.planning/research/ARCHITECTURE.md` for full build order, data flow diagrams, and anti-patterns.
+See [ARCHITECTURE.md](.planning/research/ARCHITECTURE.md) for the 11-step tiered build order, the enriched JSON response shape, anti-patterns with explanations, and the FK migration dual-display strategy.
 
 ### Critical Pitfalls
 
-1. **sql.js data loss on crash** — The in-memory flush model can lose all writes since the last flush if the Node process crashes. Mitigation: migrate to better-sqlite3 before any production data expansion. This is Phase 0, not optional.
+1. **Silent TEXT-to-FK nulling destroys production data** — Any name-matching migration that fails to resolve a text value writes NULL to the FK column; existing Akten become invisible in the UI with no error logged and no rollback possible. Prevention: additive columns only, keep text columns as display fallback forever, verify `SELECT COUNT(*) FROM akten WHERE customer_id IS NULL` post-migration, never batch-migrate by name-matching. (PITFALLS.md: Pitfalls 1, 3)
 
-2. **Duplicate Aktennummer race condition** — Two concurrent creates both read the same last Aktennummer and generate the same next value. The current `akten` table has no UNIQUE constraint on `aktennummer`. Mitigation: add UNIQUE constraint immediately; wrap number generation in an atomic SQLite transaction; auto-generate server-side only.
+2. **No audit trail violates GoBD compliance** — The current PUT handler overwrites with no diff history. The `akten_history` table must exist before the first production Akte write — retrofitting leaves early records with no trail. Prevention: create `akten_history` in Phase 1 schema; diff old vs new on every PUT; make the table append-only (no DELETE endpoint). (PITFALLS.md: Pitfall 4)
 
-3. **Permission header spoofing** — All authorization checks read `x-user-permission` from the HTTP request header, which any client can set freely. Mitigation: implement server-side session validation (JWT or opaque token + sessions table) before deploying new write endpoints. At minimum, add `requirePermission()` middleware that validates against server state, not the request header.
+3. **Zero permission checks on all five existing Akten endpoints** — Any user of any role can currently create, modify, or delete Akten. Any new endpoint added by copying the existing handlers inherits this gap. Prevention: permission check as the first two lines of every write handler; treat as non-negotiable for all new routes. (PITFALLS.md: Pitfall 5)
 
-4. **No audit trail on Akte changes** — Insurance and legal case files require traceable history under GoBD. Mitigation: create `akten_history` table and populate it on every PUT before the module handles any production records. Retrofitting history on existing records is impossible.
+4. **Async race on detail page navigation corrupts DOM** — `navigate()` does not cancel in-flight async calls; callbacks from a previous Akte fetch fire into the next page's DOM. Prevention: `currentAkteId` global guard checked inside every async callback; `Promise.allSettled()` for optional sub-entity fetches so a single null FK (no rental linked yet) does not abort the entire page render. (PITFALLS.md: Pitfalls 6, 7)
 
-5. **Free-text relational fields break referential integrity** — `anwalt`, `vermittler`, `kunde` stored as plain strings. Name changes in Stammdaten silently diverge from Akten records. Mitigation: add FK columns (`anwalt_id`, `vermittler_id`, `customer_id`) via migration before the first production Akte is created; use text fields as display fallback only.
+5. **Aktennummer has no UNIQUE constraint and is race-vulnerable** — Two concurrent POSTs both read the same max Aktennummer and insert the same next value. No database constraint prevents duplicate case numbers. Prevention: add `UNIQUE(aktennummer)` in Phase 1 schema before any number generation logic is written; scope the MAX query to the current year prefix for correct year-boundary reset. (PITFALLS.md: Pitfalls 2, 11)
 
-See `.planning/research/PITFALLS.md` for 13 pitfalls with phase-specific warnings.
+See [PITFALLS.md](.planning/research/PITFALLS.md) for all 15 pitfalls with phase-specific warning tables and prevention code snippets.
 
 ---
 
 ## Implications for Roadmap
 
-### Phase 1: Infrastructure and Security Hardening
-**Rationale:** The existing production system has a data-loss vulnerability (sql.js), a spoofable authorization model (permission headers), and no input validation. Building new features on this foundation compounds all three risks. These changes are also the lowest visible-risk changes — they don't touch the UI at all, but they fix the foundation every subsequent phase depends on.
-**Delivers:** Production-grade database (WAL, durable writes), HTTP security headers, auth endpoint rate limiting, input validation middleware, Express 5 with automatic async error propagation
-**Addresses:** Table stakes reliability; no user-visible features
-**Avoids:** Pitfalls 2 (permission spoofing), data loss from sql.js crash, malformed data writes
-**Stack changes:** better-sqlite3, express@5, zod, helmet, express-rate-limit, pdfkit@0.18.0, node:20-slim Docker base
+Research points to a 3-phase structure driven by two hard constraints: (a) schema and endpoint hardening must come before any UI change saves FK-based data to the database; (b) the detail page depends on the enriched backend endpoint, which depends on the schema having the FK columns.
 
-### Phase 2: Akten Schema and Data Model
-**Rationale:** Before building any Akten UI, the data model must be correct. FK columns must be added before the first production record; the audit trail table must exist from day one; and Aktennummer generation must be atomic. Doing this as a dedicated phase prevents the most dangerous pitfall: building forms on top of a schema that will need breaking changes.
-**Delivers:** Correct akten schema with FK columns, akten_history table, UNIQUE constraint on aktennummer, year-scoped number generation, server-side validation of required fields
-**Addresses:** Core Akten data integrity requirements
-**Avoids:** Pitfalls 1 (duplicate Aktennummern), 3 (free-text relational fields), 4 (no audit trail), 6 (silent ALTER TABLE failure), 7 (year boundary reset), 13 (empty Aktennummer)
-**Uses:** zod validation middleware from Phase 1; better-sqlite3 transaction support
+### Phase 1: Schema Hardening and Endpoint Security
 
-### Phase 3: Akten Module — Core UI
-**Rationale:** With the schema correct and the foundation solid, build out the Akten UI fully. Replace free-text inputs with Stammdaten-backed selects, add customer typeahead, connect the detail view to the history log. The scaffold already exists — this phase finishes it.
-**Delivers:** Fully functional Akten list + create/edit form with typed selects; detail view with audit history; customer detail showing linked Akten inline; search and filter
-**Addresses:** Akte case container, linked parties (Versicherung, Anwalt, Vermittler, customer), Schadensfahrzeug reference, Kostenübernahme-Typ, Notes/Verlauf, status workflow
-**Avoids:** Pitfall 5 (stale global state — reset `_aktenData` at render top), Pitfall 8 (field added to form but not detail/list — three-view checklist), Pitfall 11 (hardcoded status constants diverge)
-**Architecture:** Extend app.js renderAkten/openAkteForm/openAkteDetail; extend GET /api/akten to accept customer_id filter; populate select dropdowns from /api/lawyers and /api/vermittler
+**Rationale:** The schema migration is the highest-risk operation in the milestone. It must run in production before any frontend change can store or display FK-linked data. The permission guards and audit trail cannot be retrofitted — every record written before these exist has no authorization check and no history. These changes produce no user-visible UI change, which minimizes deployment risk.
 
-### Phase 4: Rental Module Completion
-**Rationale:** Akten are the case container; the Mietvertrag is the rental record inside the case. The rental module currently has a basic structure but is missing required fields (mileage, fuel level, deposit, driver's license, pickup/return times) and status states. Completing it unblocks the Übergabeprotokoll and invoice linkage in Phase 5.
-**Delivers:** Full Mietvertrag data model, rental status states, rental linked to Akte, rental linked to Invoice
-**Addresses:** Table stakes rental process features; rental → invoice billing loop
-**Avoids:** Pitfall 8 (three-view checklist), Pitfall 12 (date formatting inconsistency)
+**Delivers:** Production-safe schema with 9 new FK/field columns; `akten_history` table; `UNIQUE(aktennummer)` constraint; permission guards on all Akten write endpoints; server-side validation for required fields (Aktennummer non-empty, status allowed-values list); `ON DELETE SET NULL` on rental_id FK; non-silencing error logging in ALTER TABLE catch blocks.
 
-### Phase 5: Protocols, PDF, and File Attachments
-**Rationale:** Once rental and Akten data models are stable, the paper trail can be closed: handover/return protocols capture the physical state of the vehicle, PDFs provide the printable documents required under DE law, and file attachments allow scanned documents to live alongside the digital record.
-**Delivers:** Übergabeprotokoll and Rückgabeprotokoll fields; PDF generation for rental contract and handover protocol; per-Akte S3 file attachments
-**Addresses:** Physical signature requirement (DE law); damage dispute protection; document management
-**Avoids:** Pitfall 9 (S3 cleanup on Akte delete — implement when attachments are added)
-**Uses:** pdfkit (existing invoice pattern); S3 file API with akten/{id}/ folder convention
+**Addresses:** Audit trail (GoBD), Aktennummer uniqueness, authorization on write endpoints, Unfalldaten fields, Wiedervorlage field, Kostenübernahme-Typ.
 
-### Phase 6: Polish and Cross-Module Integration
-**Rationale:** This phase improves quality across all existing modules and adds the integration features that depend on stable data models everywhere else. Cross-module features (search, calendar integration, dashboard KPIs) cannot be built reliably until the underlying data models are finalized.
-**Delivers:** Search/filter on all list views; consistent empty states; confirmation dialogs; pagination on large lists; rental calendar integration; dashboard KPIs (active rentals, overdue, open invoices); consistent date formatting via `formatDateDE()` helper
-**Addresses:** Differentiator features; operational quality
-**Avoids:** Pitfall 12 (date formatting — centralize formatDateDE here if not earlier)
+**Avoids:** Pitfalls 1 (data loss), 2 (duplicate numbers), 4 (GoBD audit), 5 (permission spoofing), 8 (migration error swallowed), 9 (FK orphan on rental delete), 13 (empty Aktennummer accepted), 14 (invalid status strings accepted).
+
+**Files:** `db.js`, `server.js`.
+
+### Phase 2: Full-Page Detail View and Form Upgrade
+
+**Rationale:** With the schema and endpoints solid, the full-page detail page is a direct application of an established codebase pattern. Three identical implementations exist as templates. The form upgrade replaces free-text inputs with FK-backed dropdowns, ensuring new records are properly linked from the first save. The `renderAkteDetail()` function is the primary user-visible deliverable of the milestone.
+
+**Delivers:** Full-page Akte detail view with enriched data blocks (Kerndaten, Unfalldaten, Kundendaten, Mietvorgang, Vermittler, Versicherung); upgraded form with customer / rental / Vermittler / Versicherung selector dropdowns; read-only `akten_history` display block (admin-visible); enriched `GET /api/akten/:id` backend endpoint; `GET /api/rentals/:id` endpoint (new); `fetchStammdatenById()` helper; list row click navigates to detail page; `openAkteDetail()` modal removed after verification.
+
+**Addresses:** Full-page detail view (table stakes), typed FK dropdowns for new records, legacy text display fallback with "nicht verknüpft" badge, audit history visibility for Verwaltung/Admin roles.
+
+**Avoids:** Pitfalls 6 (stale global / async race), 7 (one failed optional fetch aborts all blocks), 10 (back button exits app — back-link required), 11 (year-boundary sequence reset), 12 (field added to form but not in detail/list — three-view checklist), 15 (date input via `new Date()` causes timezone shift — use `input.value` directly).
+
+**Files:** `server.js` (new and modified endpoints), `app.js` (renderAkteDetail, openAkteForm, saveAkte, navigate switch, list row click).
+
+### Phase 3: Rental Module Completion and Billing Close
+
+**Rationale:** The Akte-to-rental link created in Phase 2 is only as useful as the rental record it points to. The full Mietvertrag data model (mileage, fuel level, deposit, driver's license, pickup/return location) is needed before Übergabe/Rückgabe protocols and PDF generation are meaningful. Completing this phase closes the Unfallersatz paper trail end-to-end.
+
+**Delivers:** Complete rental data model with all required fields; rental status states; Übergabeprotokoll and Rückgabeprotokoll field structure; PDF generation for rental contract and handover protocol (reusing existing pdfkit pattern from invoices); Akte-to-invoice link with one-click generation.
+
+**Addresses:** Mietvertrag (table stakes), Übergabeprotokoll, Rückgabeprotokoll, PDF generation, invoice generation from Akte.
+
+**Defers:** Schadenskarte (SVG damage diagram), cross-module search, email notifications on status change, dashboard KPIs — all v2+.
+
+**Files:** `db.js` (rental schema additions), `server.js` (rental endpoints, PDF templates), `app.js` (rental form, protocol views, PDF trigger, Akte-to-invoice button).
 
 ### Phase Ordering Rationale
 
-- Phase 1 (infrastructure) before everything else: sql.js data loss and permission spoofing are not acceptable foundations for new feature development.
-- Phase 2 (schema) before Phase 3 (UI): FK columns and audit trail must exist before the first production Akte record; retrofitting is impossible.
-- Phase 4 (rentals) after Phase 3 (Akten core): Akte is the parent container; its structure must be defined before the Mietvertrag can be properly linked.
-- Phase 5 (protocols + PDF) after Phase 4 (rental): PDFs and handover protocols require all rental fields to be present and stable.
-- Phase 6 (polish + integration) last: cross-module features (search, calendar, KPIs) depend on stable data models across all modules.
+- Phase 1 before Phase 2: The `openAkteForm()` upgrade in Phase 2 saves FK IDs. If the FK columns do not exist, those saves either crash or write junk data. Schema first is non-negotiable.
+- Phase 2 before Phase 3: The Akte-to-rental link must be working and verified before the full rental data model is expanded. Adding rental fields before the link exists means testing the link against an unstable schema.
+- Defer PDF and protocols to Phase 3: The pdfkit template for a Mietvertrag requires all rental fields to be present. Building the template before the data model is complete means rebuilding it when fields are added.
 
 ### Research Flags
 
-Phases needing deeper research during planning:
-- **Phase 1 (infrastructure):** better-sqlite3 migration from sql.js requires careful API mapping (`db.run()` → `db.prepare().run()`); review all db.js query patterns before writing migration tasks. The Docker base change (Alpine → slim) has deployment implications — verify with existing CI/CD pipeline.
-- **Phase 2 (schema):** Aktennummer year-boundary logic needs a concrete implementation spec; the exact format (AK-YYYY-NNN vs other) should be confirmed with the client before implementation.
-- **Phase 5 (PDF):** The Übergabeprotokoll and Rückgabeprotokoll PDF layouts need design input — what fields, what order, whether a vehicle damage diagram is required or photo-based is acceptable.
+Phases where deeper research is likely needed during planning:
 
-Phases with well-documented patterns (standard, skip research-phase):
-- **Phase 3 (Akten UI):** All patterns are established in the codebase; select dropdowns, typeaheads, and history logs follow existing conventions. Direct implementation from ARCHITECTURE.md.
-- **Phase 6 (polish):** Standard UX improvements; no novel patterns required.
+- **Phase 1 (akten_history design):** Field-level diff vs full-row JSON snapshot — the tradeoffs for query complexity, storage, and GoBD auditability should be confirmed before the table schema is finalized. Brief research-phase pass recommended.
+- **Phase 3 (PDF templates with pdfkit):** The existing invoice PDF template needs to be studied before designing the Mietvertrag and Übergabeprotokoll templates. Layout requirements (signature lines, field order, whether a visual damage diagram space is required) need client input.
+
+Phases with well-documented patterns (skip research-phase):
+
+- **Phase 1 (schema migrations, permission guards, validation):** Fully documented in STACK.md and PITFALLS.md with verified code patterns and exact line numbers from the codebase.
+- **Phase 2 (detail page, form upgrade):** Three identical patterns exist in `app.js`. The architecture is fully specified in ARCHITECTURE.md with code snippets and exact file locations. Direct implementation from the research files.
 
 ---
 
@@ -157,44 +149,43 @@ Phases with well-documented patterns (standard, skip research-phase):
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All recommendations verified against official sources (npm, Express migration guide, sql.js issue tracker, better-sqlite3 discussions). One MEDIUM: pdfkit 0.18.0 — no breaking change notes found, but minor version bump not explicitly verified as non-breaking. |
-| Features | MEDIUM | German market product references (Rentsoft, Remoso) plus DE legal sources for Übergabeprotokoll requirements. No primary Bemo client interviews — feature priority is inferred from domain research + PROJECT.md. The Unfallersatz-specific workflow assumptions should be validated with the client. |
-| Architecture | HIGH | All findings from direct codebase analysis (db.js, server.js, app.js). No inference — confirmed line numbers. The proposed incremental migration pattern matches the existing db.js approach exactly. |
-| Pitfalls | HIGH | Critical pitfalls derived from direct code inspection of known vulnerabilities (sql.js flush pattern, permission header pattern, missing UNIQUE constraint). GoBD audit trail requirement verified against official German tax authority sources. |
+| Stack | HIGH | All findings from direct codebase inspection and official SQLite documentation. Zero new dependencies required — no inference or training-data assumptions used. |
+| Features | MEDIUM | German market sources (Rentsoft, Remoso) are authoritative for DE context but are marketing content. Unfallersatz workflow requirements cross-referenced with DE legal/attorney sources. Feature priority inferred from PROJECT.md and domain research — no direct client interview on this milestone. |
+| Architecture | HIGH | All findings from direct code inspection of `app.js`, `server.js`, `db.js` with confirmed line numbers. No inference — patterns verified against actual existing implementations. |
+| Pitfalls | HIGH | 15 pitfalls derived from direct codebase analysis of known vulnerabilities plus official SQLite and GoBD documentation. One real-world SQLite FK data-loss incident cross-referenced (kyrylo.org 2025). |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **Aktennummer format:** The exact format (e.g., AK-YYYY-NNN) is not confirmed in PROJECT.md. Validate with client before Phase 2 implementation. If the format changes post-implementation, all existing Aktennummern become inconsistently formatted.
-- **Session/auth scope:** PITFALLS.md flags permission header spoofing as critical, but a full session system may be out of scope for this milestone. During Phase 1 planning, explicitly decide: implement JWT sessions now, or document the risk and defer? This decision gates what can safely be deployed.
-- **Übergabeprotokoll design:** The required fields for handover/return protocols are known from domain research, but the PDF layout and whether a visual damage diagram is required must come from the client. Defer Phase 5 scope until this is confirmed.
-- **Stammdaten API FK constraints:** `lawyer_id` and `vermittler_id` reference an external Stammdaten service — they cannot be enforced as SQL foreign keys. The display fallback pattern (show stored text when FK is null) must be designed explicitly in Phase 3 to handle legacy records cleanly.
+- **Schadensfahrzeug storage strategy:** FEATURES.md identifies the damaged vehicle (distinct from the rental car) as a table-stakes field. The research files do not resolve whether to add columns directly to `akten` or create a separate `schadenfahrzeuge` table. This decision belongs in Phase 1 schema design — resolve before writing migrations.
+- **Stammdaten service endpoint paths:** ARCHITECTURE.md references `/api/vermittler/:id` and `/api/insurances/:id` as Stammdaten paths. The exact paths should be verified against the live stammdaten service (port 3010) before writing `fetchStammdatenById()` calls — a mismatched path returns null silently.
+- **Existing production Akten volume:** The additive migration approach was chosen conservatively. Running `SELECT COUNT(*) FROM akten WHERE kunde != ''` on the production DB before Phase 1 would confirm how many existing records will show "nicht verknüpft" after migration, informing whether staff need a guided re-linking workflow.
+- **Aktennummer format:** The exact format (e.g., `AK-2026-001` vs another convention) is not confirmed in PROJECT.md. Validate with the client before Phase 1, because the UNIQUE constraint and year-boundary MAX query depend on the prefix structure.
 
 ---
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- Direct codebase analysis: `db.js` (522 lines), `server.js` (~2763 lines), `public/js/app.js` (~10000 lines), `public/index.html`
+- Direct codebase inspection: `db.js` (full file, 522 lines), `server.js` (~2763 lines), `public/js/app.js` (~10,000 lines) — 2026-03-26
 - `.planning/codebase/ARCHITECTURE.md`, `.planning/codebase/CONCERNS.md`, `.planning/PROJECT.md`
-- [Express v5 release and migration guide](https://expressjs.com/en/guide/migrating-5.html)
-- [better-sqlite3 npm](https://www.npmjs.com/package/better-sqlite3) + [GitHub discussions #1245, #1270](https://github.com/WiseLibs/better-sqlite3/discussions)
-- [sql.js GitHub issue #350 — in-memory flush limitations](https://github.com/sql-js/sql.js/issues/350)
-- [Zod official docs](https://zod.dev/v4) + [npm](https://www.npmjs.com/package/zod)
-- [helmet GitHub](https://github.com/helmetjs/helmet)
-- [GoBD compliance requirements](https://invoicedataextraction.com/blog/gobd-compliance-germany)
+- [SQLite ALTER TABLE — sqlite.org](https://www.sqlite.org/lang_altertable.html) — 12-step table reconstruction procedure
+- [SQLite Foreign Key Support — sqlite.org](https://sqlite.org/foreignkeys.html) — PRAGMA behavior and enforcement rules
+- [Martin Fowler — Data Fetching Patterns in SPAs](https://martinfowler.com/articles/data-fetch-spa.html) — parallel fetch patterns
 
 ### Secondary (MEDIUM confidence)
-- [Rentsoft Autovermietung Features](https://rentsoft.de/branchen/autovermietung/) — German market rental software; DE workflow patterns
-- [Remoso Car Rental Software](https://www.remoso.com/en/software-solutions/car-rental-software) — German market reference
+- [Rentsoft Autovermietung Features — rentsoft.de](https://rentsoft.de/branchen/autovermietung/) — German market rental software; DE workflow patterns
+- [Remoso Car Rental Software — remoso.com](https://www.remoso.com/en/software-solutions/car-rental-software) — German market product comparison
 - [Mietwagen Übergabeprotokoll — billiger-mietwagen.de](https://www.billiger-mietwagen.de/faq/mietwagen-uebergabeprotokoll.html) — protocol field requirements
 - [Unfallrechtler Stuttgart — Mietwagen beim Unfallschaden](https://www.unfallrechtler-stuttgart.de/unfallschaden-a-z/mietwagen/) — DE legal documentation requirements
-- [bussgeldkatalog.org — Mietwagen nach Unfall Ablauf](https://www.bussgeldkatalog.org/mietwagen-nach-unfall/) — Unfallersatz process overview
+- [GoBD explained — fiskaly.com](https://www.fiskaly.com/blog/understanding-gobd-compliant-archiving) — audit trail compliance guidance
+- [GoBD 2025 amendment — aodocs.com](https://www.aodocs.com/blog/gobd-explained-requirements-for-audit-ready-digital-bookkeeping-in-germany-and-beyond/) — current year, relevant to audit trail requirement
+- [Add a Foreign Key to an Existing SQLite Table — database.guide](https://database.guide/add-a-foreign-key-to-an-existing-table-in-sqlite/) — migration pattern example
 
-### Tertiary (LOW confidence)
-- [Adamosoft — Car Rental Management Software Features](https://adamosoft.com/blog/travel-software-development/must-have-features-of-car-rental-management-software/) — US-market marketing content; cross-referenced with DE sources
-- [Record360 — Vehicle Inspection Workflows](https://record360.com/) — US SaaS; general inspection patterns only
+### Tertiary (supporting / corroborating)
+- [Adamosoft — Car Rental Management Software Features](https://adamosoft.com/blog/travel-software-development/must-have-features-of-car-rental-management-software/) — US-market marketing content, cross-referenced with DE sources
+- [SQLite FK migration data-loss incident — kyrylo.org, 2025](https://kyrylo.org/software/2025/09/27/a-mere-add-foreign-key-can-wipe-out-your-whole-rails-sqlite-production-table.html) — real-world incident validating Pitfall 1
 
 ---
 *Research completed: 2026-03-26*

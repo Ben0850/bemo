@@ -1,110 +1,199 @@
-# Domain Pitfalls
+# Domain Pitfalls: Akten-Modul
 
-**Domain:** Car rental management software — Akten module addition + feature polish
+**Domain:** Adding case file management with cross-entity FK references to an existing monolithic SPA
 **Project:** Bemo Verwaltungssystem
 **Researched:** 2026-03-26
-**Confidence:** HIGH (derived from direct codebase analysis + verified against domain research)
+**Confidence:** HIGH — derived from direct codebase analysis (db.js, server.js, app.js) + verified domain research
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause data corruption, security incidents, or rewrites.
+Mistakes that cause data corruption, silent data loss, security incidents, or rewrites.
 
 ---
 
-### Pitfall 1: Duplicate Aktennummer Due to Race Condition
+### Pitfall 1: TEXT-to-FK Migration Silently Orphans Existing Akten Rows
 
-**What goes wrong:** Two users create a new Akte simultaneously. Both read the same "last Aktennummer" (e.g., AK-2026-005) and both generate AK-2026-006. One INSERT succeeds; the second either silently overwrites or crashes with a 500 if a UNIQUE constraint exists — but the `akten` table currently has no UNIQUE constraint on `aktennummer`.
+**What goes wrong:**
+The current `akten` table stores `kunde`, `anwalt`, and `vermittler` as free-text strings (e.g. `"Müller, Hans"`). Migrating to FK columns (`kunde_id INTEGER REFERENCES customers(id)`) requires matching existing text values to integer IDs. SQLite cannot `ADD CONSTRAINT` via `ALTER TABLE` — the only path to add a FK is table recreation (CREATE new, copy with JOIN, drop old, rename). If the JOIN misses a text value (name spelled differently, record deleted, extra whitespace), those rows silently get `NULL` for the FK column. Any query that filters by FK will not return them.
 
-**Why it happens:** The current `generateInvoiceNumber()` pattern (server.js lines 1100-1116) is a read-then-write without an atomic lock. The same pattern is copy-pasted into any new sequential number generation. sql.js is synchronous but Node.js is not — two overlapping HTTP requests can both enter the read-then-increment sequence before either completes the write.
+**Why it happens:**
+The `db.js` migration pattern uses bare `try-catch` blocks that swallow all errors (lines 73–380). The same pattern used to add new columns also swallows a failed data migration. Zero rows migrated produces no exception. The app continues, the Akten appear missing, and no error trace points to the migration.
 
-**Consequences:** Duplicate Aktennummern break filing logic, cause legal ambiguity in case file references, and cannot be corrected without manual data cleanup.
+**Consequences:**
+- Production Akten with non-matching text values become invisible in the UI after migration
+- No rollback: sql.js `save()` overwrites the DB file atomically; once the file is written with NULLs, the prior state is gone unless a manual backup exists
+- Insurance case history disappears with no audit record — GoBD-relevant
 
 **Prevention:**
-- Add `UNIQUE` constraint on `aktennummer` column in `akten` table immediately.
-- Wrap the read + increment + insert in a single SQLite transaction using `db.run('BEGIN'); ... db.run('COMMIT')` so the sequence is atomic.
-- Alternatively, auto-generate the Aktennummer server-side (never trust a client-supplied value for sequential numbers) and apply a retry loop on UNIQUE constraint violation.
+1. Before writing the migration: `SELECT COUNT(*) FROM akten WHERE kunde NOT IN (SELECT last_name || ', ' || first_name FROM customers)` — count unmatched rows. If any exist, the migration must handle them (fallback TEXT column, not NULL FK).
+2. Do the migration in three steps: (a) ADD the new nullable FK column, (b) UPDATE it from a lookup, (c) verify `SELECT COUNT(*) FROM akten WHERE kunde_id IS NULL AND kunde != ''` = 0 before removing the TEXT column.
+3. Never drop the original TEXT columns in the same migration step that populates the FK columns. Keep TEXT as a display fallback: "Anwalt: Dr. Müller [gelöscht]".
+4. Call `save()` to a timestamped backup file immediately before running any migration that touches existing rows.
 
-**Warning signs:** Two Akten with the same number appear in the list; a 500 error appears in server logs during concurrent creates.
+**Detection:**
+`SELECT COUNT(*) FROM akten WHERE kunde_id IS NULL` after migration. If count exceeds the number of Akten that legitimately have no customer, rows were lost.
 
-**Phase:** Address before or during the Akten polish phase, before any multi-user testing.
+**Phase:** Phase 1 (schema migration). Must be resolved before UI development begins touching FK-based data.
 
 ---
 
-### Pitfall 2: Permission Header Spoofing on New Akten Endpoints
+### Pitfall 2: Aktennummer Race Condition Creates Duplicate Case Numbers
 
-**What goes wrong:** All authorization in this app reads `x-user-permission` from the HTTP request header (server.js lines 54-55). Any browser extension, API client, or compromised frontend can set this header to `Admin` and gain full CRUD access to Akten — including creating, editing, or deleting case files.
+**What goes wrong:**
+The `akten` table has no `UNIQUE` constraint on `aktennummer` (confirmed in db.js lines 468–482). The invoice number generator (`generateInvoiceNumber()`, server.js lines 1102–1116) demonstrates the exact same unsafe pattern: read the highest existing number, increment it, insert. Two concurrent POST requests to `/api/akten` that arrive within the same event loop cycle both read the same highest Aktennummer and both generate the same next number. Both inserts succeed because there is no constraint to block the second.
 
-**Why it happens:** The existing admin guard for DELETE (server.js line 52) trusts the header directly. The new `/api/akten` endpoints inherit this pattern. There is no server-side session validation.
+**Why it happens:**
+sql.js is synchronous internally, but Node.js `async` request handlers interleave between `await` points. The sequence "read max → compute next → insert" is not atomic at the HTTP handler level. Under light concurrent usage this is unlikely; under a multi-tab workflow (two staff opening "Neue Akte" simultaneously) it is reproducible.
 
-**Consequences:** Non-admin staff can modify or delete case files. In an insurance/legal context (Versicherungsfälle, Anwaltsakten) this is a serious integrity risk. If audited, forged records cannot be distinguished from legitimate ones.
+**Consequences:**
+- Two Akten with the same Aktennummer in production — discovered by chance, not by any error
+- Insurance correspondence references Aktennummern as case identifiers; duplicates cause real-world confusion
+- GoBD requires unique, traceable identifiers for business process documentation
 
 **Prevention:**
-- Before adding new features, implement session tokens: on login, issue a server-signed JWT or an opaque session ID stored in `sessions` table. Validate on every request — never trust permission headers from clients.
-- At minimum, add a middleware function `requirePermission(level)` that validates against a server-side session store, not a request header. Apply it to all Akten write endpoints.
-- If a full session system is out of scope for this milestone, document the risk explicitly and restrict Akten write endpoints to the same guard pattern — but do not introduce new unauthenticated write paths.
+- Add `UNIQUE(aktennummer)` to the akten table schema immediately in the first db.js migration
+- For auto-generation: scope the MAX query to the current year prefix and wrap in `db.run('BEGIN IMMEDIATE')` / `db.run('COMMIT')` to make the read-increment-insert atomic (SQLite IMMEDIATE lock blocks concurrent writes)
+- Alternatively: generate the number as a timestamp-based string client-side, rely on the UNIQUE constraint to reject the rare collision, and retry once on HTTP 409
 
-**Warning signs:** Any `/api/akten` POST/PUT/DELETE endpoint that only checks `req.headers['x-user-permission']` without session validation.
+**Detection:**
+`SELECT aktennummer, COUNT(*) FROM akten GROUP BY aktennummer HAVING COUNT(*) > 1` — run this on the production DB before and after enabling auto-generation.
 
-**Phase:** Security hardening phase. Must be addressed before deploying any new write endpoints to production.
+**Phase:** Schema fix in Phase 1. Number generation implementation in Phase 2 (new Akte form). The UNIQUE constraint must exist before any number generation logic is written.
 
 ---
 
-### Pitfall 3: Akten as Free-Text Strings Break Relational Integrity
+### Pitfall 3: Akten Stored as Free-Text Breaks Relational Integrity Over Time
 
-**What goes wrong:** The `akten` table stores `kunde`, `anwalt`, and `vermittler` as plain TEXT strings rather than foreign keys to `customers`, `lawyers`, and `vermittler` tables. If a lawyer's name changes, all Akten referencing the old name become stale. Deleting a Vermittler record leaves orphaned Akte entries pointing to a name that no longer resolves. Searching or filtering Akten by Vermittler requires string matching instead of ID lookup.
+**What goes wrong:**
+`akten.kunde`, `akten.anwalt`, `akten.vermittler` are TEXT, not FK references to `customers`, `lawyers`, `vermittler` tables. If a lawyer's display name changes, all existing Akten still show the old name. Deleting a Vermittler leaves Akten with a string that resolves to nothing. The Akten detail view cannot link to the full Stammdaten record for that entity — it would need to search by name, which is ambiguous.
 
-**Why it happens:** The original schema was built quickly as a flat-file list. The same pattern exists in `rentals.customer_name` (TEXT, not FK). It is easy to add and simple to display, but creates a fragile coupling by name rather than ID.
+**Why it happens:**
+The original schema was built as a flat filing list. The same free-text pattern exists in the rentals module. It is the simplest way to create a record quickly but the worst way to maintain relational consistency.
 
-**Consequences:** Divergence between Stammdaten records and Akten records over time. Reports become inaccurate. Renaming a lawyer means manually updating all Akten. Referential integrity cannot be enforced by the database.
+**Consequences:**
+- Reports grouping Akten by Vermittler show split counts when a name is spelled inconsistently (e.g., "Müller GmbH" vs "Mueller GmbH")
+- The new Vermittler-Daten-Block and Versicherungs-Daten-Block on the detail page cannot show current phone/email if data is stored as a text snapshot at creation time
+- Referential integrity cannot be enforced by the database
 
 **Prevention:**
-- Add `anwalt_id INTEGER REFERENCES lawyers(id)`, `vermittler_id INTEGER REFERENCES vermittler(id)`, and `customer_id INTEGER REFERENCES customers(id)` columns via migration.
-- Keep the TEXT columns as display-only cache for cases where the related record was deleted (a common pattern in legal software: "Anwalt: Dr. Müller [gelöscht]").
-- Use FK lookups in the GET endpoint JOIN so names are always current.
+- Add `anwalt_id INTEGER REFERENCES lawyers(id)`, `vermittler_id INTEGER REFERENCES vermittler(id)`, `customer_id INTEGER REFERENCES customers(id)`, `versicherung_id INTEGER REFERENCES versicherungen(id)` columns via migration
+- Keep TEXT columns as read-only display cache for the "entity was deleted" case
+- Forms use `<select>` dropdowns populated from the respective API endpoints, not free-text inputs
 
-**Warning signs:** The form uses a free-text `<input>` for Anwalt/Vermittler/Kunde rather than a `<select>` loaded from the respective API.
+**Warning signs:** The Akte form uses `<input type="text">` for Anwalt, Vermittler, or Kunde rather than a `<select>` populated from `/api/lawyers`, `/api/vermittler`, `/api/customers`.
 
-**Phase:** Akten schema design phase, before the first production record is created. Migrating TEXT to FK after records exist requires data reconciliation.
+**Phase:** Schema design before first production record. Migrating TEXT to FK after records exist requires the data reconciliation process described in Pitfall 1.
 
 ---
 
-### Pitfall 4: No Audit Trail on Case File Changes
+### Pitfall 4: No Audit Trail on Case File Changes (GoBD Exposure)
 
-**What goes wrong:** When an Akte's Zahlungsstatus changes from "offen" to "bezahlt", or when a case is marked "abgeschlossen", there is no record of who made the change or when. For insurance-related rental cases, this creates legal exposure if a dispute arises about when a case was closed or by whom.
+**What goes wrong:**
+When an Akte's `zahlungsstatus` changes from "offen" to "bezahlt" or `status` changes to "abgeschlossen", there is no record of who made the change or when. The current PUT `/api/akten/:id` handler (server.js lines 2676–2684) overwrites all fields with no diff or history write.
 
-**Why it happens:** The entire app has no audit logging (see CONCERNS.md — "Missing Critical Features"). Adding Akten without adding an audit log to that module repeats the same gap in a legally sensitive context.
+**Why it happens:**
+The app has no audit logging anywhere (CONCERNS.md — "Missing Critical Features"). Adding Akten without audit logging repeats this gap in the most legally sensitive module in the system.
 
-**Consequences:** Cannot reconstruct case file history for legal disputes. GoBD requires traceable records for business-process documentation. A user can change the status of a case file and deny it; there is no way to prove otherwise.
+**Consequences:**
+- Cannot reconstruct case file history for disputes with insurers or lawyers
+- GoBD requires traceable records for business-process documentation; changes and who made them must be logged
+- A staff member can change the payment status of a case and deny it; there is no way to demonstrate otherwise
 
 **Prevention:**
-- Add an `akten_history` table: `(id, akte_id, changed_by, changed_at, field_name, old_value, new_value)`.
-- On every PUT to `/api/akten/:id`, diff old vs new values and insert one row per changed field into `akten_history`.
-- Display the history in the Akte detail view (read-only, Verwaltung/Admin only).
+- Add an `akten_history` table: `(id INTEGER PK, akte_id INTEGER, changed_by INTEGER, changed_at TEXT, field_name TEXT, old_value TEXT, new_value TEXT)`
+- In every PUT handler for Akten: diff old vs new values (query before update, compare field by field), insert one row per changed field into `akten_history`
+- Display the history in the detail view (read-only, Verwaltung/Admin visibility)
+- The `akten_history` table must have no DELETE endpoint — append-only
 
-**Warning signs:** The PUT endpoint for Akten modifies the record with no corresponding history INSERT.
+**Warning signs:** The PUT endpoint calls `execute('UPDATE akten SET ...')` with no preceding `INSERT INTO akten_history`.
 
-**Phase:** Akten module implementation. Do not ship production Akten without history from day one — retrofitting history after records exist means the earliest records have no trail.
+**Phase:** Akten module implementation. Do not deploy production Akten writes without history from day one — retrofitting history means the earliest records have no trail.
 
 ---
 
-### Pitfall 5: Expanding the 10,000-Line app.js Without Isolating State
+### Pitfall 5: Permission Header Spoofing on New Akten Write Endpoints
 
-**What goes wrong:** Adding Akten detail views, linked sub-forms, or file attachments to `app.js` without a module boundary causes new `_aktenData` global variables to collide with page-navigation resets. For example: a user opens Akte detail, navigates away, navigates back — but `_aktenData` still contains stale data from the prior session because `renderAkten()` checks for a cached value instead of re-fetching.
+**What goes wrong:**
+All authorization in the app reads `x-user-permission` from the HTTP request header (server.js lines 54–55). The current Akten endpoints (lines 2647–2690) have NO permission check — any request can create, modify, or delete Akten. New endpoints added for the detail page (linking Mietvorgang, updating Wiedervorlage, changing payment status) will inherit the same zero-protection pattern unless a check is explicitly added.
 
-**Why it happens:** The existing pattern (e.g., `let _aktenData = []` at file scope) is already present. Every render function calls `api('/api/akten')` on load, which is fine for the list — but if a detail view stores its own state in a global and that state is not cleared on page change, stale data silently persists.
+**Why it happens:**
+The `server.js` pattern requires inline permission checks at every route. There is no global middleware enforcing authentication. New routes added by copying the current Akten handlers copy a handler that has no permission guard.
 
-**Consequences:** Users see outdated records. Status badges show old values. In a legal case file context, a user might act on stale information (e.g., think a case is still "offen" when it was just closed by a colleague).
+**Consequences:**
+- Any user (including Benutzer-role) can currently modify case files
+- Insurance-case-relevant fields (Zahlungsstatus, Abschlussdatum) can be changed without authorization
+- Without an audit trail (Pitfall 4), unauthorized changes leave no evidence
 
 **Prevention:**
-- Always re-fetch from API on page render — never read from a global cache in render functions without a `stale` check.
-- The existing `navigate(page)` function (app.js line 182: `main.innerHTML = '<div class="loading">Laden...</div>'`) clears the DOM. Use this as the contract: global page-level data variables (`_aktenData`, etc.) should be reset to `[]` at the top of each `renderX()` function, before the await, not after.
-- If adding a detail view that needs local sub-state (attachments list, history), scope it within the detail function's closure, not at file scope.
+- Every new Akten route must include `const permission = req.headers['x-user-permission'];` and the guard as the first lines, before any `req.body` destructuring
+- Read-only endpoints (GET) should be accessible to all authenticated users but verify `x-user-id` is present
+- Do not use the existing `POST /api/akten` handler as a template — it has no permission check
 
-**Warning signs:** `let _aktenXxx = ...` declared at the top of app.js file scope where it could persist across navigations.
+**Warning signs:** Any `/api/akten` POST/PUT/DELETE that does not begin with a permission level check.
 
-**Phase:** Every new page/detail view added during the polish and Akten phases.
+**Phase:** Every phase that adds a new endpoint. Non-negotiable.
+
+---
+
+### Pitfall 6: Stale `_aktenData` Global Causes Wrong Data in Detail Page
+
+**What goes wrong:**
+The existing `renderAkten()` fetches `/api/akten` and stores results in the file-scope variable `_aktenData`. The current `openAkteDetail(id)` reads from this cached array (`_aktenData.find(x => x.id === id)`), not from the server. The new full-page detail view (`navigate('akte-detail', id)`) must fetch fresh data from the server. However, if the user navigates to the detail page via a direct state (e.g., after page load without visiting the list first), `_aktenData` is empty and the find returns `undefined`.
+
+More critically: the detail page will make multiple async API calls (akte, customer, anwalt, versicherung, mietvorgang). If the user navigates away during these calls, all callbacks still fire and render into whatever DOM is currently displayed — overwriting the next page's content with data from the Akte they just left.
+
+**Why it happens:**
+The navigate function (app.js line 159) does not cancel in-flight async operations. The global `currentPage` variable is the only guard available, and it must be checked inside every async callback.
+
+**Consequences:**
+- Blank or wrong data in the detail view depending on navigation timing
+- "Laden..." spinner that never clears if an async callback runs after the page was replaced
+- Status fields showing values from a different Akte than the one displayed
+
+**Prevention:**
+1. Add `let currentAkteId = null;` as a global (mirroring `currentCustomerId`)
+2. Set it at the top of `renderAkteDetail(id)` before any `await`
+3. Inside every async callback in the detail renderer, check `if (currentPage !== 'akte-detail' || currentAkteId !== id) return;` before touching the DOM
+4. The detail page always fetches `GET /api/akten/:id` directly — never reads from `_aktenData`
+5. Reset `_aktenData = []` at the top of `renderAkten()` before the API fetch, so stale data is never served from cache
+
+**Detection:** Navigate to an Akte detail, immediately click back to the list, observe whether the list DOM shows any bleed-through from the detail page's async callbacks.
+
+**Phase:** Phase 2 (detail page). The `renderCustomerDetail` function is the correct model — follow it exactly.
+
+---
+
+### Pitfall 7: Multi-Source Data Loading Fails Entirely When One Entity Is Unset
+
+**What goes wrong:**
+The Akten detail page needs to display 4–5 data blocks: the Akte itself, the linked Kunde, Vermittler, Versicherung, and Mietvorgang. Using sequential `await` calls or `Promise.all()` means a single 404 (e.g., `mietvorgang_id` is NULL because no rental has been linked yet) aborts the entire render. The customer block, accident data, and every other field never render because one optional block returned an error.
+
+**Why it happens:**
+`Promise.all()` rejects on the first rejection. A `mietvorgang_id = NULL` fetch to `/api/vermietung/null` returns 404, which the `api()` helper throws. The outer try-catch catches it and renders a generic error page.
+
+**Consequences:**
+- An Akte without a Mietvorgang assigned yet (a common state at case creation) cannot be viewed at all
+- Users cannot fill in optional fields progressively — the form is locked until every entity is assigned
+- The "Laden..." state persists indefinitely if the error path doesn't explicitly clear it
+
+**Prevention:**
+Use `Promise.allSettled()` for all optional entity loads. The Akte record itself is required — throw if it fails. Every other block is optional — render "nicht zugewiesen" on rejection.
+
+```javascript
+const [akteResult, customerResult, mietResult] = await Promise.allSettled([
+  api(`/api/akten/${id}`),
+  customer_id ? api(`/api/customers/${customer_id}`) : Promise.resolve(null),
+  mietvorgang_id ? api(`/api/vermietung/${mietvorgang_id}`) : Promise.resolve(null)
+]);
+if (akteResult.status === 'rejected') throw akteResult.reason;
+const akte = akteResult.value;
+const kunde = customerResult.status === 'fulfilled' ? customerResult.value : null;
+// render each block independently
+```
+
+**Phase:** Phase 2 (detail page implementation). Establish this pattern before writing any block renderer — retrofitting it after building sequential `await` chains is tedious.
 
 ---
 
@@ -112,150 +201,158 @@ Mistakes that cause data corruption, security incidents, or rewrites.
 
 ---
 
-### Pitfall 6: Adding Schema Columns via try-catch Migration Without Validation
+### Pitfall 8: db.js Migration try-catch Swallows Non-Duplicate-Column Failures
 
-**What goes wrong:** Every new column added to `akten` (e.g., `anwalt_id`, `schadennummer`, `fahrzeug_id`) follows the existing try-catch pattern in db.js: `ALTER TABLE akten ADD COLUMN ... catch(e) {}`. If the `ALTER TABLE` fails for a reason other than "column already exists" (e.g., disk full, lock timeout, syntax error), the error is silently swallowed and the app starts with a missing column — then crashes at runtime when the INSERT tries to use it.
-
-**Prevention:**
-- After each `ALTER TABLE` try-catch, immediately follow with a validation query: `PRAGMA table_info(akten)` and verify the column exists. If it does not, throw a startup error before the app accepts traffic.
-- Alternatively, implement the migration as a separate numbered migration file with a `schema_version` table so each migration runs exactly once and failures are logged, not swallowed.
-
-**Warning signs:** New try-catch block added to db.js without a post-migration schema assertion.
-
-**Phase:** Any schema change in db.js.
-
----
-
-### Pitfall 7: Akten Aktennummer Auto-Increment Ignores Year Boundary
-
-**What goes wrong:** The existing invoice number format is `MMJJJJXXX` (month + year + sequence). If Aktennummern follow a similar year-scoped format (e.g., AK-2026-001), the sequence counter must reset to 001 on January 1st. The current `generateInvoiceNumber()` already queries by prefix to find the last number — but if the year boundary logic is wrong, January will continue from last December's sequence (e.g., AK-2026-...098 becomes AK-2027-099 instead of AK-2027-001).
+**What goes wrong:**
+Every new column added to `akten` follows the existing pattern:
+```javascript
+try { db.run("ALTER TABLE akten ADD COLUMN kunde_id INTEGER"); } catch(e) {}
+```
+The catch is intentional for the "duplicate column name" case (migration already ran). But if the ALTER TABLE fails for any other reason — syntax error, disk full, ORM lock — the identical catch fires and the error is swallowed. The app starts with the column missing, then crashes at runtime when any INSERT or SELECT references it.
 
 **Prevention:**
-- When generating Aktennummern, always scope the MAX query to the current year prefix: `SELECT MAX(CAST(substr(aktennummer, ...) AS INTEGER)) FROM akten WHERE aktennummer LIKE 'AK-2027-%'`.
-- Write a test (even a manual one-time check) that verifies year rollover produces 001.
+Check for the specific error text before swallowing silently:
+```javascript
+try { db.run("ALTER TABLE akten ADD COLUMN kunde_id INTEGER"); }
+catch(e) { if (!e.message.includes('duplicate column name')) console.error('Migration warning (akten):', e.message); }
+```
+Additionally: after each migration block, run `PRAGMA table_info(akten)` and assert the expected column exists before the app accepts any traffic.
 
-**Warning signs:** The sequence query does not filter by year in the WHERE clause.
+**Warning signs:** New `try { db.run('ALTER TABLE akten...') } catch(e) {}` block with no post-assertion and no error logging.
 
-**Phase:** Akten module, number generation logic.
+**Phase:** Every db.js change. Apply to all new Akten columns.
 
 ---
 
-### Pitfall 8: Feature Polish Adds Fields Without Updating All Views
+### Pitfall 9: Mietvorgang FK Orphans Akte When Rental Is Deleted
 
-**What goes wrong:** When polishing an existing module (e.g., adding a `schadennummer` field to Akten or a missing `fahrzeug_id` to Vermietung), the field is added to the form and the database — but the list view, the detail modal, and the PDF export still omit it. Users enter data that then appears invisible in every other context.
-
-**Why it happens:** In a 10,000-line app.js, render functions are far apart. It is easy to update `openAkteForm()` (line ~9725) but forget `openAkteDetail()` (line ~9695) and `renderAktenTable()` (line ~9631). The list table already omits `notizen`; adding a new field without checking all three view contexts repeats this pattern.
+**What goes wrong:**
+Adding `mietvorgang_id INTEGER REFERENCES vermietung(id)` without an ON DELETE strategy means deleting a rental from the Vermietung module silently orphans the Akte. The FK column holds a non-null ID with no corresponding row. The Mietvorgang block renders an error; the Akte itself is still functional but appears broken.
 
 **Prevention:**
-- For every new field, audit three locations before marking done: (1) form (`openXxxForm`), (2) detail view (`openXxxDetail`), (3) list table header + row.
-- If a field is intentionally list-hidden (e.g., long notes), document this in a comment at the form definition.
+Use `ON DELETE SET NULL` on the `mietvorgang_id` FK — not `ON DELETE CASCADE`, which would delete the entire Akte when a rental is cancelled (clearly wrong for a case file). Add an application-layer warning: before deleting a Vermietung entry, check `SELECT COUNT(*) FROM akten WHERE mietvorgang_id = ?` and show a confirmation dialog if count > 0.
 
-**Warning signs:** A field exists in the form but the detail modal shows a static list of fields that was copy-pasted and not updated.
-
-**Phase:** Every polish or field-addition task.
+**Phase:** Phase 1 (schema). The ON DELETE clause must be in the initial column definition — it cannot be added retroactively via ALTER TABLE in SQLite without full table recreation.
 
 ---
 
-### Pitfall 9: S3 File Attachments on Akten Without Cleanup on Delete
+### Pitfall 10: Full-Page Navigation Breaks Browser Back Button Expectation
 
-**What goes wrong:** If Akten eventually support file attachments (uploaded to S3), deleting an Akte via DELETE `/api/akten/:id` does not trigger S3 object deletion. S3 objects accumulate indefinitely, incurring cost and leaving potentially sensitive documents (scanned insurance letters, legal correspondence) in storage after the case is deleted.
-
-**Why it happens:** The existing `execute('DELETE FROM akten WHERE id=?')` has no cascading side-effect for S3. The S3 delete logic exists in server.js for the file module (`/api/files/delete`) but is not called from Akten delete.
+**What goes wrong:**
+The `navigate()` function (app.js line 159) does not interact with `window.history`. The browser back button exits the app entirely, not to the previous in-app page. For the Akte detail page — which has multiple editable fields and a "Wiedervorlage" date — users will instinctively use browser back to return to the Akten list and lose any unsaved form state.
 
 **Prevention:**
-- Before deleting an Akte, query `SELECT * FROM akte_files WHERE akte_id = ?`, call S3 `DeleteObjectCommand` for each key, then delete the DB records.
-- If S3 deletion fails, do not proceed with the DB delete — return an error and surface it to the user.
+Include a visible "Zurück zur Aktenliste" `<a class="back-link" onclick="navigate('akten')">` at the top of the detail page. This is the established pattern (customer-detail uses it). Do not rely on browser back. Consider adding a `beforeunload` guard for unsaved changes if the detail form allows inline editing.
 
-**Warning signs:** DELETE endpoint for Akten calls `execute('DELETE FROM akten...')` without a preceding S3 cleanup step.
-
-**Phase:** If/when file attachments are added to the Akten module.
+**Phase:** Phase 2 (UI). Include the back-link element as part of the page template, not as a post-launch improvement.
 
 ---
 
-### Pitfall 10: Email Notification Silent Failure on Case Status Change
+### Pitfall 11: Aktennummer Year-Boundary Sequence Reset Breaks in January
 
-**What goes wrong:** If status change notifications are added to Akten (e.g., notify the Anwalt when a case is closed), the existing O365 email integration silently swallows failures (server.js lines 1000-1033). The status update succeeds in the database, but the lawyer/intermediary is never notified. No error is shown to the user.
+**What goes wrong:**
+If Aktennummern follow a year-scoped format (e.g., AK-2026-001), the sequence counter must reset to 001 on January 1st. The existing `generateInvoiceNumber()` queries by month-year prefix. A year-scoped Aktennummer generator that queries without a year filter will continue the December sequence into January (AK-2026-098 followed by AK-2027-099 instead of AK-2027-001).
 
 **Prevention:**
-- Follow the fix pattern already documented in CONCERNS.md: return `{ success: true, warning: "Status aktualisiert, aber E-Mail-Benachrichtigung fehlgeschlagen: ..." }` and display it as a toast warning in the frontend.
-- Do not block the status change on email success — email is non-critical; the database write is critical.
+Always scope the MAX query to the current year prefix:
+```sql
+SELECT aktennummer FROM akten
+WHERE aktennummer LIKE 'AK-2027-%'
+ORDER BY aktennummer DESC LIMIT 1
+```
+Write a manual test that verifies the first Akte created on a new year gets sequence 001.
 
-**Warning signs:** Akten PUT endpoint sends email in a try-catch that swallows the error and returns `{ success: true }` unconditionally.
-
-**Phase:** If email notifications are added to Akten status changes.
+**Phase:** Phase 2 (number generation). Verify during implementation, not post-release.
 
 ---
 
-## Minor Pitfalls
+### Pitfall 12: Feature Polish Adds Fields to Form Without Updating List and Detail Views
 
----
+**What goes wrong:**
+When adding new fields to the Akte (Unfalldatum, Unfallort, Polizei vor Ort, Mietart, Wiedervorlage), the field is added to `openAkteForm()` and the database column is added in `db.js` — but `renderAktenTable()` (line 9631) and `openAkteDetail()` (line 9695) are not updated. Users enter data that appears in the edit form but is invisible everywhere else.
 
-### Pitfall 11: Hardcoded AKTEN_STATUS Values Diverge Between Frontend and Backend
-
-**What goes wrong:** `AKTEN_STATUS` and `AKTEN_ZAHLUNGSSTATUS` are defined in app.js (line ~9545). If the backend begins validating status values (which it currently does not), any status value added to the frontend list but not yet deployed on the backend causes a silent 400/500. Conversely, if the backend adds a status that the frontend list doesn't include, it cannot be set from the UI.
+**Why it happens:**
+In a 10,000-line `app.js`, the three render contexts for a single module (form, detail, list row) are 50–200 lines apart from each other. It is easy to update one and forget the others. The existing Akten module already exhibits this: `notizen` is in the form and detail modal but not in the list table.
 
 **Prevention:**
-- Either serve the valid status lists from an API endpoint (`GET /api/akten/config`) so frontend and backend share a single source of truth, or add comments in both locations marking them as paired constants requiring simultaneous updates.
+For every new field, audit three locations before marking the task done:
+1. `openAkteForm()` — form input
+2. Detail page renderer — display block
+3. `renderAktenTable()` — list column header and cell (or document why the field is intentionally list-hidden)
 
-**Warning signs:** `AKTEN_STATUS` array defined only in app.js with no corresponding validation in server.js POST/PUT handler.
-
-**Phase:** Akten module implementation.
+**Phase:** Every field addition in Phases 2–3.
 
 ---
 
-### Pitfall 12: Polish Tasks Introduce Inconsistent Date Formatting
+### Pitfall 13: Empty Aktennummer Accepted by Current POST Endpoint
 
-**What goes wrong:** The app uses `datum.split('-').reverse().join('.')` to display dates in German format (DD.MM.YYYY) in some places (e.g., Akten list, app.js line 9678) and ISO format (YYYY-MM-DD) in others. When polishing existing modules and adding new date fields, a developer copying from one module to another may use the raw ISO value for display, producing an inconsistency visible to users.
+**What goes wrong:**
+The current POST `/api/akten` handler (server.js line 2668) uses `aktennummer || ''` as the fallback — meaning an Akte with no number is a valid database record. The list view displays an empty `<strong></strong>` cell, and search (`aktennummer LIKE ?`) cannot find it. It cannot be meaningfully filed or referenced.
 
 **Prevention:**
-- Extract a `formatDateDE(isoString)` helper function and use it in every date display context. The pattern already exists inline; centralizing it prevents the inconsistency from spreading.
+Add server-side validation: `if (!aktennummer || !aktennummer.trim()) return res.status(400).json({ error: 'Aktennummer ist Pflichtfeld' });`. The frontend `required` attribute exists already — this ensures the server enforces the same rule independently.
 
-**Warning signs:** A date field displayed directly from `row.datum` without the `.split('-').reverse().join('.')` transform.
-
-**Phase:** Every polish task touching date display.
+**Phase:** Phase 1 (endpoint hardening). Should be added as part of the same PR that adds the UNIQUE constraint.
 
 ---
 
-### Pitfall 13: No Input Validation on Akten POST Allows Empty Aktennummern
+### Pitfall 14: Status Constants Defined Only in Frontend, Not Validated in Backend
 
-**What goes wrong:** The current POST `/api/akten` handler (server.js line 2667) does not validate that `aktennummer` is non-empty before inserting. An Akte with `aktennummer = ''` is created silently and appears in the list with no identifier, making it unfindable by search and un-deletable by number.
+**What goes wrong:**
+`AKTEN_STATUS` and `AKTEN_ZAHLUNGSSTATUS` are JavaScript arrays defined only in `app.js`. The backend accepts any string value for `status` and `zahlungsstatus` fields without validating against the known list. A typo or a direct API call can write `"Offen"` (uppercase O) or `"in_bearbeitung"` (underscore) to the database, causing status badges to render with the grey fallback color (unknown status) and filter dropdowns to show zero results for that status.
 
 **Prevention:**
-- Add a validation guard: `if (!aktennummer || !aktennummer.trim()) return res.status(400).json({ error: 'Aktennummer ist Pflichtfeld' })`.
-- Mirror this validation in the frontend form (the `required` attribute on the input already exists — verify the server also enforces it).
+Add an allowed-values check in the POST and PUT handlers:
+```javascript
+const VALID_STATUS = ['offen', 'in Bearbeitung', 'abgeschlossen', 'storniert'];
+if (status && !VALID_STATUS.includes(status)) return res.status(400).json({ error: 'Ungültiger Status' });
+```
+Or serve the valid list from `GET /api/akten/config` so frontend and backend share a single source.
 
-**Warning signs:** POST handler uses `aktennummer || ''` as the fallback, meaning empty string is a valid value.
-
-**Phase:** Akten module hardening.
+**Phase:** Phase 1 (endpoint hardening).
 
 ---
 
-## Phase-Specific Warnings
+### Pitfall 15: Date Fields Converted Through `new Date()` Shift by Timezone
+
+**What goes wrong:**
+Dates stored as `TEXT` in SQLite (`YYYY-MM-DD`) are correct when taken directly from an `<input type="date">` value. If any code path passes the date through `new Date(value).toISOString()`, the ISO string will include a UTC offset: `"2026-04-01T22:00:00.000Z"` for a Berlin user entering April 1st (CEST = UTC+2). Stored as TEXT, this writes `"2026-04-01T22:00:00.000Z"` to the database. Displayed with the existing `datum.split('-').reverse().join('.')` formatter, it shows `"000Z.00.2026-04-01T22"` — a broken display.
+
+**Prevention:**
+Use `document.getElementById('akte-datum').value` directly (returns `"2026-04-01"`). Never pass a date-input value through `new Date()`. The existing helpers `berlinToday()` and `berlinNow()` are for server-side timestamps only.
+
+**Phase:** Phase 2 (form implementation). Applies to every date field: Unfalldatum, Wiedervorlage.
+
+---
+
+## Phase-Specific Warnings Summary
 
 | Phase Topic | Likely Pitfall | Mitigation |
 |-------------|----------------|------------|
-| Akten schema design | Free-text strings for relational data (Pitfall 3) | Add FK columns before first production record |
-| Akten number generation | Race condition duplicates (Pitfall 1) | UNIQUE constraint + atomic transaction |
-| Akten number generation | Year-boundary sequence reset (Pitfall 7) | Scope MAX query to current year prefix |
-| Any new write endpoint | Permission header spoofing (Pitfall 2) | requirePermission() middleware against session, not header |
-| Status/payment changes | No audit trail (Pitfall 4) | `akten_history` table, populated in PUT handler |
-| Feature polish (any module) | Field added to form but not detail/list (Pitfall 8) | Three-view checklist per field |
-| db.js schema migrations | Silent ALTER TABLE failure (Pitfall 6) | Post-migration schema assertion |
-| Page navigation / app.js | Stale global state (Pitfall 5) | Reset module data at top of each render function |
-| Date display in polish tasks | Inconsistent DE/ISO formatting (Pitfall 12) | `formatDateDE()` helper function |
-| Akten POST endpoint | Empty Aktennummer accepted (Pitfall 13) | Server-side non-empty validation |
+| Phase 1: Schema — Add FK columns | Silent ALTER TABLE failure (Pitfall 8) | Log non-duplicate-column errors; assert column exists post-migration |
+| Phase 1: Schema — TEXT-to-FK migration | Unmatched text values become NULL (Pitfall 1) | Pre-count mismatches; keep TEXT fallback; verify NULLs = 0 before dropping |
+| Phase 1: Schema — Aktennummer | No UNIQUE constraint (Pitfall 2) | Add UNIQUE before enabling auto-generation |
+| Phase 1: Schema — Mietvorgang FK | Orphan reference on rental deletion (Pitfall 9) | ON DELETE SET NULL in initial column definition |
+| Phase 1: Endpoints — POST/PUT | Empty Aktennummer accepted (Pitfall 13) | Server-side non-empty validation |
+| Phase 1: Endpoints — all writes | No permission check on existing routes (Pitfall 5) | Add permission guard as first line in every handler |
+| Phase 1: Endpoints — PUT | No audit trail (Pitfall 4) | `akten_history` table; diff and insert on every PUT |
+| Phase 1: Endpoints — status fields | Invalid status strings accepted (Pitfall 14) | Allowed-values validation in POST/PUT |
+| Phase 2: Detail page — navigation | Stale global state, async race (Pitfall 6) | `currentAkteId` guard in every async callback |
+| Phase 2: Detail page — sub-entity loading | One 404 aborts all blocks (Pitfall 7) | `Promise.allSettled()` for optional FKs |
+| Phase 2: Detail page — back button | Browser back exits app (Pitfall 10) | Visible `back-link` in page template |
+| Phase 2: Number generation | Year-boundary sequence not reset (Pitfall 11) | Scope MAX query to current year prefix |
+| Phase 2: Form — date fields | `new Date()` timezone shift corrupts date (Pitfall 15) | Use `input.value` directly |
+| Phase 2–3: Any field addition | Field in form but not in detail/list views (Pitfall 12) | Three-view checklist per field |
+| Phase 3+: Relational integrity over time | Free-text entities diverge from Stammdaten (Pitfall 3) | FK columns with Stammdaten dropdowns in forms |
 
 ---
 
 ## Sources
 
-- Codebase direct analysis: `server.js`, `db.js`, `public/js/app.js` (2026-03-26)
-- `.planning/codebase/CONCERNS.md` — known bugs, fragile areas, security considerations
-- [GoBD 2025 Amendment — E-Invoice Archiving Rules (RTC Suite)](https://rtcsuite.com/germany-clarifies-e-invoice-archiving-rules-gobd-2025-amendment-how-businesses-must-now-store-einvoices/)
-- [GoBD Requirements Germany: Complete Digital Record-Keeping Guide](https://invoicedataextraction.com/blog/gobd-compliance-germany)
-- [SQLite Concurrency and Why You Should Care (HN)](https://news.ycombinator.com/item?id=45781298)
-- [SQLite 4.0 as a Production Database: 2025 Benchmarks and Pitfalls (Markaicode)](https://markaicode.com/sqlite-4-production-database-benchmarks-pitfalls/)
-- [How To Prevent Race Conditions in Database (Medium)](https://medium.com/@doniantoro34/how-to-prevent-race-conditions-in-database-3aac965bf47b)
-- [Global Variables Cause Data Leaks in Node.js Servers (Aikido)](https://www.aikido.dev/code-quality/rules/why-global-variables-cause-data-leaks-in-node-js-servers)
-- [Top 10 Application-Design Mistakes (NN/G)](https://www.nngroup.com/articles/top-10-application-design-mistakes/)
-- Ersatzfahrzeug/Schadenfall domain research: [Leihwagen nach Unfall — autocrashexpert.de](https://www.autocrashexpert.de/leihwagen-nach-unfall/)
+- Direct codebase analysis: `server.js`, `db.js`, `public/js/app.js` — 2026-03-26 (HIGH confidence — primary sources)
+- `.planning/codebase/CONCERNS.md` — known bugs, fragile areas, security considerations (HIGH confidence — internal analysis)
+- [SQLite Foreign Key Support — sqlite.org](https://sqlite.org/foreignkeys.html) (HIGH confidence — official documentation)
+- [A mere add_foreign_key can wipe out your whole Rails+SQLite production table — kyrylo.org, 2025](https://kyrylo.org/software/2025/09/27/a-mere-add-foreign-key-can-wipe-out-your-whole-rails-sqlite-production-table.html) (MEDIUM confidence — real-world incident, directly applicable)
+- [Alembic batch migrations for SQLite — alembic.sqlalchemy.org](https://alembic.sqlalchemy.org/en/latest/batch.html) (HIGH confidence — official docs on SQLite table recreation constraint)
+- [GoBD explained: Requirements for bookkeeping and digital archiving — fiskaly.com](https://www.fiskaly.com/blog/understanding-gobd-compliant-archiving) (MEDIUM confidence — practitioner guide, consistent with known GoBD scope)
+- [GoBD 2025 amendment on e-invoice archiving — aodocs.com](https://www.aodocs.com/blog/gobd-explained-requirements-for-audit-ready-digital-bookkeeping-in-germany-and-beyond/) (MEDIUM confidence — current year, relevant to audit trail requirement)
