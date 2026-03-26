@@ -31,8 +31,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Schema migration: new columns, UNIQUE constraint, akten_history table
-- [ ] 01-02-PLAN.md — Endpoint security: permission guards on POST/PUT/DELETE, audit trail write logic
+- [x] 01-01-PLAN.md — Schema migration: new columns, UNIQUE constraint, akten_history table
+- [x] 01-02-PLAN.md — Endpoint security: permission guards on POST/PUT/DELETE, audit trail write logic
 
 ### Phase 2: Detailseite & Formular
 **Goal**: Jeder Akten-Datensatz hat eine vollständige Verwaltungsseite mit allen verknüpften Entitäten auf einen Blick, und neue Akten werden mit FK-Referenzen angelegt
@@ -44,7 +44,11 @@ Plans:
   3. Die Detailseite zeigt den Vermittler-Datenblock und den Versicherungs-Datenblock — bei nicht verknüpften Datensätzen erscheint ein "Nicht verknüpft"-Badge statt einem Fehler
   4. Das Akten-Formular enthält Dropdown-/Suchfelder für Kunde, Vermittler und Versicherung (statt Freitexteingabe), und eine gespeicherte Akte zeigt die verknüpften Daten korrekt in der Detailseite
   5. Ein Mietvorgang aus dem Vermietkalender kann im Formular ausgewählt und mit der Akte verknüpft werden
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Enriched backend endpoint + full-page detail view with 6 data blocks
+- [ ] 02-02-PLAN.md — Form upgrade with FK pickers for Kunde/Vermittler/Versicherung/Mietvorgang
 
 ### Phase 3: Listen-Optimierung
 **Goal**: Die Akten-Liste ist produktionstauglich mit durchsuchbaren, sortierbaren Spalten die den täglichen Workflow unterstützen
@@ -63,5 +67,5 @@ Phases execute in numeric order: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Schema & Sicherheit | 2/2 | Complete   | 2026-03-26 |
-| 2. Detailseite & Formular | 0/? | Not started | - |
+| 2. Detailseite & Formular | 0/2 | Planning complete | - |
 | 3. Listen-Optimierung | 0/? | Not started | - |
