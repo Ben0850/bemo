@@ -228,6 +228,12 @@ async function getDb() {
   try { db.run("ALTER TABLE fleet_maintenance ADD COLUMN next_maintenance_date TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE fleet_maintenance ADD COLUMN next_maintenance_km INTEGER DEFAULT 0"); } catch(e) {}
 
+  // Migration: fleet_vehicles rental type and assignment
+  try { db.run("ALTER TABLE fleet_vehicles ADD COLUMN rental_type TEXT DEFAULT 'kurz'"); } catch(e) {}
+  try { db.run("ALTER TABLE fleet_vehicles ADD COLUMN assigned_to TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE fleet_vehicles ADD COLUMN assigned_customer_id INTEGER DEFAULT NULL"); } catch(e) {}
+  try { db.run("ALTER TABLE fleet_vehicles ADD COLUMN assigned_contact_person TEXT DEFAULT ''"); } catch(e) {}
+
   db.run(`
     CREATE TABLE IF NOT EXISTS fleet_mileage (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -429,6 +435,20 @@ async function getDb() {
     )
   `);
 
+  // Rentals (Vermietung)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS rentals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_id INTEGER NOT NULL,
+      customer_name TEXT DEFAULT '',
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      notes TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (vehicle_id) REFERENCES fleet_vehicles(id) ON DELETE CASCADE
+    )
+  `);
+
   // Overtime deductions table
   db.run(`
     CREATE TABLE IF NOT EXISTS overtime_deductions (
@@ -440,6 +460,116 @@ async function getDb() {
       created_by INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Akten (case files) table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS akten (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      aktennummer TEXT NOT NULL DEFAULT '',
+      datum TEXT NOT NULL DEFAULT '',
+      kunde TEXT NOT NULL DEFAULT '',
+      anwalt TEXT NOT NULL DEFAULT '',
+      vorlage TEXT NOT NULL DEFAULT '',
+      zahlungsstatus TEXT NOT NULL DEFAULT 'offen',
+      vermittler TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'offen',
+      notizen TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Phase 1 migrations: akten new columns (DB-01, DB-02, DB-03)
+  try { db.run("ALTER TABLE akten ADD COLUMN customer_id INTEGER DEFAULT NULL"); } catch(e) {}
+  try { db.run("ALTER TABLE akten ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
+  try { db.run("ALTER TABLE akten ADD COLUMN versicherung_id INTEGER DEFAULT NULL"); } catch(e) {}
+  try { db.run("ALTER TABLE akten ADD COLUMN rental_id INTEGER DEFAULT NULL"); } catch(e) {}
+  try { db.run("ALTER TABLE akten ADD COLUMN unfalldatum TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE akten ADD COLUMN unfallort TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE akten ADD COLUMN polizei_vor_ort INTEGER DEFAULT 0"); } catch(e) {}
+  try { db.run("ALTER TABLE akten ADD COLUMN mietart TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE akten ADD COLUMN wiedervorlage_datum TEXT DEFAULT ''"); } catch(e) {}
+
+  // Phase 1: Table reconstruction for UNIQUE(aktennummer) constraint (DB-04)
+  try {
+    const idxResult = db.exec("PRAGMA index_list(akten)");
+    // db.exec returns [{ columns: [...], values: [[seq, name, unique, origin, partial], ...] }]
+    // Column index 2 is the 'unique' flag (1 = unique index exists)
+    const uniqueExists = idxResult.length > 0 &&
+      idxResult[0].values.some(row => row[2] === 1);
+
+    if (!uniqueExists) {
+      db.run('PRAGMA foreign_keys = OFF');
+      db.run('BEGIN TRANSACTION');
+
+      db.run(`
+        CREATE TABLE akten_new (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          aktennummer     TEXT NOT NULL DEFAULT '' UNIQUE,
+          datum           TEXT NOT NULL DEFAULT '',
+          kunde           TEXT NOT NULL DEFAULT '',
+          anwalt          TEXT NOT NULL DEFAULT '',
+          vorlage         TEXT NOT NULL DEFAULT '',
+          vermittler      TEXT NOT NULL DEFAULT '',
+          customer_id     INTEGER DEFAULT NULL,
+          vermittler_id   INTEGER DEFAULT NULL,
+          versicherung_id INTEGER DEFAULT NULL,
+          rental_id       INTEGER DEFAULT NULL,
+          unfalldatum     TEXT DEFAULT '',
+          unfallort       TEXT DEFAULT '',
+          polizei_vor_ort INTEGER DEFAULT 0,
+          mietart         TEXT DEFAULT '',
+          wiedervorlage_datum TEXT DEFAULT '',
+          zahlungsstatus  TEXT NOT NULL DEFAULT 'offen',
+          status          TEXT NOT NULL DEFAULT 'offen',
+          notizen         TEXT NOT NULL DEFAULT '',
+          created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      db.run(`
+        INSERT INTO akten_new
+          (id, aktennummer, datum, kunde, anwalt, vorlage, vermittler,
+           customer_id, vermittler_id, versicherung_id, rental_id,
+           unfalldatum, unfallort, polizei_vor_ort,
+           mietart, wiedervorlage_datum,
+           zahlungsstatus, status, notizen, created_at, updated_at)
+        SELECT
+          id, aktennummer, datum, kunde, anwalt, vorlage, vermittler,
+          customer_id, vermittler_id, versicherung_id, rental_id,
+          unfalldatum, unfallort, polizei_vor_ort,
+          mietart, wiedervorlage_datum,
+          zahlungsstatus, status, notizen, created_at, updated_at
+        FROM akten
+      `);
+
+      db.run('DROP TABLE akten');
+      db.run('ALTER TABLE akten_new RENAME TO akten');
+      db.run('COMMIT');
+      db.run('PRAGMA foreign_keys = ON');
+      console.log('akten migration: table reconstructed with UNIQUE(aktennummer) and new columns');
+    }
+  } catch (e) {
+    try { db.run('ROLLBACK'); } catch (_) {}
+    db.run('PRAGMA foreign_keys = ON');
+    console.error('akten migration failed:', e.message);
+  }
+
+  // Phase 1: Audit trail table (DB-05 — GoBD compliance)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS akten_history (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      akte_id     INTEGER NOT NULL,
+      changed_by  INTEGER NOT NULL,
+      changed_at  TEXT NOT NULL,
+      field_name  TEXT NOT NULL,
+      old_value   TEXT,
+      new_value   TEXT,
+      FOREIGN KEY (akte_id) REFERENCES akten(id) ON DELETE CASCADE,
+      FOREIGN KEY (changed_by) REFERENCES staff(id)
     )
   `);
 
