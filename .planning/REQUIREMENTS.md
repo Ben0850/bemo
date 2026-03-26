@@ -7,11 +7,11 @@
 
 ### Schema & Backend
 
-- [ ] **DB-01**: FK-Spalten customer_id, vermittler_id, versicherung_id, rental_id zur akten-Tabelle hinzufügen (neben bestehenden TEXT-Feldern als Fallback)
-- [ ] **DB-02**: Neue Spalten unfalldatum, unfallort, polizei_vor_ort in akten-Tabelle
-- [ ] **DB-03**: Neue Spalten mietart, wiedervorlage_datum in akten-Tabelle
-- [ ] **DB-04**: UNIQUE Constraint auf aktennummer (keine Duplikate)
-- [ ] **DB-05**: akten_history Tabelle für Audit-Trail (wer hat wann was geändert — GoBD)
+- [x] **DB-01**: FK-Spalten customer_id, vermittler_id, versicherung_id, rental_id zur akten-Tabelle hinzufügen (neben bestehenden TEXT-Feldern als Fallback)
+- [x] **DB-02**: Neue Spalten unfalldatum, unfallort, polizei_vor_ort in akten-Tabelle
+- [x] **DB-03**: Neue Spalten mietart, wiedervorlage_datum in akten-Tabelle
+- [x] **DB-04**: UNIQUE Constraint auf aktennummer (keine Duplikate)
+- [x] **DB-05**: akten_history Tabelle für Audit-Trail (wer hat wann was geändert — GoBD)
 
 ### Sicherheit
 
@@ -57,11 +57,11 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DB-01 | Phase 1 | Pending |
-| DB-02 | Phase 1 | Pending |
-| DB-03 | Phase 1 | Pending |
-| DB-04 | Phase 1 | Pending |
-| DB-05 | Phase 1 | Pending |
+| DB-01 | Phase 1 | Complete |
+| DB-02 | Phase 1 | Complete |
+| DB-03 | Phase 1 | Complete |
+| DB-04 | Phase 1 | Complete |
+| DB-05 | Phase 1 | Complete |
 | SEC-01 | Phase 1 | Pending |
 | UI-01 | Phase 2 | Pending |
 | UI-02 | Phase 2 | Pending |
