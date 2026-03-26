@@ -38,8 +38,14 @@ Alle Geschäftsprozesse der Autovermietung — von der Kundenverwaltung über Mi
 
 ### Active
 
-- [ ] Bestehende Features fertigstellen und polieren (Detailansichten, fehlende Felder, UI-Konsistenz)
-- [ ] Akten-Modul für Mietvorgänge (Details noch offen — wird in separatem Meilenstein definiert)
+- [ ] Akten-Modul: Vollständige Akten-Detailseite (Vollseite, kein Modal)
+- [ ] Akten-Modul: Kundendaten-Block mit vollständiger Kontaktanzeige
+- [ ] Akten-Modul: Unfalldaten (Datum, Ort, Polizei Ja/Nein)
+- [ ] Akten-Modul: Mietvorgang-Verknüpfung aus Vermietkalender (Mietbeginn, Mietende, Fahrzeug, Mietdauer)
+- [ ] Akten-Modul: Mietart (Reparaturmiete / Totalschadenmiete)
+- [ ] Akten-Modul: Wiedervorlagedatum
+- [ ] Akten-Modul: Vermittler-Daten-Block
+- [ ] Akten-Modul: Versicherungs-Daten-Block
 
 ### Out of Scope
 
@@ -73,7 +79,23 @@ Alle Geschäftsprozesse der Autovermietung — von der Kundenverwaltung über Mi
 | Vanilla JS statt Framework | Bestehendes System, Umstieg zu aufwendig | ✓ Good |
 | SQLite statt PostgreSQL | Einfaches Setup, ausreichend für aktuelle Nutzerzahl | ✓ Good |
 | Monolithische app.js | Historisch gewachsen, funktioniert | ⚠️ Revisit |
-| Akten-Modul als separater Meilenstein | Umfang noch unklar, erst bestehende Features fertigstellen | — Pending |
+| Akten-Modul als separater Meilenstein | Umfang jetzt definiert, eigener Meilenstein v1.0 | ✓ Good |
+| Akten-Detailseite als Vollseite statt Modal | Umfangreiche Verwaltung braucht Platz, Modal zu eingeschränkt | — Pending |
+| FK-Referenzen statt Freitext für Kunde/Vermittler/Versicherung | Konsistenz mit Stammdaten, keine Divergenz bei Namensänderungen | — Pending |
+
+## Current Milestone: v1.0 Akten-Modul
+
+**Goal:** Akten-Detailseite als vollständige Verwaltungsseite für Mietvorgänge — mit Kundendaten, Unfalldaten, Mietvorgang, Vermittler und Versicherung auf einen Blick.
+
+**Target features:**
+- Vollseiten-Detailansicht für Akten (kein Modal)
+- Kundendaten-Block mit Telefon und E-Mail
+- Unfalldaten: Datum, Ort, Polizei vor Ort (Ja/Nein)
+- Mietvorgang aus Vermietkalender verknüpfen (Mietbeginn, Mietende, Fahrzeug, Mietdauer in Tagen)
+- Mietart: Reparaturmiete oder Totalschadenmiete
+- Wiedervorlagedatum
+- Vermittler-Daten-Block
+- Versicherungs-Daten-Block
 
 ---
-*Last updated: 2026-03-26 after initialization*
+*Last updated: 2026-03-26 after milestone v1.0 start*
