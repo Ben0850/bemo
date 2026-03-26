@@ -2009,10 +2009,11 @@ app.get('/api/fleet-vehicles', (req, res) => {
   const kmSub = `(SELECT km_stand FROM fleet_mileage WHERE fleet_vehicle_id = fv.id ORDER BY record_date DESC, id DESC LIMIT 1)`;
   const maintDateSub = `(SELECT next_maintenance_date FROM fleet_maintenance WHERE fleet_vehicle_id = fv.id AND next_maintenance_date != '' ORDER BY maintenance_date DESC, id DESC LIMIT 1)`;
   const maintKmSub = `(SELECT next_maintenance_km FROM fleet_maintenance WHERE fleet_vehicle_id = fv.id AND next_maintenance_km > 0 ORDER BY maintenance_date DESC, id DESC LIMIT 1)`;
+  const custSub = `CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name ELSE c.first_name || ' ' || c.last_name END`;
   if (permission === 'Admin' || permission === 'Verwaltung') {
-    res.json(queryAll(`SELECT fv.*, s.name as staff_name, ${kmSub} as latest_km, ${maintDateSub} as next_maintenance_date, ${maintKmSub} as next_maintenance_km FROM fleet_vehicles fv LEFT JOIN staff s ON fv.assigned_staff_id = s.id ORDER BY fv.manufacturer, fv.model`));
+    res.json(queryAll(`SELECT fv.*, s.name as staff_name, ${custSub} as assigned_customer_name, ${kmSub} as latest_km, ${maintDateSub} as next_maintenance_date, ${maintKmSub} as next_maintenance_km FROM fleet_vehicles fv LEFT JOIN staff s ON fv.assigned_staff_id = s.id LEFT JOIN customers c ON fv.assigned_customer_id = c.id ORDER BY fv.rental_type, fv.manufacturer, fv.model`));
   } else {
-    res.json(queryAll(`SELECT fv.*, s.name as staff_name, ${kmSub} as latest_km, ${maintDateSub} as next_maintenance_date, ${maintKmSub} as next_maintenance_km FROM fleet_vehicles fv LEFT JOIN staff s ON fv.assigned_staff_id = s.id WHERE fv.assigned_staff_id = ? ORDER BY fv.manufacturer, fv.model`, [Number(userId)]));
+    res.json(queryAll(`SELECT fv.*, s.name as staff_name, ${custSub} as assigned_customer_name, ${kmSub} as latest_km, ${maintDateSub} as next_maintenance_date, ${maintKmSub} as next_maintenance_km FROM fleet_vehicles fv LEFT JOIN staff s ON fv.assigned_staff_id = s.id LEFT JOIN customers c ON fv.assigned_customer_id = c.id WHERE fv.assigned_staff_id = ? ORDER BY fv.rental_type, fv.manufacturer, fv.model`, [Number(userId)]));
   }
 });
 
@@ -2022,7 +2023,8 @@ app.get('/api/fleet-vehicles/:id', (req, res) => {
   const kmSub = `(SELECT km_stand FROM fleet_mileage WHERE fleet_vehicle_id = fv.id ORDER BY record_date DESC, id DESC LIMIT 1)`;
   const maintDateSub = `(SELECT next_maintenance_date FROM fleet_maintenance WHERE fleet_vehicle_id = fv.id AND next_maintenance_date != '' ORDER BY maintenance_date DESC, id DESC LIMIT 1)`;
   const maintKmSub = `(SELECT next_maintenance_km FROM fleet_maintenance WHERE fleet_vehicle_id = fv.id AND next_maintenance_km > 0 ORDER BY maintenance_date DESC, id DESC LIMIT 1)`;
-  const vehicle = queryOne(`SELECT fv.*, s.name as staff_name, ${kmSub} as latest_km, ${maintDateSub} as next_maintenance_date, ${maintKmSub} as next_maintenance_km FROM fleet_vehicles fv LEFT JOIN staff s ON fv.assigned_staff_id = s.id WHERE fv.id = ?`, [Number(req.params.id)]);
+  const custSub2 = `CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name ELSE c.first_name || ' ' || c.last_name END`;
+  const vehicle = queryOne(`SELECT fv.*, s.name as staff_name, ${custSub2} as assigned_customer_name, ${kmSub} as latest_km, ${maintDateSub} as next_maintenance_date, ${maintKmSub} as next_maintenance_km FROM fleet_vehicles fv LEFT JOIN staff s ON fv.assigned_staff_id = s.id LEFT JOIN customers c ON fv.assigned_customer_id = c.id WHERE fv.id = ?`, [Number(req.params.id)]);
   if (!vehicle) return res.status(404).json({ error: 'Fahrzeug nicht gefunden' });
   if (permission !== 'Admin' && permission !== 'Verwaltung' && vehicle.assigned_staff_id !== Number(userId)) {
     return res.status(403).json({ error: 'Kein Zugriff auf dieses Fahrzeug' });
@@ -2035,11 +2037,11 @@ app.get('/api/fleet-vehicles/:id', (req, res) => {
 app.post('/api/fleet-vehicles', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
-  const { manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, assigned_staff_id, notes } = req.body;
+  const { manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, rental_type, assigned_customer_id, assigned_contact_person, notes } = req.body;
   if (!manufacturer || !model) return res.status(400).json({ error: 'Hersteller und Modell sind Pflichtfelder' });
   const result = execute(
-    'INSERT INTO fleet_vehicles (manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, assigned_staff_id, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [manufacturer, model, vehicle_type || '', vin || '', license_plate || '', first_registration || '', next_tuev_date || '', assigned_staff_id || null, notes || '']
+    'INSERT INTO fleet_vehicles (manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, rental_type, assigned_customer_id, assigned_contact_person, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [manufacturer, model, vehicle_type || '', vin || '', license_plate || '', first_registration || '', next_tuev_date || '', rental_type || 'kurz', assigned_customer_id || null, assigned_contact_person || '', notes || '']
   );
   res.json({ id: result.lastId, message: 'Fahrzeug erstellt' });
 });
@@ -2047,11 +2049,11 @@ app.post('/api/fleet-vehicles', (req, res) => {
 app.put('/api/fleet-vehicles/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
-  const { manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, assigned_staff_id, notes } = req.body;
+  const { manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, rental_type, assigned_customer_id, assigned_contact_person, notes } = req.body;
   if (!manufacturer || !model) return res.status(400).json({ error: 'Hersteller und Modell sind Pflichtfelder' });
   execute(
-    'UPDATE fleet_vehicles SET manufacturer=?, model=?, vehicle_type=?, vin=?, license_plate=?, first_registration=?, next_tuev_date=?, assigned_staff_id=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-    [manufacturer, model, vehicle_type || '', vin || '', license_plate || '', first_registration || '', next_tuev_date || '', assigned_staff_id || null, notes || '', Number(req.params.id)]
+    'UPDATE fleet_vehicles SET manufacturer=?, model=?, vehicle_type=?, vin=?, license_plate=?, first_registration=?, next_tuev_date=?, rental_type=?, assigned_customer_id=?, assigned_contact_person=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    [manufacturer, model, vehicle_type || '', vin || '', license_plate || '', first_registration || '', next_tuev_date || '', rental_type || 'kurz', assigned_customer_id || null, assigned_contact_person || '', notes || '', Number(req.params.id)]
   );
   res.json({ message: 'Fahrzeug aktualisiert' });
 });
@@ -2107,6 +2109,48 @@ app.delete('/api/fleet-maintenance/:id', (req, res) => {
 app.delete('/api/fleet-mileage/:id', (req, res) => {
   execute('DELETE FROM fleet_mileage WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'KM-Eintrag gelöscht' });
+});
+
+// ===== RENTALS (Vermietung) =====
+
+app.get('/api/rentals', (req, res) => {
+  const { year } = req.query;
+  let sql = `SELECT r.id, r.vehicle_id, fv.license_plate, fv.manufacturer, fv.model, r.customer_name, r.start_date, r.end_date, r.notes
+    FROM rentals r
+    JOIN fleet_vehicles fv ON r.vehicle_id = fv.id
+    WHERE 1=1`;
+  const params = [];
+  if (year) {
+    sql += ' AND (substr(r.start_date, 1, 4) = ? OR substr(r.end_date, 1, 4) = ?)';
+    params.push(year, year);
+  }
+  sql += ' ORDER BY r.start_date';
+  res.json(queryAll(sql, params));
+});
+
+app.post('/api/rentals', (req, res) => {
+  const { vehicle_id, customer_name, start_date, end_date, notes } = req.body;
+  if (!vehicle_id || !start_date || !end_date) return res.status(400).json({ error: 'Fahrzeug, Start- und Enddatum sind Pflichtfelder' });
+  const result = execute(
+    'INSERT INTO rentals (vehicle_id, customer_name, start_date, end_date, notes) VALUES (?, ?, ?, ?, ?)',
+    [Number(vehicle_id), customer_name || '', start_date, end_date, notes || '']
+  );
+  res.json({ id: result.lastId, message: 'Vermietung erstellt' });
+});
+
+app.put('/api/rentals/:id', (req, res) => {
+  const { vehicle_id, customer_name, start_date, end_date, notes } = req.body;
+  if (!vehicle_id || !start_date || !end_date) return res.status(400).json({ error: 'Fahrzeug, Start- und Enddatum sind Pflichtfelder' });
+  execute(
+    'UPDATE rentals SET vehicle_id=?, customer_name=?, start_date=?, end_date=?, notes=? WHERE id=?',
+    [Number(vehicle_id), customer_name || '', start_date, end_date, notes || '', Number(req.params.id)]
+  );
+  res.json({ message: 'Vermietung aktualisiert' });
+});
+
+app.delete('/api/rentals/:id', (req, res) => {
+  execute('DELETE FROM rentals WHERE id = ?', [Number(req.params.id)]);
+  res.json({ message: 'Vermietung gelöscht' });
 });
 
 // ===== TIME TRACKING =====
@@ -2599,6 +2643,123 @@ app.get('/api/files/test', async (req, res) => {
     res.status(500).json({ status: 'error', message: err.message });
   }
 });
+
+// ===== Akten (Case Files) =====
+app.get('/api/akten', (req, res) => {
+  const { search } = req.query;
+  if (search) {
+    const term = `%${search}%`;
+    res.json(queryAll(
+      `SELECT * FROM akten WHERE aktennummer LIKE ? OR kunde LIKE ? OR anwalt LIKE ? OR vermittler LIKE ? OR status LIKE ? ORDER BY id DESC`,
+      [term, term, term, term, term]
+    ));
+  } else {
+    res.json(queryAll('SELECT * FROM akten ORDER BY id DESC'));
+  }
+});
+
+app.get('/api/akten/:id', (req, res) => {
+  const row = queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  res.json(row);
+});
+
+app.post('/api/akten', (req, res) => {
+  // SEC-01: Permission guard
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const { aktennummer, datum, kunde, anwalt, vorlage, zahlungsstatus, vermittler, status, notizen,
+          customer_id, vermittler_id, versicherung_id, rental_id,
+          unfalldatum, unfallort, polizei_vor_ort, mietart, wiedervorlage_datum } = req.body;
+  if (!aktennummer || !aktennummer.trim()) {
+    return res.status(400).json({ error: 'Aktennummer ist Pflichtfeld' });
+  }
+  const result = execute(
+    `INSERT INTO akten (aktennummer, datum, kunde, anwalt, vorlage, zahlungsstatus, vermittler, status, notizen,
+       customer_id, vermittler_id, versicherung_id, rental_id,
+       unfalldatum, unfallort, polizei_vor_ort, mietart, wiedervorlage_datum)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [aktennummer.trim(), datum || '', kunde || '', anwalt || '', vorlage || '',
+     zahlungsstatus || 'offen', vermittler || '', status || 'offen', notizen || '',
+     customer_id || null, vermittler_id || null, versicherung_id || null, rental_id || null,
+     unfalldatum || '', unfallort || '', polizei_vor_ort ? 1 : 0,
+     mietart || '', wiedervorlage_datum || '']
+  );
+  res.status(201).json(queryOne('SELECT * FROM akten WHERE id = ?', [result.lastId]));
+});
+
+app.put('/api/akten/:id', (req, res) => {
+  const existing = queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  const { aktennummer, datum, kunde, anwalt, vorlage, zahlungsstatus, vermittler, status, notizen } = req.body;
+  execute(
+    `UPDATE akten SET aktennummer=?, datum=?, kunde=?, anwalt=?, vorlage=?, zahlungsstatus=?, vermittler=?, status=?, notizen=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+    [aktennummer || '', datum || '', kunde || '', anwalt || '', vorlage || '', zahlungsstatus || 'offen', vermittler || '', status || 'offen', notizen || '', Number(req.params.id)]
+  );
+  res.json(queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]));
+});
+
+app.delete('/api/akten/:id', (req, res) => {
+  // SEC-01: Permission guard (explicit — global middleware only allows Admin, this adds Verwaltung/Buchhaltung)
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const existing = queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  execute('DELETE FROM akten WHERE id = ?', [Number(req.params.id)]);
+  res.json({ success: true });
+});
+
+// ===== Stammdaten API Proxy =====
+const STAMMDATEN_API_URL = process.env.STAMMDATEN_API_URL || 'http://localhost:3010';
+const http = require('http');
+const https = require('https');
+
+function proxyStammdatenRequest(req, res) {
+  const url = `${STAMMDATEN_API_URL}${req.originalUrl}`;
+  const proto = url.startsWith('https') ? https : http;
+  const options = {
+    method: req.method,
+    headers: { 'Content-Type': 'application/json' }
+  };
+  const proxyReq = proto.request(url, options, proxyRes => {
+    res.status(proxyRes.statusCode);
+    let data = '';
+    proxyRes.on('data', c => data += c);
+    proxyRes.on('end', () => {
+      try { res.json(JSON.parse(data)); } catch { res.send(data); }
+    });
+  });
+  proxyReq.on('error', err => {
+    console.error('Stammdaten API proxy error:', err.message);
+    res.status(502).json({ error: 'Stammdaten API not reachable' });
+  });
+  if (req.body && ['POST', 'PUT'].includes(req.method)) {
+    proxyReq.write(JSON.stringify(req.body));
+  }
+  proxyReq.end();
+}
+
+app.get('/api/insurances', proxyStammdatenRequest);
+app.get('/api/insurances/:id', proxyStammdatenRequest);
+app.post('/api/insurances', proxyStammdatenRequest);
+app.put('/api/insurances/:id', proxyStammdatenRequest);
+app.delete('/api/insurances/:id', proxyStammdatenRequest);
+
+app.get('/api/lawyers', proxyStammdatenRequest);
+app.get('/api/lawyers/:id', proxyStammdatenRequest);
+app.post('/api/lawyers', proxyStammdatenRequest);
+app.put('/api/lawyers/:id', proxyStammdatenRequest);
+app.delete('/api/lawyers/:id', proxyStammdatenRequest);
+
+app.get('/api/vermittler', proxyStammdatenRequest);
+app.get('/api/vermittler/:id', proxyStammdatenRequest);
+app.post('/api/vermittler', proxyStammdatenRequest);
+app.put('/api/vermittler/:id', proxyStammdatenRequest);
+app.delete('/api/vermittler/:id', proxyStammdatenRequest);
 
 // Fallback: serve index.html
 app.get('*', (req, res) => {
