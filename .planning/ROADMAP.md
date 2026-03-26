@@ -28,7 +28,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Die aktennummer-Spalte hat einen UNIQUE-Constraint — ein zweiter INSERT mit derselben Aktennummer wird vom Datenbankfehler abgefangen
   4. Jeder Schreibversuch auf POST/PUT/DELETE /api/akten von einem Benutzer mit der Rolle "Benutzer" wird mit HTTP 403 abgelehnt
   5. Jede PUT-Anfrage auf /api/akten/:id erzeugt einen Eintrag in akten_history mit Nutzer-ID, Zeitstempel und den geänderten Feldern
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Schema migration: new columns, UNIQUE constraint, akten_history table
+- [ ] 01-02-PLAN.md — Endpoint security: permission guards on POST/PUT/DELETE, audit trail write logic
 
 ### Phase 2: Detailseite & Formular
 **Goal**: Jeder Akten-Datensatz hat eine vollständige Verwaltungsseite mit allen verknüpften Entitäten auf einen Blick, und neue Akten werden mit FK-Referenzen angelegt
@@ -58,6 +62,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Schema & Sicherheit | 0/? | Not started | - |
+| 1. Schema & Sicherheit | 0/2 | Planning complete | - |
 | 2. Detailseite & Formular | 0/? | Not started | - |
 | 3. Listen-Optimierung | 0/? | Not started | - |
