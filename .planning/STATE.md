@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: "Completed 01-01-PLAN.md — schema migration complete"
-last_updated: "2026-03-27T10:09:30Z"
+status: unknown
+stopped_at: Completed 01-02-PLAN.md — permission guards and audit trail for akten endpoints
+last_updated: "2026-03-26T23:28:06.611Z"
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State: Bemo Verwaltungssystem
@@ -50,6 +50,7 @@ Plan: 2 of 2 (01-01 complete, 01-02 next)
 *Updated after each plan completion*
 
 ---
+| Phase 01-schema-sicherheit P02 | 2 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -63,6 +64,9 @@ Plan: 2 of 2 (01-01 complete, 01-02 next)
 | ALTER TABLE vor Reconstruction ausführen | Neue Spalten existieren in Quelltabelle bevor INSERT...SELECT läuft | 2026-03-27 |
 | PRAGMA index_list col 2 als Idempotenz-Guard | Zuverlässig nach Neustart, unabhängig von Index-Namen | 2026-03-27 |
 | akten_history append-only (kein DELETE-Endpoint) | GoBD-Konformität erfordert unveränderliches Audit-Log | 2026-03-27 |
+
+- [Phase 01-schema-sicherheit]: Permission guard checks x-user-permission header — roles: Admin, Verwaltung, Buchhaltung (SEC-01)
+- [Phase 01-schema-sicherheit]: Audit diff loop skips fields absent from req.body — supports partial PUT without spurious history rows (DB-05)
 
 ### Existing Akten scaffold
 
@@ -86,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-27
-Stopped at: Completed 01-01-PLAN.md — schema migration, UNIQUE constraint, akten_history table
+Last session: 2026-03-26T23:28:06.606Z
+Stopped at: Completed 01-02-PLAN.md — permission guards and audit trail for akten endpoints
 Resume file: None

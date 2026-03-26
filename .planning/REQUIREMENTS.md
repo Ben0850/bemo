@@ -15,7 +15,7 @@
 
 ### Sicherheit
 
-- [ ] **SEC-01**: Permission-Guards auf allen Akten-Endpoints (POST, PUT, DELETE) — nur Verwaltung/Buchhaltung/Admin dürfen schreiben
+- [x] **SEC-01**: Permission-Guards auf allen Akten-Endpoints (POST, PUT, DELETE) — nur Verwaltung/Buchhaltung/Admin dürfen schreiben
 
 ### Frontend — Detailansicht
 
@@ -62,7 +62,7 @@
 | DB-03 | Phase 1 | Complete |
 | DB-04 | Phase 1 | Complete |
 | DB-05 | Phase 1 | Complete |
-| SEC-01 | Phase 1 | Pending |
+| SEC-01 | Phase 1 | Complete |
 | UI-01 | Phase 2 | Pending |
 | UI-02 | Phase 2 | Pending |
 | UI-03 | Phase 2 | Pending |

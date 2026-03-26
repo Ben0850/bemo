@@ -12,7 +12,7 @@ The Akten-Modul gives Bemo a single, coherent case file for every Unfallersatz r
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Schema & Sicherheit** - FK-Spalten, Audit-Tabelle, UNIQUE-Constraint und Schreibschutz vor jeder UI-Änderung
+- [x] **Phase 1: Schema & Sicherheit** - FK-Spalten, Audit-Tabelle, UNIQUE-Constraint und Schreibschutz vor jeder UI-Änderung (completed 2026-03-26)
 - [ ] **Phase 2: Detailseite & Formular** - Vollseiten-Aktenansicht mit allen Datenblöcken und FK-Dropdowns im Formular
 - [ ] **Phase 3: Listen-Optimierung** - Akten-Liste mit verbesserter Filterung, Sortierung und Spaltenstruktur
 
@@ -62,6 +62,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Schema & Sicherheit | 1/2 | In Progress|  |
+| 1. Schema & Sicherheit | 2/2 | Complete   | 2026-03-26 |
 | 2. Detailseite & Formular | 0/? | Not started | - |
 | 3. Listen-Optimierung | 0/? | Not started | - |
