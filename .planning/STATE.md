@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: Akten-Modul
-current_phase: null
+current_phase: 1
 current_plan: null
-status: defining_requirements
+status: ready_to_plan
 last_updated: "2026-03-26"
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -16,76 +16,80 @@ progress:
 # Project State: Bemo Verwaltungssystem
 
 **Last updated:** 2026-03-26
-**Session:** Milestone v1.0 initialization
+**Session:** Roadmap created for milestone v1.0
 
 ---
 
 ## Project Reference
 
-**Core value:** Alle Geschäftsprozesse der Autovermietung zuverlässig in einem System abbilden.
+See: .planning/PROJECT.md (updated 2026-03-26)
 
-**Current focus:** Akten-Modul — vollständige Verwaltungsseite für Mietvorgänge
+**Core value:** Alle Geschäftsprozesse der Autovermietung zuverlässig in einem System abbilden.
+**Current focus:** Phase 1 — Schema & Sicherheit
 
 ---
 
 ## Current Position
 
-**Current phase:** Not started (defining requirements)
-**Current plan:** —
-**Status:** Defining requirements
+Phase: 1 of 3 (Schema & Sicherheit)
+Plan: 0 of ? in current phase
+Status: Ready to plan
+Last activity: 2026-03-26 — Roadmap erstellt, 16 Requirements auf 3 Phasen verteilt
 
-**Progress:**
+Progress:
 ```
-[          ] Phases not yet defined — roadmap pending
+[          ] 0%
 ```
-
-**Overall:** Milestone v1.0 started, requirements being defined
 
 ---
 
-## Key Decisions
+## Performance Metrics
 
-| Decision | Rationale | Date |
-|----------|-----------|------|
-| Akten-Detailseite als Vollseite | Umfangreiche Verwaltung braucht Platz | 2026-03-26 |
-| Mietvorgang aus Vermietkalender verknüpfen | Daten nicht doppelt erfassen | 2026-03-26 |
+**Velocity:**
+- Total plans completed: 0
+- Average duration: —
+- Total execution time: —
+
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| - | - | - | - |
+
+*Updated after each plan completion*
 
 ---
 
 ## Accumulated Context
 
+### Decisions
+
+| Decision | Rationale | Date |
+|----------|-----------|------|
+| Akten-Detailseite als Vollseite | Umfangreiche Verwaltung braucht Platz | 2026-03-26 |
+| FK-Spalten additiv neben TEXT-Spalten | Kein Datenverlust bei bestehenden Akten | 2026-03-26 |
+| Mietvorgang aus Vermietkalender verknüpfen | Daten nicht doppelt erfassen | 2026-03-26 |
+
 ### Existing Akten scaffold
-- DB table `akten` exists with: id, aktennummer, datum, kunde (TEXT), anwalt (TEXT), vorlage, zahlungsstatus, vermittler (TEXT), status, notizen
-- CRUD API endpoints exist at `/api/akten`
-- Frontend has list view, modal detail, and modal form
-- All relations (kunde, anwalt, vermittler) are free text — no FK references
-- Research flagged: race condition risk on aktennummer, missing audit trail
+- DB table `akten` exists: id, aktennummer, datum, kunde (TEXT), anwalt (TEXT), vorlage, zahlungsstatus, vermittler (TEXT), status, notizen
+- CRUD API at `/api/akten` — alle Write-Endpoints aktuell ohne Permission-Guards
+- Frontend: List + Modal (Detail + Form) — kein Full-Page-View
+- Stammdaten (Vermittler, Anwälte, Versicherungen) über Stammdaten-API Port 3010
 
-### Architecture notes
-- Monolithic SPA: server.js (~2763 lines), app.js (~10000 lines), db.js (~522 lines)
-- Stammdaten (Vermittler, Anwälte, Versicherungen) proxied via Stammdaten-API on port 3010
-- S3 file storage available for document attachments
-- Existing page navigation pattern: `navigate('page-name', id)` → `renderPageName(id)`
+### Pending Todos
 
----
+None yet.
 
-## Blockers
+### Blockers/Concerns
 
-None currently.
+- Aktennummer-Format vor Phase 1 klären (UNIQUE-Constraint und MAX-Query hängen vom Prefix ab)
+- Stammdaten-Service Endpunkt-Pfade auf Port 3010 vor Phase 2 verifizieren
+- Schadensfahrzeug-Speicherstrategie (Spalten in akten vs. eigene Tabelle) vor Phase 1 entscheiden
 
 ---
 
 ## Session Continuity
 
-**Last session:** 2026-03-26
-**Stopped at:** Defining requirements for milestone v1.0
-
-**To resume:**
-1. Read `.planning/PROJECT.md` for milestone goals
-2. Read `.planning/STATE.md` for current position
-3. Continue with requirements definition → roadmap creation
-
----
-
-*State initialized: 2026-03-26*
-*Project: Bemo Verwaltungssystem — Akten-Modul*
+Last session: 2026-03-26
+Stopped at: Roadmap erstellt — bereit für /gsd:plan-phase 1
+Resume file: None
