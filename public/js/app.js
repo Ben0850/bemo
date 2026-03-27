@@ -9550,6 +9550,7 @@ const MIETART_OPTIONS = ['Reparaturmiete', 'Totalschadenmiete'];
 
 let _aktenData = [];
 let _aktenSort = { field: 'id', dir: 'desc' };
+let _aktenFilterState = { search: '', status: '' };
 
 async function renderAkten() {
   const main = document.getElementById('main-content');
@@ -9561,7 +9562,7 @@ async function renderAkten() {
     <div class="card" style="margin-bottom:20px;">
       <div class="filter-bar">
         <div class="form-group" style="flex:1;min-width:250px;">
-          <label>Suche (Aktennr., Kunde, Anwalt, Vermittler)</label>
+          <label>Suche (Aktennr., Kundenname, Status)</label>
           <input type="text" id="akten-search" placeholder="z.B. AK-2026-001" oninput="filterAkten()">
         </div>
         <div class="form-group" style="min-width:150px;">
@@ -9571,13 +9572,6 @@ async function renderAkten() {
             ${AKTEN_STATUS.map(s => '<option value="' + s + '">' + s + '</option>').join('')}
           </select>
         </div>
-        <div class="form-group" style="min-width:150px;">
-          <label>Zahlungsstatus</label>
-          <select id="akten-filter-zahlung" onchange="filterAkten()">
-            <option value="">Alle</option>
-            ${AKTEN_ZAHLUNGSSTATUS.map(s => '<option value="' + s + '">' + s + '</option>').join('')}
-          </select>
-        </div>
         <button class="btn btn-secondary" onclick="clearAktenFilter()">Zurücksetzen</button>
       </div>
     </div>
@@ -9585,6 +9579,11 @@ async function renderAkten() {
       <div id="akten-table-content"><div class="loading">Laden...</div></div>
     </div>
   `;
+  // Restore persisted filter state
+  const _sEl = document.getElementById('akten-search');
+  const _stEl = document.getElementById('akten-filter-status');
+  if (_sEl) _sEl.value = _aktenFilterState.search;
+  if (_stEl) _stEl.value = _aktenFilterState.status;
   try {
     _aktenData = await api('/api/akten');
     renderAktenTable();
@@ -9594,9 +9593,9 @@ async function renderAkten() {
 }
 
 function clearAktenFilter() {
+  _aktenFilterState = { search: '', status: '' };
   const s = document.getElementById('akten-search'); if (s) s.value = '';
   const st = document.getElementById('akten-filter-status'); if (st) st.value = '';
-  const z = document.getElementById('akten-filter-zahlung'); if (z) z.value = '';
   filterAkten();
 }
 
@@ -9631,6 +9630,16 @@ function aktenZahlungBadge(status) {
   return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:#fff;background:' + bg + ';">' + escapeHtml(status) + '</span>';
 }
 
+function aktenWiedervorlageBadge(datum) {
+  if (!datum) return '<span style="color:var(--text-muted);">-</span>';
+  const d = datum.split('-').reverse().join('.');
+  const isOverdue = new Date(datum) < new Date(new Date().toDateString());
+  if (isOverdue) {
+    return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:#fff;background:#ef4444;">' + escapeHtml(d) + '</span>';
+  }
+  return escapeHtml(d);
+}
+
 function renderAktenTable() {
   const container = document.getElementById('akten-table-content');
   if (!container) return;
@@ -9638,19 +9647,23 @@ function renderAktenTable() {
 
   const searchTerm = (document.getElementById('akten-search')?.value || '').toLowerCase().trim();
   const statusFilter = document.getElementById('akten-filter-status')?.value || '';
-  const zahlungFilter = document.getElementById('akten-filter-zahlung')?.value || '';
+  _aktenFilterState = { search: searchTerm, status: statusFilter };
 
   if (searchTerm) {
-    data = data.filter(a => [a.aktennummer, a.kunde, a.anwalt, a.vermittler].join(' ').toLowerCase().includes(searchTerm));
+    data = data.filter(a => {
+      const name = (a.customer_name || a.kunde || '').toLowerCase();
+      return (a.aktennummer || '').toLowerCase().includes(searchTerm)
+        || name.includes(searchTerm)
+        || (a.status || '').toLowerCase().includes(searchTerm);
+    });
   }
   if (statusFilter) data = data.filter(a => a.status === statusFilter);
-  if (zahlungFilter) data = data.filter(a => a.zahlungsstatus === zahlungFilter);
 
   data.sort((a, b) => {
     const f = _aktenSort.field;
+    if (f === 'id') { return _aktenSort.dir === 'asc' ? a.id - b.id : b.id - a.id; }
     let va = (a[f] || '').toString().toLowerCase();
     let vb = (b[f] || '').toString().toLowerCase();
-    if (f === 'id') { return _aktenSort.dir === 'asc' ? a.id - b.id : b.id - a.id; }
     return _aktenSort.dir === 'asc' ? va.localeCompare(vb, 'de') : vb.localeCompare(va, 'de');
   });
 
@@ -9666,27 +9679,21 @@ function renderAktenTable() {
       <table>
         <thead><tr>
           <th style="${thStyle}" onclick="sortAkten('aktennummer')">Aktennr. ${aktenSortIcon('aktennummer')}</th>
-          <th style="${thStyle}" onclick="sortAkten('datum')">vom ${aktenSortIcon('datum')}</th>
-          <th style="${thStyle}" onclick="sortAkten('kunde')">Kunde ${aktenSortIcon('kunde')}</th>
-          <th style="${thStyle}" onclick="sortAkten('anwalt')">Anwalt ${aktenSortIcon('anwalt')}</th>
-          <th style="${thStyle}" onclick="sortAkten('vorlage')">Vorlage ${aktenSortIcon('vorlage')}</th>
-          <th style="${thStyle}" onclick="sortAkten('zahlungsstatus')">Zahlungsstatus ${aktenSortIcon('zahlungsstatus')}</th>
-          <th style="${thStyle}" onclick="sortAkten('vermittler')">Vermittler ${aktenSortIcon('vermittler')}</th>
+          <th style="${thStyle}" onclick="sortAkten('customer_name')">Kunde ${aktenSortIcon('customer_name')}</th>
+          <th style="${thStyle}" onclick="sortAkten('mietart')">Mietart ${aktenSortIcon('mietart')}</th>
           <th style="${thStyle}" onclick="sortAkten('status')">Status ${aktenSortIcon('status')}</th>
+          <th style="${thStyle}" onclick="sortAkten('wiedervorlage_datum')">Wiedervorlage ${aktenSortIcon('wiedervorlage_datum')}</th>
           <th>Aktionen</th>
         </tr></thead>
         <tbody>
           ${data.map(a => `<tr style="cursor:pointer;" onclick="navigate('akte-detail', ${a.id})">
             <td><strong>${escapeHtml(a.aktennummer || '')}</strong></td>
-            <td>${a.datum ? escapeHtml(a.datum.split('-').reverse().join('.')) : ''}</td>
-            <td>${escapeHtml(a.kunde || '')}</td>
-            <td>${escapeHtml(a.anwalt || '')}</td>
-            <td>${escapeHtml(a.vorlage || '')}</td>
-            <td>${aktenZahlungBadge(a.zahlungsstatus)}</td>
-            <td>${escapeHtml(a.vermittler || '')}</td>
+            <td>${escapeHtml(a.customer_name || a.kunde || '')}</td>
+            <td>${escapeHtml(a.mietart || '')}</td>
             <td>${aktenStatusBadge(a.status)}</td>
+            <td>${aktenWiedervorlageBadge(a.wiedervorlage_datum)}</td>
             <td>
-              ${isAdmin() ? '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openAkteForm(' + a.id + ')">Bearbeiten</button> <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteAkte(' + a.id + ',\'' + escapeHtml(a.aktennummer || '').replace(/'/g, "\\'") + '\')">Löschen</button>' : '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();navigate(\'akte-detail\', ' + a.id + ')">Details</button>'}
+              ${isAdmin() ? '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openAkteForm(' + a.id + ')">Bearbeiten</button> <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteAkte(' + a.id + ',\'' + escapeHtml(a.aktennummer || '').replace(/\'/g, "\\'") + '\')">Löschen</button>' : '<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();navigate(\'akte-detail\', ' + a.id + ')">Details</button>'}
             </td>
           </tr>`).join('')}
         </tbody>
