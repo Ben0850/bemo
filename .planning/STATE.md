@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: complete
+status: unknown
 stopped_at: Completed 03-01-PLAN.md — Akten-Liste 5 Spalten, customer_name JOIN, Filter-Persistenz
-last_updated: "2026-03-27T00:21:31.632Z"
+last_updated: "2026-03-27T00:24:41.640Z"
 progress:
   total_phases: 3
   completed_phases: 3
