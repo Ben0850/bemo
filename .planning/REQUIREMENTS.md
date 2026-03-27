@@ -29,8 +29,8 @@
 
 ### Frontend — Formular & Liste
 
-- [ ] **UI-08**: Akten-Formular mit Dropdown/Suche für Kunde, Vermittler, Versicherung (statt Freitext)
-- [ ] **UI-09**: Mietvorgang aus Vermietkalender verknüpfen (Auswahl bestehender Mietvorgänge)
+- [x] **UI-08**: Akten-Formular mit Dropdown/Suche für Kunde, Vermittler, Versicherung (statt Freitext)
+- [x] **UI-09**: Mietvorgang aus Vermietkalender verknüpfen (Auswahl bestehender Mietvorgänge)
 - [ ] **UI-10**: Akten-Liste: Spalten, Filter und Sortierung verbessern
 
 ## v2.0 Requirements
@@ -70,8 +70,8 @@
 | UI-05 | Phase 2 | Complete |
 | UI-06 | Phase 2 | Complete |
 | UI-07 | Phase 2 | Complete |
-| UI-08 | Phase 2 | Pending |
-| UI-09 | Phase 2 | Pending |
+| UI-08 | Phase 2 | Complete |
+| UI-09 | Phase 2 | Complete |
 | UI-10 | Phase 3 | Pending |
 
 **Coverage:**

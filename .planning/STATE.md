@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-01-PLAN.md — enriched Akten detail endpoint and full-page view
-last_updated: "2026-03-27T00:00:22.763Z"
+stopped_at: Completed 02-02-PLAN.md — upgraded Akten form with FK pickers and new accident/rental fields
+last_updated: "2026-03-27T00:05:13.647Z"
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State: Bemo Verwaltungssystem
@@ -52,6 +52,7 @@ Plan: 2 of 2
 ---
 | Phase 01-schema-sicherheit P02 | 2 | 2 tasks | 1 files |
 | Phase 02-detailseite-formular P01 | 2 | 2 tasks | 2 files |
+| Phase 02-detailseite-formular P02 | 2 | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,9 @@ Plan: 2 of 2
 - [Phase 01-schema-sicherheit]: Audit diff loop skips fields absent from req.body — supports partial PUT without spurious history rows (DB-05)
 - [Phase 02-detailseite-formular]: fetchStammdatenById helper inserted after STAMMDATEN_API_URL consts — all dependencies defined at call time
 - [Phase 02-detailseite-formular]: Legacy text fields shown with amber badge to distinguish pre-FK data from linked Stammdaten records
+- [Phase 02-detailseite-formular]: Vermittler/Versicherung use full-list select (small lists), Kunde uses live search (large list)
+- [Phase 02-detailseite-formular]: Legacy kunde/vermittler text fields set to empty on save — FK fields are source of truth for new records
+- [Phase 02-detailseite-formular]: After-save navigation: currentAkteId && editId routes to detail page, else to list
 
 ### Existing Akten scaffold
 
@@ -93,6 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-27T00:00:22.759Z
-Stopped at: Completed 02-01-PLAN.md — enriched Akten detail endpoint and full-page view
+Last session: 2026-03-27T00:05:13.644Z
+Stopped at: Completed 02-02-PLAN.md — upgraded Akten form with FK pickers and new accident/rental fields
 Resume file: None
