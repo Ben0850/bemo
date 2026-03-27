@@ -2647,14 +2647,21 @@ app.get('/api/files/test', async (req, res) => {
 // ===== Akten (Case Files) =====
 app.get('/api/akten', (req, res) => {
   const { search } = req.query;
+  const base = `
+    SELECT a.*,
+      CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name
+           ELSE c.last_name || ', ' || c.first_name END as customer_name
+    FROM akten a
+    LEFT JOIN customers c ON a.customer_id = c.id
+  `;
   if (search) {
     const term = `%${search}%`;
     res.json(queryAll(
-      `SELECT * FROM akten WHERE aktennummer LIKE ? OR kunde LIKE ? OR anwalt LIKE ? OR vermittler LIKE ? OR status LIKE ? ORDER BY id DESC`,
+      base + ` WHERE a.aktennummer LIKE ? OR a.kunde LIKE ? OR a.anwalt LIKE ? OR a.vermittler LIKE ? OR a.status LIKE ? ORDER BY a.id DESC`,
       [term, term, term, term, term]
     ));
   } else {
-    res.json(queryAll('SELECT * FROM akten ORDER BY id DESC'));
+    res.json(queryAll(base + ' ORDER BY a.id DESC'));
   }
 });
 
