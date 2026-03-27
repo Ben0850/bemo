@@ -57,7 +57,10 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. Die Akten-Liste zeigt relevante Spalten (z. B. Aktennummer, Kunde, Mietart, Status, Wiedervorlage) und lässt sich nach jeder Spalte sortieren
   2. Die Liste kann nach Aktennummer, Kundenname oder Status gefiltert werden, und der Filter überlebt eine Seitennavigation (zurück von Detailansicht zur Liste)
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 03-01-PLAN.md — Akten-Liste: neue Spaltenstruktur (Aktennr./Kunde/Mietart/Status/Wiedervorlage), Filter-Persistenz und customer_name JOIN im Backend
 
 ## Progress
 
@@ -68,4 +71,4 @@ Phases execute in numeric order: 1 → 2 → 3
 |-------|----------------|--------|-----------|
 | 1. Schema & Sicherheit | 2/2 | Complete   | 2026-03-26 |
 | 2. Detailseite & Formular | 2/2 | Complete   | 2026-03-27 |
-| 3. Listen-Optimierung | 0/? | Not started | - |
+| 3. Listen-Optimierung | 0/1 | Not started | - |
