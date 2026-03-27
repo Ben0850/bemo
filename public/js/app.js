@@ -9546,6 +9546,7 @@ async function deleteVermittler(id, name) {
 // ===== PAGE: Akten (Case Files) =====
 const AKTEN_STATUS = ['offen', 'in Bearbeitung', 'abgeschlossen', 'storniert'];
 const AKTEN_ZAHLUNGSSTATUS = ['offen', 'teilweise bezahlt', 'bezahlt', 'Mahnung', 'storniert'];
+const MIETART_OPTIONS = ['Reparaturmiete', 'Totalschadenmiete'];
 
 let _aktenData = [];
 let _aktenSort = { field: 'id', dir: 'desc' };
@@ -9893,22 +9894,100 @@ function openAkteDetail(id) {
 }
 
 async function openAkteForm(editId) {
-  let a = { aktennummer: '', datum: '', kunde: '', anwalt: '', vorlage: '', zahlungsstatus: 'offen', vermittler: '', status: 'offen', notizen: '' };
-  if (editId) {
-    try { a = await api('/api/akten/' + editId); } catch { showToast('Akte nicht gefunden', 'error'); return; }
+  let a = {
+    aktennummer: '', datum: '', kunde: '', anwalt: '', vorlage: '',
+    zahlungsstatus: 'offen', vermittler: '', status: 'offen', notizen: '',
+    customer_id: null, vermittler_id: null, versicherung_id: null, rental_id: null,
+    unfalldatum: '', unfallort: '', polizei_vor_ort: 0, mietart: '', wiedervorlage_datum: ''
+  };
+  let vermittlerList = [], versicherungen = [], rentals = [];
+
+  try {
+    const results = await Promise.all([
+      api('/api/vermittler'),
+      api('/api/insurances'),
+      api('/api/rentals')
+    ]);
+    vermittlerList = results[0] || [];
+    versicherungen = results[1] || [];
+    rentals = results[2] || [];
+    if (editId) a = await api('/api/akten/' + editId);
+  } catch (err) {
+    showToast('Fehler beim Laden der Formulardaten', 'error');
+    return;
   }
+
+  // Pre-compute customer display name for edit mode
+  let customerDisplayText = '';
+  if (a.customer && a.customer_id) {
+    const c = a.customer;
+    customerDisplayText = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt')
+      ? (c.company_name || '') : `${c.last_name || ''}, ${c.first_name || ''}`;
+  }
+
   openModal(editId ? 'Akte bearbeiten' : 'Neue Akte', `
     <form onsubmit="saveAkte(event, ${editId || 'null'})">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div class="form-group"><label>Aktennummer *</label><input type="text" id="akte-nummer" value="${escapeHtml(a.aktennummer)}" required></div>
         <div class="form-group"><label>Datum</label><input type="date" id="akte-datum" value="${escapeHtml(a.datum)}"></div>
       </div>
-      <div class="form-group"><label>Kunde</label><input type="text" id="akte-kunde" value="${escapeHtml(a.kunde)}"></div>
+
+      <div class="form-group" style="position:relative;">
+        <label>Kunde suchen</label>
+        <input type="text" id="akte-customer-search" placeholder="Name oder Firma eingeben..."
+          oninput="searchAkteCustomer()" autocomplete="off"
+          ${a.customer_id ? 'style="display:none;"' : ''}>
+        <div class="search-dropdown" id="akte-customer-dropdown"></div>
+      </div>
+      <div id="akte-customer-selected" style="${a.customer_id ? '' : 'display:none;'}margin-bottom:16px;">
+        ${a.customer_id ? '<div class="search-selected"><span>' + escapeHtml(customerDisplayText) + '</span><button class="btn btn-sm btn-secondary" type="button" onclick="clearAkteCustomer()">\u00c4ndern</button></div>' : ''}
+      </div>
+      <input type="hidden" id="akte-customer-id" value="${a.customer_id || ''}">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group"><label>Vermittler</label>
+          <select id="akte-vermittler-id">
+            <option value="">\u2014 kein Vermittler \u2014</option>
+            ${vermittlerList.map(v => '<option value="' + v.id + '" ' + (a.vermittler_id == v.id ? 'selected' : '') + '>' + escapeHtml(v.name || '') + '</option>').join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>Versicherung</label>
+          <select id="akte-versicherung-id">
+            <option value="">\u2014 keine Versicherung \u2014</option>
+            ${versicherungen.map(ins => '<option value="' + ins.id + '" ' + (a.versicherung_id == ins.id ? 'selected' : '') + '>' + escapeHtml(ins.name || '') + '</option>').join('')}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group"><label>Mietvorgang</label>
+        <select id="akte-rental-id">
+          <option value="">\u2014 kein Mietvorgang \u2014</option>
+          ${rentals.map(r => '<option value="' + r.id + '" ' + (a.rental_id == r.id ? 'selected' : '') + '>' + escapeHtml(r.license_plate || '') + ' ' + escapeHtml((r.manufacturer || '') + ' ' + (r.model || '')) + ' \u00b7 ' + (r.start_date ? formatDate(r.start_date) : '') + '\u2013' + (r.end_date ? formatDate(r.end_date) : '') + (r.customer_name ? ' \u00b7 ' + escapeHtml(r.customer_name) : '') + '</option>').join('')}
+        </select>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group"><label>Unfalldatum</label><input type="date" id="akte-unfalldatum" value="${escapeHtml(a.unfalldatum)}"></div>
+        <div class="form-group"><label>Unfallort</label><input type="text" id="akte-unfallort" value="${escapeHtml(a.unfallort)}" placeholder="z.B. Aachen, B1"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group" style="display:flex;align-items:center;gap:8px;padding-top:22px;">
+          <input type="checkbox" id="akte-polizei" ${a.polizei_vor_ort ? 'checked' : ''} style="width:auto;margin:0;">
+          <label for="akte-polizei" style="margin:0;cursor:pointer;">Polizei vor Ort</label>
+        </div>
+        <div class="form-group"><label>Mietart</label>
+          <select id="akte-mietart">
+            <option value="">\u2014 keine \u2014</option>
+            ${MIETART_OPTIONS.map(m => '<option value="' + m + '" ' + (a.mietart === m ? 'selected' : '') + '>' + m + '</option>').join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Wiedervorlagedatum</label><input type="date" id="akte-wiedervorlage-datum" value="${escapeHtml(a.wiedervorlage_datum)}"></div>
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div class="form-group"><label>Anwalt</label><input type="text" id="akte-anwalt" value="${escapeHtml(a.anwalt)}"></div>
-        <div class="form-group"><label>Vermittler</label><input type="text" id="akte-vermittler" value="${escapeHtml(a.vermittler)}"></div>
+        <div class="form-group"><label>Vorlage</label><input type="text" id="akte-vorlage" value="${escapeHtml(a.vorlage)}"></div>
       </div>
-      <div class="form-group"><label>Vorlage</label><input type="text" id="akte-vorlage" value="${escapeHtml(a.vorlage)}"></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div class="form-group"><label>Zahlungsstatus</label>
           <select id="akte-zahlungsstatus">
@@ -9927,7 +10006,47 @@ async function openAkteForm(editId) {
         <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
       </div>
     </form>
-  `);
+  `, 'modal-wide');
+}
+
+async function searchAkteCustomer() {
+  const term = document.getElementById('akte-customer-search').value.trim();
+  const dropdown = document.getElementById('akte-customer-dropdown');
+  if (term.length < 2) { dropdown.style.display = 'none'; return; }
+  try {
+    const customers = await api(`/api/customers?search=${encodeURIComponent(term)}`);
+    if (customers.length === 0) {
+      dropdown.innerHTML = '<div class="search-dropdown-item" style="color:var(--text-muted);">Keine Kunden gefunden</div>';
+    } else {
+      dropdown.innerHTML = customers.slice(0, 10).map(c => {
+        const name = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt')
+          ? c.company_name : `${c.last_name}, ${c.first_name}`;
+        const sub = c.city ? ` \u2014 ${c.city}` : '';
+        return `<div class="search-dropdown-item" onclick="selectAkteCustomer(${c.id}, '${escapeHtml(name + sub)}')">${escapeHtml(name + sub)}</div>`;
+      }).join('');
+    }
+    dropdown.style.display = 'block';
+  } catch { dropdown.style.display = 'none'; }
+}
+
+function selectAkteCustomer(id, displayName) {
+  document.getElementById('akte-customer-id').value = id;
+  document.getElementById('akte-customer-dropdown').style.display = 'none';
+  document.getElementById('akte-customer-search').style.display = 'none';
+  document.getElementById('akte-customer-selected').style.display = '';
+  document.getElementById('akte-customer-selected').innerHTML = `
+    <div class="search-selected">
+      <span>${escapeHtml(displayName)}</span>
+      <button class="btn btn-sm btn-secondary" type="button" onclick="clearAkteCustomer()">\u00c4ndern</button>
+    </div>`;
+}
+
+function clearAkteCustomer() {
+  document.getElementById('akte-customer-id').value = '';
+  document.getElementById('akte-customer-search').value = '';
+  document.getElementById('akte-customer-search').style.display = '';
+  document.getElementById('akte-customer-selected').style.display = 'none';
+  document.getElementById('akte-customer-search').focus();
 }
 
 async function saveAkte(e, editId) {
@@ -9935,13 +10054,26 @@ async function saveAkte(e, editId) {
   const data = {
     aktennummer: document.getElementById('akte-nummer').value,
     datum: document.getElementById('akte-datum').value,
-    kunde: document.getElementById('akte-kunde').value,
+    zahlungsstatus: document.getElementById('akte-zahlungsstatus').value,
+    status: document.getElementById('akte-status').value,
+    notizen: document.getElementById('akte-notizen').value,
     anwalt: document.getElementById('akte-anwalt').value,
     vorlage: document.getElementById('akte-vorlage').value,
-    zahlungsstatus: document.getElementById('akte-zahlungsstatus').value,
-    vermittler: document.getElementById('akte-vermittler').value,
-    status: document.getElementById('akte-status').value,
-    notizen: document.getElementById('akte-notizen').value
+    // Legacy text fields preserved for backwards compat
+    kunde: '',
+    vermittler: '',
+    // FK fields
+    customer_id: Number(document.getElementById('akte-customer-id').value) || null,
+    vermittler_id: Number(document.getElementById('akte-vermittler-id').value) || null,
+    versicherung_id: Number(document.getElementById('akte-versicherung-id').value) || null,
+    rental_id: Number(document.getElementById('akte-rental-id').value) || null,
+    // Unfall fields
+    unfalldatum: document.getElementById('akte-unfalldatum').value,
+    unfallort: document.getElementById('akte-unfallort').value,
+    polizei_vor_ort: document.getElementById('akte-polizei').checked ? 1 : 0,
+    // Miet fields
+    mietart: document.getElementById('akte-mietart').value,
+    wiedervorlage_datum: document.getElementById('akte-wiedervorlage-datum').value
   };
   try {
     if (editId) {
@@ -9952,7 +10084,13 @@ async function saveAkte(e, editId) {
       showToast('Akte angelegt');
     }
     closeModal();
-    renderAkten();
+    // Navigate back to detail page if editing from detail, otherwise to list
+    if (currentAkteId && editId) {
+      renderAkteDetail(currentAkteId);
+    } else {
+      currentAkteId = null;
+      renderAkten();
+    }
   } catch (err) {
     showToast(err.message, 'error');
   }
