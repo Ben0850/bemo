@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Schema & Sicherheit** - FK-Spalten, Audit-Tabelle, UNIQUE-Constraint und Schreibschutz vor jeder UI-Änderung (completed 2026-03-26)
 - [x] **Phase 2: Detailseite & Formular** - Vollseiten-Aktenansicht mit allen Datenblöcken und FK-Dropdowns im Formular (completed 2026-03-27)
-- [ ] **Phase 3: Listen-Optimierung** - Akten-Liste mit verbesserter Filterung, Sortierung und Spaltenstruktur
+- [x] **Phase 3: Listen-Optimierung** - Akten-Liste mit verbesserter Filterung, Sortierung und Spaltenstruktur (completed 2026-03-27)
 
 ## Phase Details
 
@@ -71,4 +71,4 @@ Phases execute in numeric order: 1 → 2 → 3
 |-------|----------------|--------|-----------|
 | 1. Schema & Sicherheit | 2/2 | Complete   | 2026-03-26 |
 | 2. Detailseite & Formular | 2/2 | Complete   | 2026-03-27 |
-| 3. Listen-Optimierung | 0/1 | Not started | - |
+| 3. Listen-Optimierung | 1/1 | Complete   | 2026-03-27 |

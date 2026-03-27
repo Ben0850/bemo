@@ -31,7 +31,7 @@
 
 - [x] **UI-08**: Akten-Formular mit Dropdown/Suche für Kunde, Vermittler, Versicherung (statt Freitext)
 - [x] **UI-09**: Mietvorgang aus Vermietkalender verknüpfen (Auswahl bestehender Mietvorgänge)
-- [ ] **UI-10**: Akten-Liste: Spalten, Filter und Sortierung verbessern
+- [x] **UI-10**: Akten-Liste: Spalten, Filter und Sortierung verbessern
 
 ## v2.0 Requirements
 
@@ -72,7 +72,7 @@
 | UI-07 | Phase 2 | Complete |
 | UI-08 | Phase 2 | Complete |
 | UI-09 | Phase 2 | Complete |
-| UI-10 | Phase 3 | Pending |
+| UI-10 | Phase 3 | Complete |
 
 **Coverage:**
 - v1.0 requirements: 16 total

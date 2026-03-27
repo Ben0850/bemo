@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-stopped_at: Completed 02-02-PLAN.md — upgraded Akten form with FK pickers and new accident/rental fields
-last_updated: "2026-03-27T00:09:04.184Z"
+status: complete
+stopped_at: Completed 03-01-PLAN.md — Akten-Liste 5 Spalten, customer_name JOIN, Filter-Persistenz
+last_updated: "2026-03-27T00:21:31.632Z"
 progress:
   total_phases: 3
-  completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  completed_phases: 3
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # Project State: Bemo Verwaltungssystem
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Alle Geschäftsprozesse der Autovermietung zuverlässig in einem System abbilden.
-**Current focus:** Phase 02 — detailseite-formular
+**Current focus:** Phase 03 — listen-optimierung
 
 ---
 
 ## Current Position
 
-Phase: 02 (detailseite-formular) — EXECUTING
-Plan: 2 of 2
+Phase: 03 (listen-optimierung) — COMPLETE
+Plan: 1 of 1 (all plans complete)
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Plan: 2 of 2
 | Phase 01-schema-sicherheit P02 | 2 | 2 tasks | 1 files |
 | Phase 02-detailseite-formular P01 | 2 | 2 tasks | 2 files |
 | Phase 02-detailseite-formular P02 | 2 | 1 tasks | 1 files |
+| Phase 03-listen-optimierung P01 | 15 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,8 @@ Plan: 2 of 2
 - [Phase 02-detailseite-formular]: Vermittler/Versicherung use full-list select (small lists), Kunde uses live search (large list)
 - [Phase 02-detailseite-formular]: Legacy kunde/vermittler text fields set to empty on save — FK fields are source of truth for new records
 - [Phase 02-detailseite-formular]: After-save navigation: currentAkteId && editId routes to detail page, else to list
+- [Phase 03-listen-optimierung]: customer_name || kunde Fallback in Tabelle und Suche haelt Legacy-Akten ohne customer_id sichtbar
+- [Phase 03-listen-optimierung]: _aktenFilterState als Modulvariable fuer Filter-Persistenz ueber SPA-interne Navigation ohne localStorage
 
 ### Existing Akten scaffold
 
@@ -97,6 +100,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-27T00:05:13.644Z
-Stopped at: Completed 02-02-PLAN.md — upgraded Akten form with FK pickers and new accident/rental fields
+Last session: 2026-03-27T00:21:31.625Z
+Stopped at: Completed 03-01-PLAN.md — Akten-Liste 5 Spalten, customer_name JOIN, Filter-Persistenz
 Resume file: None
