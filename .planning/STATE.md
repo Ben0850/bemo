@@ -3,19 +3,19 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 01-02-PLAN.md — permission guards and audit trail for akten endpoints
-last_updated: "2026-03-26T23:31:36.147Z"
+stopped_at: Completed 02-01-PLAN.md — enriched Akten detail endpoint and full-page view
+last_updated: "2026-03-27T00:00:22.763Z"
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 4
+  completed_plans: 3
 ---
 
 # Project State: Bemo Verwaltungssystem
 
 **Last updated:** 2026-03-27
-**Session:** Plan 01-01 executed — akten schema migration complete
+**Session:** Plan 02-01 executed — enriched Akten detail endpoint and full-page view
 
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Alle Geschäftsprozesse der Autovermietung zuverlässig in einem System abbilden.
-**Current focus:** Phase 01 — schema-sicherheit
+**Current focus:** Phase 02 — detailseite-formular
 
 ---
 
 ## Current Position
 
-Phase: 01 (schema-sicherheit) — EXECUTING
-Plan: 2 of 2 (01-01 complete, 01-02 next)
+Phase: 02 (detailseite-formular) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -51,6 +51,7 @@ Plan: 2 of 2 (01-01 complete, 01-02 next)
 
 ---
 | Phase 01-schema-sicherheit P02 | 2 | 2 tasks | 1 files |
+| Phase 02-detailseite-formular P01 | 2 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -67,6 +68,8 @@ Plan: 2 of 2 (01-01 complete, 01-02 next)
 
 - [Phase 01-schema-sicherheit]: Permission guard checks x-user-permission header — roles: Admin, Verwaltung, Buchhaltung (SEC-01)
 - [Phase 01-schema-sicherheit]: Audit diff loop skips fields absent from req.body — supports partial PUT without spurious history rows (DB-05)
+- [Phase 02-detailseite-formular]: fetchStammdatenById helper inserted after STAMMDATEN_API_URL consts — all dependencies defined at call time
+- [Phase 02-detailseite-formular]: Legacy text fields shown with amber badge to distinguish pre-FK data from linked Stammdaten records
 
 ### Existing Akten scaffold
 
@@ -83,13 +86,13 @@ None yet.
 ### Blockers/Concerns
 
 - UNIQUE-Constraint aktiv: Plan 02 POST-Handler muss leere aktennummer ablehnen (400), da leerer String '' nun nur einmal erlaubt
-- Stammdaten-Service Endpunkt-Pfade auf Port 3010 vor Phase 2 verifizieren
+- Stammdaten-Service Endpunkt-Pfade verifiziert: /api/vermittler/:id und /api/insurances/:id (aufgeloest durch 02-01)
 - Schadensfahrzeug-Speicherstrategie (Spalten in akten vs. eigene Tabelle) vor Phase 2 entscheiden
 
 ---
 
 ## Session Continuity
 
-Last session: 2026-03-26T23:28:06.606Z
-Stopped at: Completed 01-02-PLAN.md — permission guards and audit trail for akten endpoints
+Last session: 2026-03-27T00:00:22.759Z
+Stopped at: Completed 02-01-PLAN.md — enriched Akten detail endpoint and full-page view
 Resume file: None

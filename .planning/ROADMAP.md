@@ -67,5 +67,5 @@ Phases execute in numeric order: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Schema & Sicherheit | 2/2 | Complete   | 2026-03-26 |
-| 2. Detailseite & Formular | 0/2 | Planning complete | - |
+| 2. Detailseite & Formular | 1/2 | In Progress|  |
 | 3. Listen-Optimierung | 0/? | Not started | - |

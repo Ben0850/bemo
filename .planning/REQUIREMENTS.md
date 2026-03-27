@@ -19,13 +19,13 @@
 
 ### Frontend — Detailansicht
 
-- [ ] **UI-01**: Akten-Detailseite als Vollseite (kein Modal), erreichbar per Klick aus der Akten-Liste
-- [ ] **UI-02**: Kundendaten-Block mit vollständiger Kontaktanzeige (Name, Telefon, E-Mail)
-- [ ] **UI-03**: Unfalldaten-Block (Unfalldatum, Unfallort, Polizei vor Ort Ja/Nein)
-- [ ] **UI-04**: Mietvorgang-Block (Mietbeginn, Mietende, Fahrzeug Kennzeichen + Bezeichnung, Mietdauer in Tagen)
-- [ ] **UI-05**: Mietart-Anzeige (Reparaturmiete / Totalschadenmiete) und Wiedervorlagedatum
-- [ ] **UI-06**: Vermittler-Daten-Block
-- [ ] **UI-07**: Versicherungs-Daten-Block
+- [x] **UI-01**: Akten-Detailseite als Vollseite (kein Modal), erreichbar per Klick aus der Akten-Liste
+- [x] **UI-02**: Kundendaten-Block mit vollständiger Kontaktanzeige (Name, Telefon, E-Mail)
+- [x] **UI-03**: Unfalldaten-Block (Unfalldatum, Unfallort, Polizei vor Ort Ja/Nein)
+- [x] **UI-04**: Mietvorgang-Block (Mietbeginn, Mietende, Fahrzeug Kennzeichen + Bezeichnung, Mietdauer in Tagen)
+- [x] **UI-05**: Mietart-Anzeige (Reparaturmiete / Totalschadenmiete) und Wiedervorlagedatum
+- [x] **UI-06**: Vermittler-Daten-Block
+- [x] **UI-07**: Versicherungs-Daten-Block
 
 ### Frontend — Formular & Liste
 
@@ -63,13 +63,13 @@
 | DB-04 | Phase 1 | Complete |
 | DB-05 | Phase 1 | Complete |
 | SEC-01 | Phase 1 | Complete |
-| UI-01 | Phase 2 | Pending |
-| UI-02 | Phase 2 | Pending |
-| UI-03 | Phase 2 | Pending |
-| UI-04 | Phase 2 | Pending |
-| UI-05 | Phase 2 | Pending |
-| UI-06 | Phase 2 | Pending |
-| UI-07 | Phase 2 | Pending |
+| UI-01 | Phase 2 | Complete |
+| UI-02 | Phase 2 | Complete |
+| UI-03 | Phase 2 | Complete |
+| UI-04 | Phase 2 | Complete |
+| UI-05 | Phase 2 | Complete |
+| UI-06 | Phase 2 | Complete |
+| UI-07 | Phase 2 | Complete |
 | UI-08 | Phase 2 | Pending |
 | UI-09 | Phase 2 | Pending |
 | UI-10 | Phase 3 | Pending |
