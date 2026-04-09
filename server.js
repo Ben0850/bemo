@@ -3,6 +3,8 @@ const cors = require('cors');
 const path = require('path');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
+const { execFile } = require('child_process');
+const os = require('os');
 const msal = require('@azure/msal-node');
 const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
@@ -221,30 +223,64 @@ app.put('/api/customers/:id/special-agreements', (req, res) => {
   res.json({ message: 'Vereinbarungen aktualisiert' });
 });
 
+app.put('/api/customers/:id/bank', (req, res) => {
+  const { bank_iban, bank_bic, bank_holder, bank_name } = req.body;
+  execute('UPDATE customers SET bank_iban=?, bank_bic=?, bank_holder=?, bank_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    [bank_iban || '', bank_bic || '', bank_holder || '', bank_name || '', Number(req.params.id)]);
+  res.json({ message: 'Bankverbindung aktualisiert' });
+});
+
 // Credits CRUD
 app.get('/api/customers/:id/credits', (req, res) => {
   res.json(queryAll('SELECT * FROM credits WHERE customer_id = ? ORDER BY credit_date DESC, id DESC', [Number(req.params.id)]));
 });
 
 app.post('/api/customers/:id/credits', (req, res) => {
-  const { credit_number, credit_date, description, amount_net, amount_gross } = req.body;
-  const result = execute(
-    'INSERT INTO credits (customer_id, credit_number, credit_date, description, amount_net, amount_gross) VALUES (?, ?, ?, ?, ?, ?)',
-    [Number(req.params.id), credit_number || '', credit_date || '', description || '', Number(amount_net) || 0, Number(amount_gross) || 0]
-  );
-  res.json({ id: result.lastId, message: 'Gutschrift erstellt' });
+  try {
+    const { credit_number, credit_date, description, amount_net, amount_gross, settled_period, credit_type } = req.body;
+    const result = execute(
+      'INSERT INTO credits (customer_id, credit_number, credit_date, description, amount_net, amount_gross, settled_period, credit_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [Number(req.params.id), credit_number || '', credit_date || '', description || '', Number(amount_net) || 0, Number(amount_gross) || 0, settled_period || '', credit_type || '']
+    );
+    res.json({ id: result.lastId, message: 'Gutschrift erstellt' });
+  } catch(e) {
+    console.error('Credits POST error:', e.message);
+    res.status(500).json({ error: 'Fehler beim Speichern: ' + e.message });
+  }
 });
 
 app.put('/api/credits/:id', (req, res) => {
-  const { credit_number, credit_date, description, amount_net, amount_gross } = req.body;
-  execute(
-    'UPDATE credits SET credit_number=?, credit_date=?, description=?, amount_net=?, amount_gross=? WHERE id=?',
-    [credit_number || '', credit_date || '', description || '', Number(amount_net) || 0, Number(amount_gross) || 0, Number(req.params.id)]
+  try {
+    const { credit_number, credit_date, description, amount_net, amount_gross, settled_period, credit_type } = req.body;
+    execute(
+      'UPDATE credits SET credit_number=?, credit_date=?, description=?, amount_net=?, amount_gross=?, settled_period=?, credit_type=? WHERE id=?',
+      [credit_number || '', credit_date || '', description || '', Number(amount_net) || 0, Number(amount_gross) || 0, settled_period || '', credit_type || '', Number(req.params.id)]
+    );
+    res.json({ message: 'Gutschrift aktualisiert' });
+  } catch(e) {
+    console.error('Credits PUT error:', e.message);
+    res.status(500).json({ error: 'Fehler beim Speichern: ' + e.message });
+  }
+});
+
+// Lookup credit note by number (for auto-fill in credit form)
+app.get('/api/credit-notes/lookup/:number', (req, res) => {
+  const cn = queryOne(
+    `SELECT cn.credit_number, cn.credit_date, cn.total_net, cn.total_gross, cn.notes,
+     GROUP_CONCAT(ci.description, ', ') as item_descriptions
+     FROM credit_notes cn
+     LEFT JOIN credit_note_items ci ON ci.credit_note_id = cn.id
+     WHERE cn.credit_number = ?
+     GROUP BY cn.id`,
+    [req.params.number]
   );
-  res.json({ message: 'Gutschrift aktualisiert' });
+  if (!cn) return res.json({ found: false });
+  res.json({ found: true, credit_date: cn.credit_date, total_net: cn.total_net, total_gross: cn.total_gross, description: cn.item_descriptions || cn.notes || '' });
 });
 
 app.delete('/api/credits/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Gutschriften löschen' });
   execute('DELETE FROM credits WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'Gutschrift gelöscht' });
 });
@@ -257,7 +293,7 @@ app.get('/api/customers/:id/rebates', (req, res) => {
      FROM customer_rebates r
      LEFT JOIN staff s1 ON r.agreed_with_staff_id = s1.id
      LEFT JOIN staff s2 ON r.created_by_staff_id = s2.id
-     WHERE r.customer_id = ? ORDER BY r.rebate_date DESC, r.id DESC`,
+     WHERE r.customer_id = ? ORDER BY COALESCE(r.is_active, 1) DESC, r.rebate_date DESC, r.id DESC`,
     [Number(req.params.id)]
   );
   res.json(rows);
@@ -267,24 +303,48 @@ app.post('/api/customers/:id/rebates', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const userId = Number(req.headers['x-user-id']);
-  const { rebate_date, rebate_text, rebate_type, rebate_period, agreed_with_staff_id } = req.body;
+  const { rebate_date, rebate_text, rebate_type, rebate_period, agreed_with_staff_id, next_due_date } = req.body;
   if (!rebate_date || !rebate_text) return res.status(400).json({ error: 'Datum und Rückvergütung sind Pflichtfelder' });
+  if (!rebate_period) return res.status(400).json({ error: 'Zeitraum ist ein Pflichtfeld' });
+  if (!next_due_date) return res.status(400).json({ error: 'Nächste Fälligkeit ist ein Pflichtfeld' });
+  // Deactivate previous agreements for this customer
+  execute('UPDATE customer_rebates SET is_active = 0, next_due_date = "" WHERE customer_id = ?', [Number(req.params.id)]);
   const result = execute(
-    'INSERT INTO customer_rebates (customer_id, rebate_date, rebate_text, rebate_type, rebate_period, agreed_with_staff_id, created_by_staff_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [Number(req.params.id), rebate_date, rebate_text, rebate_type || '', rebate_period || '', agreed_with_staff_id ? Number(agreed_with_staff_id) : null, userId]
+    'INSERT INTO customer_rebates (customer_id, rebate_date, rebate_text, rebate_type, rebate_period, agreed_with_staff_id, created_by_staff_id, next_due_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)',
+    [Number(req.params.id), rebate_date, rebate_text, rebate_type || '', rebate_period || '', agreed_with_staff_id ? Number(agreed_with_staff_id) : null, userId, next_due_date || '']
   );
   res.json({ id: result.lastId, message: 'Eintrag erstellt' });
 });
 
+// Update only next_due_date
+app.put('/api/rebates/:id/due-date', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { next_due_date } = req.body;
+  execute('UPDATE customer_rebates SET next_due_date = ? WHERE id = ?', [next_due_date || '', Number(req.params.id)]);
+  res.json({ message: 'Fälligkeit aktualisiert' });
+});
+
 app.put('/api/rebates/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
-  const { rebate_text, rebate_type, rebate_period, agreed_with_staff_id } = req.body;
+  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Vereinbarungen bearbeiten' });
+  const { rebate_text, rebate_type, rebate_period, agreed_with_staff_id, next_due_date } = req.body;
   execute(
-    'UPDATE customer_rebates SET rebate_text=?, rebate_type=?, rebate_period=?, agreed_with_staff_id=? WHERE id=?',
-    [rebate_text || '', rebate_type || '', rebate_period || '', agreed_with_staff_id ? Number(agreed_with_staff_id) : null, Number(req.params.id)]
+    'UPDATE customer_rebates SET rebate_text=?, rebate_type=?, rebate_period=?, agreed_with_staff_id=?, next_due_date=? WHERE id=?',
+    [rebate_text || '', rebate_type || '', rebate_period || '', agreed_with_staff_id ? Number(agreed_with_staff_id) : null, next_due_date || '', Number(req.params.id)]
   );
   res.json({ message: 'Eintrag aktualisiert' });
+});
+
+app.get('/api/rebates/due', (req, res) => {
+  const today = berlinNow().toISOString().split('T')[0];
+  const due = queryAll(
+    `SELECT r.*, c.id as customer_id, c.first_name, c.last_name, c.company_name, c.customer_type
+     FROM customer_rebates r JOIN customers c ON r.customer_id = c.id
+     WHERE r.next_due_date != '' AND r.next_due_date <= ? AND COALESCE(r.is_active, 1) = 1
+     ORDER BY r.next_due_date`, [today]
+  );
+  res.json(due);
 });
 
 app.delete('/api/rebates/:id', (req, res) => {
@@ -292,6 +352,132 @@ app.delete('/api/rebates/:id', (req, res) => {
   if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Einträge löschen' });
   execute('DELETE FROM customer_rebates WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'Eintrag gelöscht' });
+});
+
+// ===== VERMITTLER-VERWALTUNG (lokal in Bemo-DB) =====
+
+// Management (Bank, Vereinbarungen)
+app.get('/api/vermittler-mgmt/:vermittlerId', (req, res) => {
+  const row = queryOne('SELECT * FROM vermittler_management WHERE vermittler_id = ?', [Number(req.params.vermittlerId)]);
+  res.json(row || { vermittler_id: Number(req.params.vermittlerId), bank_iban: '', bank_bic: '', bank_holder: '', bank_name: '', special_agreements: '' });
+});
+
+app.put('/api/vermittler-mgmt/:vermittlerId/bank', (req, res) => {
+  const vid = Number(req.params.vermittlerId);
+  const { bank_iban, bank_bic, bank_holder, bank_name } = req.body;
+  const existing = queryOne('SELECT id FROM vermittler_management WHERE vermittler_id = ?', [vid]);
+  if (existing) {
+    execute('UPDATE vermittler_management SET bank_iban=?, bank_bic=?, bank_holder=?, bank_name=?, updated_at=CURRENT_TIMESTAMP WHERE vermittler_id=?',
+      [bank_iban || '', bank_bic || '', bank_holder || '', bank_name || '', vid]);
+  } else {
+    execute('INSERT INTO vermittler_management (vermittler_id, bank_iban, bank_bic, bank_holder, bank_name) VALUES (?, ?, ?, ?, ?)',
+      [vid, bank_iban || '', bank_bic || '', bank_holder || '', bank_name || '']);
+  }
+  res.json({ message: 'Bankverbindung aktualisiert' });
+});
+
+app.put('/api/vermittler-mgmt/:vermittlerId/agreements', (req, res) => {
+  const vid = Number(req.params.vermittlerId);
+  const { special_agreements } = req.body;
+  const existing = queryOne('SELECT id FROM vermittler_management WHERE vermittler_id = ?', [vid]);
+  if (existing) {
+    execute('UPDATE vermittler_management SET special_agreements=?, updated_at=CURRENT_TIMESTAMP WHERE vermittler_id=?', [special_agreements || '', vid]);
+  } else {
+    execute('INSERT INTO vermittler_management (vermittler_id, special_agreements) VALUES (?, ?)', [vid, special_agreements || '']);
+  }
+  res.json({ message: 'Vereinbarungen aktualisiert' });
+});
+
+// Vermittler Rebates
+app.get('/api/vermittler-mgmt/:vermittlerId/rebates', (req, res) => {
+  res.json(queryAll(
+    `SELECT r.*, s1.name as agreed_with_name, s2.name as created_by_name
+     FROM vermittler_rebates r
+     LEFT JOIN staff s1 ON r.agreed_with_staff_id = s1.id
+     LEFT JOIN staff s2 ON r.created_by_staff_id = s2.id
+     WHERE r.vermittler_id = ? ORDER BY COALESCE(r.is_active, 1) DESC, r.rebate_date DESC, r.id DESC`,
+    [Number(req.params.vermittlerId)]
+  ));
+});
+
+app.post('/api/vermittler-mgmt/:vermittlerId/rebates', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const userId = Number(req.headers['x-user-id']);
+  const { rebate_date, rebate_text, rebate_type, rebate_period, agreed_with_staff_id, next_due_date } = req.body;
+  if (!rebate_date || !rebate_text) return res.status(400).json({ error: 'Datum und Rückvergütung sind Pflichtfelder' });
+  if (!rebate_period) return res.status(400).json({ error: 'Zeitraum ist ein Pflichtfeld' });
+  if (!next_due_date) return res.status(400).json({ error: 'Nächste Fälligkeit ist ein Pflichtfeld' });
+  execute('UPDATE vermittler_rebates SET is_active = 0, next_due_date = "" WHERE vermittler_id = ?', [Number(req.params.vermittlerId)]);
+  const result = execute(
+    'INSERT INTO vermittler_rebates (vermittler_id, rebate_date, rebate_text, rebate_type, rebate_period, agreed_with_staff_id, created_by_staff_id, next_due_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)',
+    [Number(req.params.vermittlerId), rebate_date, rebate_text, rebate_type || '', rebate_period || '', agreed_with_staff_id ? Number(agreed_with_staff_id) : null, userId, next_due_date || '']
+  );
+  res.json({ id: result.lastId, message: 'Eintrag erstellt' });
+});
+
+app.put('/api/vermittler-rebates/:id/due-date', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  execute('UPDATE vermittler_rebates SET next_due_date = ? WHERE id = ?', [req.body.next_due_date || '', Number(req.params.id)]);
+  res.json({ message: 'Fälligkeit aktualisiert' });
+});
+
+app.put('/api/vermittler-rebates/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Vereinbarungen bearbeiten' });
+  const { rebate_text, rebate_type, rebate_period, agreed_with_staff_id, next_due_date } = req.body;
+  execute('UPDATE vermittler_rebates SET rebate_text=?, rebate_type=?, rebate_period=?, agreed_with_staff_id=?, next_due_date=? WHERE id=?',
+    [rebate_text || '', rebate_type || '', rebate_period || '', agreed_with_staff_id ? Number(agreed_with_staff_id) : null, next_due_date || '', Number(req.params.id)]);
+  res.json({ message: 'Eintrag aktualisiert' });
+});
+
+app.delete('/api/vermittler-rebates/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Einträge löschen' });
+  execute('DELETE FROM vermittler_rebates WHERE id = ?', [Number(req.params.id)]);
+  res.json({ message: 'Eintrag gelöscht' });
+});
+
+app.get('/api/vermittler-rebates/due', (req, res) => {
+  const today = berlinNow().toISOString().split('T')[0];
+  res.json(queryAll(
+    `SELECT r.*, r.vermittler_id FROM vermittler_rebates r
+     WHERE r.next_due_date != '' AND r.next_due_date <= ? AND COALESCE(r.is_active, 1) = 1
+     ORDER BY r.next_due_date`, [today]
+  ));
+});
+
+// Vermittler Credits
+app.get('/api/vermittler-mgmt/:vermittlerId/credits', (req, res) => {
+  res.json(queryAll('SELECT * FROM vermittler_credits WHERE vermittler_id = ? ORDER BY credit_date DESC, id DESC', [Number(req.params.vermittlerId)]));
+});
+
+app.post('/api/vermittler-mgmt/:vermittlerId/credits', (req, res) => {
+  try {
+    const { credit_number, credit_date, description, amount_net, amount_gross, settled_period, credit_type } = req.body;
+    const result = execute(
+      'INSERT INTO vermittler_credits (vermittler_id, credit_number, credit_date, description, amount_net, amount_gross, settled_period, credit_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [Number(req.params.vermittlerId), credit_number || '', credit_date || '', description || '', Number(amount_net) || 0, Number(amount_gross) || 0, settled_period || '', credit_type || '']
+    );
+    res.json({ id: result.lastId, message: 'Gutschrift erstellt' });
+  } catch(e) { res.status(500).json({ error: 'Fehler: ' + e.message }); }
+});
+
+app.put('/api/vermittler-credits/:id', (req, res) => {
+  try {
+    const { credit_number, credit_date, description, amount_net, amount_gross, settled_period, credit_type } = req.body;
+    execute('UPDATE vermittler_credits SET credit_number=?, credit_date=?, description=?, amount_net=?, amount_gross=?, settled_period=?, credit_type=? WHERE id=?',
+      [credit_number || '', credit_date || '', description || '', Number(amount_net) || 0, Number(amount_gross) || 0, settled_period || '', credit_type || '', Number(req.params.id)]);
+    res.json({ message: 'Gutschrift aktualisiert' });
+  } catch(e) { res.status(500).json({ error: 'Fehler: ' + e.message }); }
+});
+
+app.delete('/api/vermittler-credits/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Gutschriften löschen' });
+  execute('DELETE FROM vermittler_credits WHERE id = ?', [Number(req.params.id)]);
+  res.json({ message: 'Gutschrift gelöscht' });
 });
 
 // Set/unset reminder block on customer (with password check for unblock)
@@ -1540,9 +1726,13 @@ app.post('/api/credit-notes', (req, res) => {
   if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
-  const { customer_id, credit_date, due_date, service_date, payment_method, notes, bank_account_id } = req.body;
-  if (!customer_id || !credit_date) {
-    return res.status(400).json({ error: 'Kunde und Gutschriftsdatum sind Pflichtfelder' });
+  const { customer_id, vermittler_id, credit_date, due_date, service_date, payment_method, notes, bank_account_id } = req.body;
+  if (!customer_id && !vermittler_id) {
+    if (!credit_date) return res.status(400).json({ error: 'Gutschriftsdatum ist ein Pflichtfeld' });
+    return res.status(400).json({ error: 'Kunde oder Vermittler ist ein Pflichtfeld' });
+  }
+  if (!credit_date) {
+    return res.status(400).json({ error: 'Gutschriftsdatum ist ein Pflichtfeld' });
   }
   let credit_number;
   try {
@@ -1553,12 +1743,13 @@ app.post('/api/credit-notes', (req, res) => {
   try {
     const snapshot = JSON.stringify(buildSnapshot(bank_account_id));
     const result = execute(
-      'INSERT INTO credit_notes (credit_number, customer_id, credit_date, due_date, service_date, payment_method, notes, company_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [credit_number, customer_id, credit_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot]
+      'INSERT INTO credit_notes (credit_number, customer_id, vermittler_id, credit_date, due_date, service_date, payment_method, notes, company_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [credit_number, customer_id || 0, vermittler_id || null, credit_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot]
     );
     res.json({ id: result.lastId, credit_number, message: 'Gutschrift erstellt' });
   } catch(e) {
-    res.status(500).json({ error: 'Gutschrift konnte nicht erstellt werden' });
+    console.error('Credit note creation error:', e.message);
+    res.status(500).json({ error: 'Gutschrift konnte nicht erstellt werden: ' + e.message });
   }
 });
 
@@ -2031,7 +2222,10 @@ app.get('/api/fleet-vehicles/:id', (req, res) => {
   }
   const maintenance = queryAll('SELECT * FROM fleet_maintenance WHERE fleet_vehicle_id = ? ORDER BY maintenance_date DESC, id DESC', [Number(req.params.id)]);
   const mileage = queryAll('SELECT fm.*, s.name as staff_name FROM fleet_mileage fm LEFT JOIN staff s ON fm.recorded_by_staff_id = s.id WHERE fm.fleet_vehicle_id = ? ORDER BY fm.record_date DESC, fm.id DESC', [Number(req.params.id)]);
-  res.json({ ...vehicle, maintenance, mileage });
+  const damages = queryAll('SELECT * FROM fleet_damages WHERE fleet_vehicle_id = ? ORDER BY damage_date DESC, id DESC', [Number(req.params.id)]);
+  const insurance = queryAll('SELECT * FROM fleet_insurance WHERE fleet_vehicle_id = ? ORDER BY contract_date DESC, id DESC', [Number(req.params.id)]);
+  const tax = queryAll('SELECT * FROM fleet_tax WHERE fleet_vehicle_id = ? ORDER BY tax_date DESC, id DESC', [Number(req.params.id)]);
+  res.json({ ...vehicle, maintenance, mileage, damages, insurance, tax });
 });
 
 app.post('/api/fleet-vehicles', (req, res) => {
@@ -2111,11 +2305,178 @@ app.delete('/api/fleet-mileage/:id', (req, res) => {
   res.json({ message: 'KM-Eintrag gelöscht' });
 });
 
+// Fleet damages
+app.get('/api/fleet-vehicles/:id/damages', (req, res) => {
+  res.json(queryAll('SELECT * FROM fleet_damages WHERE fleet_vehicle_id = ? ORDER BY damage_date DESC, id DESC', [Number(req.params.id)]));
+});
+
+app.post('/api/fleet-vehicles/:id/damages', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { damage_date, damage_type, repair_cost, caused_by, status } = req.body;
+  if (!damage_date || !damage_type) return res.status(400).json({ error: 'Schadensdatum und Schadensart sind Pflichtfelder' });
+  const result = execute(
+    'INSERT INTO fleet_damages (fleet_vehicle_id, damage_date, damage_type, repair_cost, caused_by, status) VALUES (?, ?, ?, ?, ?, ?)',
+    [Number(req.params.id), damage_date, damage_type, Number(repair_cost) || 0, caused_by || '', status || 'unrepariert']
+  );
+  res.json({ id: result.lastId, message: 'Schaden erstellt' });
+});
+
+app.put('/api/fleet-damages/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { damage_date, damage_type, repair_cost, caused_by, status } = req.body;
+  execute(
+    'UPDATE fleet_damages SET damage_date=?, damage_type=?, repair_cost=?, caused_by=?, status=? WHERE id=?',
+    [damage_date || '', damage_type || '', Number(repair_cost) || 0, caused_by || '', status || 'unrepariert', Number(req.params.id)]
+  );
+  res.json({ message: 'Schaden aktualisiert' });
+});
+
+// Fleet insurance contracts
+app.get('/api/fleet-vehicles/:id/insurance', (req, res) => {
+  res.json(queryAll('SELECT * FROM fleet_insurance WHERE fleet_vehicle_id = ? ORDER BY contract_date DESC, id DESC', [Number(req.params.id)]));
+});
+
+app.post('/api/fleet-vehicles/:id/insurance', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { contract_date, insurance_name, insurance_type, annual_premium, payment_interval, payment_method } = req.body;
+  if (!contract_date) return res.status(400).json({ error: 'Datum ist Pflichtfeld' });
+  const result = execute(
+    'INSERT INTO fleet_insurance (fleet_vehicle_id, contract_date, insurance_name, insurance_type, annual_premium, payment_interval, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [Number(req.params.id), contract_date, insurance_name || '', insurance_type || '', Number(annual_premium) || 0, payment_interval || '', payment_method || '']
+  );
+  res.json({ id: result.lastId });
+});
+
+app.put('/api/fleet-insurance/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { contract_date, insurance_name, insurance_type, annual_premium, payment_interval, payment_method } = req.body;
+  execute(
+    'UPDATE fleet_insurance SET contract_date=?, insurance_name=?, insurance_type=?, annual_premium=?, payment_interval=?, payment_method=? WHERE id=?',
+    [contract_date || '', insurance_name || '', insurance_type || '', Number(annual_premium) || 0, payment_interval || '', payment_method || '', Number(req.params.id)]
+  );
+  res.json({ success: true });
+});
+
+app.delete('/api/fleet-insurance/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  execute('DELETE FROM fleet_insurance WHERE id = ?', [Number(req.params.id)]);
+  res.json({ success: true });
+});
+
+// Fleet vehicle tax
+app.get('/api/fleet-vehicles/:id/tax', (req, res) => {
+  res.json(queryAll('SELECT * FROM fleet_tax WHERE fleet_vehicle_id = ? ORDER BY tax_date DESC, id DESC', [Number(req.params.id)]));
+});
+
+app.post('/api/fleet-vehicles/:id/tax', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { tax_date, tax_year, tax_amount, payment_method } = req.body;
+  if (!tax_date) return res.status(400).json({ error: 'Datum ist Pflichtfeld' });
+  const result = execute(
+    'INSERT INTO fleet_tax (fleet_vehicle_id, tax_date, tax_year, tax_amount, payment_method) VALUES (?, ?, ?, ?, ?)',
+    [Number(req.params.id), tax_date, tax_year || '', Number(tax_amount) || 0, payment_method || '']
+  );
+  res.json({ id: result.lastId });
+});
+
+app.put('/api/fleet-tax/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { tax_date, tax_year, tax_amount, payment_method } = req.body;
+  execute(
+    'UPDATE fleet_tax SET tax_date=?, tax_year=?, tax_amount=?, payment_method=? WHERE id=?',
+    [tax_date || '', tax_year || '', Number(tax_amount) || 0, payment_method || '', Number(req.params.id)]
+  );
+  res.json({ success: true });
+});
+
+app.delete('/api/fleet-tax/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  execute('DELETE FROM fleet_tax WHERE id = ?', [Number(req.params.id)]);
+  res.json({ success: true });
+});
+
+// Fleet maintenance documents
+app.get('/api/fleet-maintenance/:id/docs', (req, res) => {
+  res.json(queryAll('SELECT * FROM fleet_maintenance_docs WHERE maintenance_id = ? ORDER BY created_at DESC', [Number(req.params.id)]));
+});
+app.post('/api/fleet-maintenance/:id/docs', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { filename, s3_key } = req.body;
+  if (!filename || !s3_key) return res.status(400).json({ error: 'Dateiname und S3-Key erforderlich' });
+  const result = execute('INSERT INTO fleet_maintenance_docs (maintenance_id, filename, s3_key) VALUES (?, ?, ?)', [Number(req.params.id), filename, s3_key]);
+  res.json({ id: result.lastId });
+});
+app.delete('/api/fleet-maintenance-docs/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  execute('DELETE FROM fleet_maintenance_docs WHERE id = ?', [Number(req.params.id)]);
+  res.json({ success: true });
+});
+
+// Fleet insurance documents
+app.get('/api/fleet-insurance/:id/docs', (req, res) => {
+  res.json(queryAll('SELECT * FROM fleet_insurance_docs WHERE insurance_id = ? ORDER BY created_at DESC', [Number(req.params.id)]));
+});
+app.post('/api/fleet-insurance/:id/docs', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { filename, s3_key } = req.body;
+  if (!filename || !s3_key) return res.status(400).json({ error: 'Dateiname und S3-Key erforderlich' });
+  const result = execute('INSERT INTO fleet_insurance_docs (insurance_id, filename, s3_key) VALUES (?, ?, ?)', [Number(req.params.id), filename, s3_key]);
+  res.json({ id: result.lastId });
+});
+app.delete('/api/fleet-insurance-docs/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  execute('DELETE FROM fleet_insurance_docs WHERE id = ?', [Number(req.params.id)]);
+  res.json({ success: true });
+});
+
+// Fleet damage documents
+app.get('/api/fleet-damages/:id/docs', (req, res) => {
+  res.json(queryAll('SELECT * FROM fleet_damage_docs WHERE damage_id = ? ORDER BY created_at DESC', [Number(req.params.id)]));
+});
+
+app.post('/api/fleet-damages/:id/docs', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { filename, s3_key } = req.body;
+  if (!filename || !s3_key) return res.status(400).json({ error: 'Dateiname und S3-Key erforderlich' });
+  const result = execute(
+    'INSERT INTO fleet_damage_docs (damage_id, filename, s3_key) VALUES (?, ?, ?)',
+    [Number(req.params.id), filename, s3_key]
+  );
+  res.json({ id: result.lastId });
+});
+
+app.delete('/api/fleet-damage-docs/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  execute('DELETE FROM fleet_damage_docs WHERE id = ?', [Number(req.params.id)]);
+  res.json({ success: true });
+});
+
+app.delete('/api/fleet-damages/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
+  execute('DELETE FROM fleet_damages WHERE id = ?', [Number(req.params.id)]);
+  res.json({ message: 'Schaden gel\u00f6scht' });
+});
+
 // ===== RENTALS (Vermietung) =====
 
 app.get('/api/rentals', (req, res) => {
   const { year } = req.query;
-  let sql = `SELECT r.id, r.vehicle_id, fv.license_plate, fv.manufacturer, fv.model, r.customer_name, r.start_date, r.end_date, r.notes
+  let sql = `SELECT r.id, r.vehicle_id, fv.license_plate, fv.manufacturer, fv.model, r.customer_name, r.start_date, r.end_date, r.start_time, r.end_time, r.km_start, r.km_end, r.mietart, r.status, r.notes, r.created_at
     FROM rentals r
     JOIN fleet_vehicles fv ON r.vehicle_id = fv.id
     WHERE 1=1`;
@@ -2128,29 +2489,133 @@ app.get('/api/rentals', (req, res) => {
   res.json(queryAll(sql, params));
 });
 
+app.get('/api/rentals/:id', async (req, res) => {
+  const row = queryOne(
+    `SELECT r.*, fv.license_plate, fv.manufacturer, fv.model, s.name AS created_by_name
+     FROM rentals r
+     JOIN fleet_vehicles fv ON r.vehicle_id = fv.id
+     LEFT JOIN staff s ON r.created_by = s.id
+     WHERE r.id = ?`, [Number(req.params.id)]
+  );
+  if (!row) return res.status(404).json({ error: 'Not found' });
+
+  // Load Beteiligte
+  const beteiligte = queryAll(
+    'SELECT * FROM rental_beteiligte WHERE rental_id = ? ORDER BY sort_order ASC, id ASC',
+    [Number(req.params.id)]
+  );
+  const enriched = await Promise.all(beteiligte.map(async (b) => {
+    if (b.type === 'kunde' && b.entity_id) {
+      b.entity = queryOne('SELECT * FROM customers WHERE id = ?', [b.entity_id]) || null;
+    } else if (b.type === 'vermittler' && b.entity_id) {
+      b.entity = await fetchStammdatenById(`/api/vermittler/${b.entity_id}`);
+    } else if (b.type === 'werkstatt' && b.entity_id) {
+      b.entity = await fetchStammdatenById(`/api/vermittler/${b.entity_id}`);
+    } else if (b.type === 'versicherung' && b.entity_id) {
+      b.entity = await fetchStammdatenById(`/api/insurances/${b.entity_id}`);
+    } else if (b.type === 'anwalt' && b.entity_id) {
+      b.entity = await fetchStammdatenById(`/api/lawyers/${b.entity_id}`);
+    }
+    return b;
+  }));
+  row.beteiligte = enriched;
+  res.json(row);
+});
+
+// Rental-Beteiligte CRUD
+app.post('/api/rentals/:id/beteiligte', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const { type, entity_id, name, adresse, telefon, email, art } = req.body;
+  if (!type) return res.status(400).json({ error: 'Typ erforderlich' });
+  const rentalId = Number(req.params.id);
+  if (type === 'kunde') {
+    const existing = queryOne('SELECT id FROM rental_beteiligte WHERE rental_id = ? AND type = ?', [rentalId, 'kunde']);
+    if (existing) return res.status(400).json({ error: 'Es darf nur ein Kunde pro Mietvorgang hinterlegt sein' });
+  }
+  const maxOrder = queryOne('SELECT MAX(sort_order) as m FROM rental_beteiligte WHERE rental_id = ?', [rentalId]);
+  const nextOrder = (maxOrder && maxOrder.m !== null ? maxOrder.m : -1) + 1;
+  execute(
+    'INSERT INTO rental_beteiligte (rental_id, type, entity_id, name, adresse, telefon, email, art, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [rentalId, type, entity_id || null, name || '', adresse || '', telefon || '', email || '', art || '', nextOrder]
+  );
+  res.status(201).json({ success: true });
+});
+
+app.delete('/api/rentals/:id/beteiligte/:betId', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  execute(
+    'DELETE FROM rental_beteiligte WHERE id = ? AND rental_id = ?',
+    [Number(req.params.betId), Number(req.params.id)]
+  );
+  res.json({ success: true });
+});
+
+app.put('/api/rentals/:id/beteiligte/sort', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const { order } = req.body;
+  if (!Array.isArray(order)) return res.status(400).json({ error: 'order array required' });
+  const rentalId = Number(req.params.id);
+  order.forEach((betId, idx) => {
+    execute('UPDATE rental_beteiligte SET sort_order = ? WHERE id = ? AND rental_id = ?', [idx, Number(betId), rentalId]);
+  });
+  res.json({ success: true });
+});
+
 app.post('/api/rentals', (req, res) => {
-  const { vehicle_id, customer_name, start_date, end_date, notes } = req.body;
+  const { vehicle_id, customer_name, start_date, end_date, start_time, end_time, mietart, status, notes } = req.body;
+  const userId = Number(req.headers['x-user-id']) || null;
   if (!vehicle_id || !start_date || !end_date) return res.status(400).json({ error: 'Fahrzeug, Start- und Enddatum sind Pflichtfelder' });
   const result = execute(
-    'INSERT INTO rentals (vehicle_id, customer_name, start_date, end_date, notes) VALUES (?, ?, ?, ?, ?)',
-    [Number(vehicle_id), customer_name || '', start_date, end_date, notes || '']
+    'INSERT INTO rentals (vehicle_id, customer_name, start_date, end_date, start_time, end_time, mietart, status, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [Number(vehicle_id), customer_name || '', start_date, end_date, start_time || '', end_time || '', mietart || '', status || 'Reservierung', notes || '', userId]
   );
   res.json({ id: result.lastId, message: 'Vermietung erstellt' });
 });
 
 app.put('/api/rentals/:id', (req, res) => {
-  const { vehicle_id, customer_name, start_date, end_date, notes } = req.body;
-  if (!vehicle_id || !start_date || !end_date) return res.status(400).json({ error: 'Fahrzeug, Start- und Enddatum sind Pflichtfelder' });
+  const existing = queryOne('SELECT * FROM rentals WHERE id = ?', [Number(req.params.id)]);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  const b = req.body;
+  const merged = {
+    vehicle_id: b.vehicle_id !== undefined ? Number(b.vehicle_id) : existing.vehicle_id,
+    customer_name: b.customer_name !== undefined ? (b.customer_name || '') : existing.customer_name,
+    start_date: b.start_date !== undefined ? b.start_date : existing.start_date,
+    end_date: b.end_date !== undefined ? b.end_date : existing.end_date,
+    start_time: b.start_time !== undefined ? (b.start_time || '') : existing.start_time,
+    end_time: b.end_time !== undefined ? (b.end_time || '') : existing.end_time,
+    km_start: b.km_start !== undefined ? (b.km_start || '') : existing.km_start,
+    km_end: b.km_end !== undefined ? (b.km_end || '') : existing.km_end,
+    mietart: b.mietart !== undefined ? (b.mietart || '') : existing.mietart,
+    status: b.status !== undefined ? (b.status || 'Reservierung') : existing.status,
+    notes: b.notes !== undefined ? (b.notes || '') : existing.notes,
+  };
   execute(
-    'UPDATE rentals SET vehicle_id=?, customer_name=?, start_date=?, end_date=?, notes=? WHERE id=?',
-    [Number(vehicle_id), customer_name || '', start_date, end_date, notes || '', Number(req.params.id)]
+    'UPDATE rentals SET vehicle_id=?, customer_name=?, start_date=?, end_date=?, start_time=?, end_time=?, km_start=?, km_end=?, mietart=?, status=?, notes=? WHERE id=?',
+    [merged.vehicle_id, merged.customer_name, merged.start_date, merged.end_date, merged.start_time, merged.end_time, merged.km_start, merged.km_end, merged.mietart, merged.status, merged.notes, Number(req.params.id)]
   );
   res.json({ message: 'Vermietung aktualisiert' });
 });
 
 app.delete('/api/rentals/:id', (req, res) => {
-  execute('DELETE FROM rentals WHERE id = ?', [Number(req.params.id)]);
-  res.json({ message: 'Vermietung gelöscht' });
+  const rentalId = Number(req.params.id);
+  // Check if rental is used in any Akte
+  const akteRef = queryOne('SELECT id, aktennummer FROM akten WHERE rental_id = ?', [rentalId]);
+  if (akteRef) {
+    return res.status(400).json({
+      error: `Mietvorgang kann nicht gel\u00f6scht werden, da er in Akte ${akteRef.aktennummer || akteRef.id} verwendet wird. Bitte entfernen Sie den Mietvorgang zuerst aus der Akte.`
+    });
+  }
+  execute('DELETE FROM rentals WHERE id = ?', [rentalId]);
+  res.json({ message: 'Vermietung gel\u00f6scht' });
 });
 
 // ===== TIME TRACKING =====
@@ -2566,6 +3031,17 @@ function getS3Bucket() {
   return getS3Config().bucket;
 }
 
+// File log helper
+function logFileAction(action, fileKey, filename, folder, req, size, details) {
+  const userId = Number(req.headers['x-user-id']) || 0;
+  const username = req.headers['x-user-name'] || '';
+  const now = berlinToday() + ' ' + berlinTime();
+  execute(
+    `INSERT INTO file_log (action, file_key, filename, folder, user_id, username, file_size, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [action, fileKey, filename, folder, userId, username, size || 0, details || '', now]
+  );
+}
+
 // Upload file (base64 body)
 app.post('/api/files/upload', async (req, res) => {
   try {
@@ -2573,12 +3049,21 @@ app.post('/api/files/upload', async (req, res) => {
     if (!filename || !data) return res.status(400).json({ error: 'filename und data sind Pflichtfelder' });
     const key = folder ? `${folder}/${filename}` : filename;
     const buffer = Buffer.from(data, 'base64');
+
+    // Check if file already exists (for log: upload vs overwrite)
+    let isOverwrite = false;
+    try {
+      const existing = await getS3Client().send(new GetObjectCommand({ Bucket: getS3Bucket(), Key: key }));
+      if (existing) isOverwrite = true;
+    } catch (e) { /* file doesn't exist, normal upload */ }
+
     await getS3Client().send(new PutObjectCommand({
       Bucket: getS3Bucket(),
       Key: key,
       Body: buffer,
       ContentType: content_type || 'application/octet-stream'
     }));
+    logFileAction(isOverwrite ? 'überschrieben' : 'hochgeladen', key, filename, folder || '', req, buffer.length, content_type || '');
     res.json({ key, message: 'Datei hochgeladen', size: buffer.length });
   } catch (err) {
     console.error('S3 Upload Error:', err.message);
@@ -2622,10 +3107,94 @@ app.get('/api/files/download', async (req, res) => {
   }
 });
 
+// Proxy file download (avoids CORS and Office Online redirect)
+app.get('/api/files/proxy-download', async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) return res.status(400).json({ error: 'key ist Pflichtfeld' });
+    const filename = key.split('/').pop();
+    const command = new GetObjectCommand({ Bucket: getS3Bucket(), Key: key });
+    const response = await getS3Client().send(command);
+    res.setHeader('Content-Disposition', 'attachment; filename="' + filename.replace(/"/g, '') + '"');
+    res.setHeader('Content-Type', response.ContentType || 'application/octet-stream');
+    response.Body.pipe(res);
+  } catch (err) {
+    console.error('S3 Proxy Download Error:', err.message);
+    res.status(500).json({ error: 'Download fehlgeschlagen: ' + err.message });
+  }
+});
+
+// Office → PDF conversion for preview (LibreOffice headless)
+const _pdfCache = new Map();
+const SOFFICE = process.platform === 'win32'
+  ? 'C:\\Program Files\\LibreOffice\\program\\soffice.exe'
+  : '/usr/bin/libreoffice';
+
+app.get('/api/files/office-to-pdf', async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) return res.status(400).json({ error: 'key ist Pflichtfeld' });
+
+    if (_pdfCache.has(key)) {
+      const cached = _pdfCache.get(key);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline');
+      return res.send(cached);
+    }
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bemo-office-'));
+    const ext = (key.split('.').pop() || '').toLowerCase();
+    const inputFile = path.join(tmpDir, 'input.' + ext);
+    const command = new GetObjectCommand({ Bucket: getS3Bucket(), Key: key });
+    const response = await getS3Client().send(command);
+    const chunks = [];
+    for await (const chunk of response.Body) chunks.push(chunk);
+    fs.writeFileSync(inputFile, Buffer.concat(chunks));
+
+    await new Promise((resolve, reject) => {
+      execFile(SOFFICE, [
+        '--headless', '--invisible', '--nocrashreport', '--nodefault', '--nologo', '--nofirststartwizard', '--norestore',
+        '--convert-to', 'pdf', '--outdir', tmpDir, inputFile
+      ], { timeout: 30000 }, (err, stdout, stderr) => {
+        if (err) reject(new Error('LibreOffice Konvertierung fehlgeschlagen: ' + (stderr || err.message)));
+        else resolve();
+      });
+    });
+
+    const pdfFile = path.join(tmpDir, 'input.pdf');
+    if (!fs.existsSync(pdfFile)) throw new Error('PDF wurde nicht erzeugt');
+    const pdfData = fs.readFileSync(pdfFile);
+
+    if (_pdfCache.size > 50) {
+      const firstKey = _pdfCache.keys().next().value;
+      _pdfCache.delete(firstKey);
+    }
+    _pdfCache.set(key, pdfData);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline');
+    res.send(pdfData);
+  } catch (err) {
+    console.error('Office-to-PDF Error:', err.message);
+    res.status(500).json({ error: 'PDF-Konvertierung fehlgeschlagen: ' + err.message });
+  }
+});
+
+// File log
+app.get('/api/files/log', (req, res) => {
+  const limit = Number(req.query.limit) || 100;
+  res.json(queryAll('SELECT * FROM file_log ORDER BY id DESC LIMIT ?', [limit]));
+});
+
 // Delete file
 app.delete('/api/files/:key(*)', async (req, res) => {
   try {
-    await getS3Client().send(new DeleteObjectCommand({ Bucket: getS3Bucket(), Key: req.params.key }));
+    const key = req.params.key;
+    const filename = key.split('/').pop();
+    const folder = key.split('/').slice(0, -1).join('/');
+    await getS3Client().send(new DeleteObjectCommand({ Bucket: getS3Bucket(), Key: key }));
+    logFileAction('gelöscht', key, filename, folder, req, 0, '');
     res.json({ message: 'Datei gelöscht' });
   } catch (err) {
     console.error('S3 Delete Error:', err.message);
@@ -2644,21 +3213,70 @@ app.get('/api/files/test', async (req, res) => {
   }
 });
 
+// Parse .msg files for preview
+app.get('/api/files/docx-preview', async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) return res.status(400).json({ error: 'key ist Pflichtfeld' });
+    const mammoth = require('mammoth');
+    const response = await getS3Client().send(new GetObjectCommand({ Bucket: getS3Bucket(), Key: key }));
+    const chunks = [];
+    for await (const chunk of response.Body) chunks.push(chunk);
+    const buffer = Buffer.concat(chunks);
+    const result = await mammoth.convertToHtml({ buffer });
+    res.json({ html: result.value });
+  } catch (err) {
+    res.status(500).json({ error: 'Vorschau fehlgeschlagen: ' + err.message });
+  }
+});
+
+app.get('/api/files/msg-preview', async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) return res.status(400).json({ error: 'key ist Pflichtfeld' });
+    const MsgReader = require('@kenjiuno/msgreader').default || require('@kenjiuno/msgreader');
+    const response = await getS3Client().send(new GetObjectCommand({ Bucket: getS3Bucket(), Key: key }));
+    const chunks = [];
+    for await (const chunk of response.Body) { chunks.push(chunk); }
+    const buffer = Buffer.concat(chunks);
+    const reader = new MsgReader(buffer);
+    const msg = reader.getFileData();
+    res.json({
+      subject: msg.subject || '',
+      from: msg.senderName || msg.senderEmail || '',
+      senderEmail: msg.senderEmail || '',
+      to: msg.recipients ? msg.recipients.map(r => r.name + (r.email ? ' <' + r.email + '>' : '')).join(', ') : '',
+      date: msg.messageDeliveryTime || msg.clientSubmitTime || '',
+      body: msg.body || '',
+      attachments: msg.attachments ? msg.attachments.map(a => ({ name: a.fileName || a.name || 'Anhang', size: a.contentLength || 0 })) : []
+    });
+  } catch (err) {
+    console.error('MSG Parse Error:', err.message);
+    res.status(500).json({ error: 'MSG-Vorschau fehlgeschlagen: ' + err.message });
+  }
+});
+
 // ===== Akten (Case Files) =====
 app.get('/api/akten', (req, res) => {
   const { search } = req.query;
   const base = `
     SELECT a.*,
       CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name
-           ELSE c.last_name || ', ' || c.first_name END as customer_name
+           ELSE c.last_name || ', ' || c.first_name END as customer_name,
+      (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type = 'kunde' ORDER BY sort_order ASC LIMIT 1) as bet_kunde,
+      (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type = 'anwalt' ORDER BY sort_order ASC LIMIT 1) as bet_anwalt,
+      (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type = 'versicherung' ORDER BY sort_order ASC LIMIT 1) as bet_versicherung,
+      (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type IN ('vermittler','werkstatt') ORDER BY sort_order ASC LIMIT 1) as bet_vermittler
     FROM akten a
     LEFT JOIN customers c ON a.customer_id = c.id
   `;
   if (search) {
     const term = `%${search}%`;
     res.json(queryAll(
-      base + ` WHERE a.aktennummer LIKE ? OR a.kunde LIKE ? OR a.anwalt LIKE ? OR a.vermittler LIKE ? OR a.status LIKE ? ORDER BY a.id DESC`,
-      [term, term, term, term, term]
+      base + ` WHERE a.aktennummer LIKE ? OR a.kunde LIKE ? OR a.anwalt LIKE ? OR a.vermittler LIKE ? OR a.status LIKE ?
+        OR a.id IN (SELECT akte_id FROM akten_beteiligte WHERE name LIKE ?)
+        ORDER BY a.id DESC`,
+      [term, term, term, term, term, term]
     ));
   } else {
     res.json(queryAll(base + ' ORDER BY a.id DESC'));
@@ -2666,7 +3284,10 @@ app.get('/api/akten', (req, res) => {
 });
 
 app.get('/api/akten/:id', async (req, res) => {
-  const row = queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]);
+  const row = queryOne(
+    `SELECT a.*, s.name AS created_by_name FROM akten a LEFT JOIN staff s ON a.created_by = s.id WHERE a.id = ?`,
+    [Number(req.params.id)]
+  );
   if (!row) return res.status(404).json({ error: 'Not found' });
 
   // Local FK joins (synchronous, in-memory SQLite)
@@ -2678,7 +3299,7 @@ app.get('/api/akten/:id', async (req, res) => {
   }
   if (row.rental_id) {
     row.rental = queryOne(
-      `SELECT r.id, r.start_date, r.end_date, fv.license_plate, fv.manufacturer, fv.model
+      `SELECT r.id, r.start_date, r.end_date, r.mietart, fv.license_plate, fv.manufacturer, fv.model
        FROM rentals r
        JOIN fleet_vehicles fv ON r.vehicle_id = fv.id
        WHERE r.id = ?`,
@@ -2686,13 +3307,35 @@ app.get('/api/akten/:id', async (req, res) => {
     ) || null;
   }
 
-  // External Stammdaten (parallel, non-blocking)
+  // External Stammdaten (parallel, non-blocking) — legacy FK fields
   const [vermittlerData, versicherungData] = await Promise.all([
     row.vermittler_id ? fetchStammdatenById(`/api/vermittler/${row.vermittler_id}`) : Promise.resolve(null),
     row.versicherung_id ? fetchStammdatenById(`/api/insurances/${row.versicherung_id}`) : Promise.resolve(null)
   ]);
   row.vermittler_obj = vermittlerData;
   row.versicherung_obj = versicherungData;
+
+  // Load Beteiligte (new many-to-many table)
+  const beteiligte = queryAll(
+    'SELECT * FROM akten_beteiligte WHERE akte_id = ? ORDER BY sort_order ASC, id ASC',
+    [Number(req.params.id)]
+  );
+  // Enrich each Beteiligter with entity data
+  const enriched = await Promise.all(beteiligte.map(async (b) => {
+    if (b.type === 'kunde' && b.entity_id) {
+      b.entity = queryOne('SELECT * FROM customers WHERE id = ?', [b.entity_id]) || null;
+    } else if (b.type === 'vermittler' && b.entity_id) {
+      b.entity = await fetchStammdatenById(`/api/vermittler/${b.entity_id}`);
+    } else if (b.type === 'werkstatt' && b.entity_id) {
+      b.entity = await fetchStammdatenById(`/api/vermittler/${b.entity_id}`);
+    } else if (b.type === 'versicherung' && b.entity_id) {
+      b.entity = await fetchStammdatenById(`/api/insurances/${b.entity_id}`);
+    } else if (b.type === 'anwalt' && b.entity_id) {
+      b.entity = await fetchStammdatenById(`/api/lawyers/${b.entity_id}`);
+    }
+    return b;
+  }));
+  row.beteiligte = enriched;
 
   res.json(row);
 });
@@ -2703,22 +3346,26 @@ app.post('/api/akten', (req, res) => {
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
-  const { aktennummer, datum, kunde, anwalt, vorlage, zahlungsstatus, vermittler, status, notizen,
+  const { datum, kunde, anwalt, zahlungsstatus, vermittler, status,
           customer_id, vermittler_id, versicherung_id, rental_id,
           unfalldatum, unfallort, polizei_vor_ort, mietart, wiedervorlage_datum } = req.body;
-  if (!aktennummer || !aktennummer.trim()) {
-    return res.status(400).json({ error: 'Aktennummer ist Pflichtfeld' });
-  }
+  const userId = Number(req.headers['x-user-id']) || null;
+
+  // Auto-generate Aktennummer: next number starting from 1000
+  const row = queryOne('SELECT MAX(CAST(aktennummer AS INTEGER)) as max_nr FROM akten');
+  const nextNr = Math.max((row && row.max_nr) || 0, 999) + 1;
+  const aktennummer = String(nextNr);
+
   const result = execute(
-    `INSERT INTO akten (aktennummer, datum, kunde, anwalt, vorlage, zahlungsstatus, vermittler, status, notizen,
+    `INSERT INTO akten (aktennummer, datum, kunde, anwalt, zahlungsstatus, vermittler, status,
        customer_id, vermittler_id, versicherung_id, rental_id,
-       unfalldatum, unfallort, polizei_vor_ort, mietart, wiedervorlage_datum)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [aktennummer.trim(), datum || '', kunde || '', anwalt || '', vorlage || '',
-     zahlungsstatus || 'offen', vermittler || '', status || 'offen', notizen || '',
+       unfalldatum, unfallort, polizei_vor_ort, mietart, wiedervorlage_datum, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [aktennummer, datum || '', kunde || '', anwalt || '',
+     zahlungsstatus || 'offen', vermittler || '', status || 'Neu Angelegt',
      customer_id || null, vermittler_id || null, versicherung_id || null, rental_id || null,
      unfalldatum || '', unfallort || '', polizei_vor_ort ? 1 : 0,
-     mietart || '', wiedervorlage_datum || '']
+     mietart || '', wiedervorlage_datum || '', userId]
   );
   res.status(201).json(queryOne('SELECT * FROM akten WHERE id = ?', [result.lastId]));
 });
@@ -2735,14 +3382,13 @@ app.put('/api/akten/:id', (req, res) => {
 
   // DB-05: Audit trail — diff before update
   const TRACKED_FIELDS = [
-    'aktennummer', 'datum', 'kunde', 'anwalt', 'vorlage', 'vermittler',
+    'datum', 'kunde', 'anwalt', 'vermittler',
     'customer_id', 'vermittler_id', 'versicherung_id', 'rental_id',
     'unfalldatum', 'unfallort', 'polizei_vor_ort',
     'mietart', 'wiedervorlage_datum',
-    'zahlungsstatus', 'status', 'notizen'
+    'zahlungsstatus', 'status'
   ];
 
-  // Normalize values: NULL/undefined/'' all become null for FK fields, '' for text fields
   const FK_FIELDS = ['customer_id', 'vermittler_id', 'versicherung_id', 'rental_id'];
   function norm(field, val) {
     if (FK_FIELDS.includes(field)) {
@@ -2754,7 +3400,7 @@ app.put('/api/akten/:id', (req, res) => {
   const now = `${berlinToday()} ${berlinTime()}`;
 
   for (const field of TRACKED_FIELDS) {
-    if (req.body[field] === undefined) continue; // field not in request body — skip
+    if (req.body[field] === undefined) continue;
     const oldVal = norm(field, existing[field]);
     const newVal = norm(field, req.body[field]);
     if (String(oldVal ?? '') !== String(newVal ?? '')) {
@@ -2766,31 +3412,198 @@ app.put('/api/akten/:id', (req, res) => {
     }
   }
 
-  // Perform the update with all columns
+  // Perform the update — merge request body with existing data (only overwrite sent fields)
+  const b = req.body;
+  const merged = {
+    datum:              b.datum !== undefined ? (b.datum || '') : existing.datum,
+    kunde:              b.kunde !== undefined ? (b.kunde || '') : existing.kunde,
+    anwalt:             b.anwalt !== undefined ? (b.anwalt || '') : existing.anwalt,
+    vermittler:         b.vermittler !== undefined ? (b.vermittler || '') : existing.vermittler,
+    customer_id:        b.customer_id !== undefined ? (b.customer_id || null) : existing.customer_id,
+    vermittler_id:      b.vermittler_id !== undefined ? (b.vermittler_id || null) : existing.vermittler_id,
+    versicherung_id:    b.versicherung_id !== undefined ? (b.versicherung_id || null) : existing.versicherung_id,
+    rental_id:          b.rental_id !== undefined ? (b.rental_id || null) : existing.rental_id,
+    unfalldatum:        b.unfalldatum !== undefined ? (b.unfalldatum || '') : existing.unfalldatum,
+    unfallort:          b.unfallort !== undefined ? (b.unfallort || '') : existing.unfallort,
+    polizei_vor_ort:    b.polizei_vor_ort !== undefined ? (b.polizei_vor_ort ? 1 : 0) : existing.polizei_vor_ort,
+    mietart:            b.mietart !== undefined ? (b.mietart || '') : existing.mietart,
+    wiedervorlage_datum: b.wiedervorlage_datum !== undefined ? (b.wiedervorlage_datum || '') : existing.wiedervorlage_datum,
+    zahlungsstatus:     b.zahlungsstatus !== undefined ? (b.zahlungsstatus || 'offen') : existing.zahlungsstatus,
+    status:             b.status !== undefined ? (b.status || 'Neu Angelegt') : existing.status,
+  };
   execute(
     `UPDATE akten SET
-      aktennummer=?, datum=?, kunde=?, anwalt=?, vorlage=?, vermittler=?,
+      datum=?, kunde=?, anwalt=?, vermittler=?,
       customer_id=?, vermittler_id=?, versicherung_id=?, rental_id=?,
       unfalldatum=?, unfallort=?, polizei_vor_ort=?,
       mietart=?, wiedervorlage_datum=?,
-      zahlungsstatus=?, status=?, notizen=?,
+      zahlungsstatus=?, status=?,
       updated_at=CURRENT_TIMESTAMP
      WHERE id=?`,
     [
-      req.body.aktennummer || '', req.body.datum || '',
-      req.body.kunde || '', req.body.anwalt || '', req.body.vorlage || '', req.body.vermittler || '',
-      req.body.customer_id || null, req.body.vermittler_id || null,
-      req.body.versicherung_id || null, req.body.rental_id || null,
-      req.body.unfalldatum || '', req.body.unfallort || '',
-      req.body.polizei_vor_ort ? 1 : 0,
-      req.body.mietart || '', req.body.wiedervorlage_datum || '',
-      req.body.zahlungsstatus || 'offen', req.body.status || 'offen',
-      req.body.notizen || '',
+      merged.datum, merged.kunde, merged.anwalt, merged.vermittler,
+      merged.customer_id, merged.vermittler_id, merged.versicherung_id, merged.rental_id,
+      merged.unfalldatum, merged.unfallort, merged.polizei_vor_ort,
+      merged.mietart, merged.wiedervorlage_datum,
+      merged.zahlungsstatus, merged.status,
       Number(req.params.id)
     ]
   );
 
   res.json(queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]));
+});
+
+// ===== Akten-Beteiligte (participants) =====
+app.get('/api/akten/:id/beteiligte', (req, res) => {
+  res.json(queryAll(
+    'SELECT * FROM akten_beteiligte WHERE akte_id = ? ORDER BY sort_order ASC, id ASC',
+    [Number(req.params.id)]
+  ));
+});
+
+app.put('/api/akten/:id/beteiligte/sort', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const { order } = req.body; // array of beteiligter IDs in desired order
+  if (!Array.isArray(order)) return res.status(400).json({ error: 'order array required' });
+  const akteId = Number(req.params.id);
+  order.forEach((betId, idx) => {
+    execute('UPDATE akten_beteiligte SET sort_order = ? WHERE id = ? AND akte_id = ?', [idx, Number(betId), akteId]);
+  });
+  res.json({ success: true });
+});
+
+app.post('/api/akten/:id/beteiligte', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const { type, entity_id, name, adresse, telefon, email, art } = req.body;
+  if (!type) return res.status(400).json({ error: 'Typ erforderlich' });
+  const akteId = Number(req.params.id);
+  if (type === 'kunde') {
+    const existing = queryOne('SELECT id FROM akten_beteiligte WHERE akte_id = ? AND type = ?', [akteId, 'kunde']);
+    if (existing) return res.status(400).json({ error: 'Es darf nur ein Kunde pro Akte hinterlegt sein' });
+  }
+  const maxOrder = queryOne('SELECT MAX(sort_order) as m FROM akten_beteiligte WHERE akte_id = ?', [akteId]);
+  const nextOrder = (maxOrder && maxOrder.m !== null ? maxOrder.m : -1) + 1;
+  execute(
+    'INSERT INTO akten_beteiligte (akte_id, type, entity_id, name, adresse, telefon, email, art, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [akteId, type, entity_id || null, name || '', adresse || '', telefon || '', email || '', art || '', nextOrder]
+  );
+  res.status(201).json({ success: true });
+});
+
+app.delete('/api/akten/:id/beteiligte/:betId', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  execute(
+    'DELETE FROM akten_beteiligte WHERE id = ? AND akte_id = ?',
+    [Number(req.params.betId), Number(req.params.id)]
+  );
+  res.json({ success: true });
+});
+
+// ===== Akteneinträge (case entries) =====
+// ===== AKTEN-POST (Korrespondenz) =====
+app.get('/api/akten/:id/post', (req, res) => {
+  res.json(queryAll(
+    `SELECT p.*, s.name AS uploader_name FROM akten_post p LEFT JOIN staff s ON p.uploaded_by = s.id WHERE p.akte_id = ? ORDER BY p.post_date DESC, p.id DESC`,
+    [Number(req.params.id)]
+  ));
+});
+
+app.post('/api/akten/:id/post', (req, res) => {
+  const userId = Number(req.headers['x-user-id']);
+  const { post_date, sender, recipient, subject, s3_key, filename } = req.body;
+  if (!filename) return res.status(400).json({ error: 'Dateiname ist Pflichtfeld' });
+  const result = execute(
+    'INSERT INTO akten_post (akte_id, post_date, sender, recipient, subject, s3_key, filename, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [Number(req.params.id), post_date || new Date().toISOString().split('T')[0], sender || '', recipient || '', subject || '', s3_key, filename, userId]
+  );
+  res.json({ id: result.lastId, message: 'Post eingetragen' });
+});
+
+app.put('/api/akten-post/:id', (req, res) => {
+  const { post_date, sender, recipient, subject, s3_key, filename } = req.body;
+  let sql = 'UPDATE akten_post SET post_date=?, sender=?, recipient=?, subject=?';
+  const params = [post_date || '', sender || '', recipient || '', subject || ''];
+  if (s3_key !== undefined) { sql += ', s3_key=?'; params.push(s3_key); }
+  if (filename !== undefined) { sql += ', filename=?'; params.push(filename); }
+  sql += ' WHERE id=?';
+  params.push(Number(req.params.id));
+  execute(sql, params);
+  res.json({ message: 'Post aktualisiert' });
+});
+
+app.delete('/api/akten-post/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  execute('DELETE FROM akten_post WHERE id = ?', [Number(req.params.id)]);
+  res.json({ message: 'Post gelöscht' });
+});
+
+app.get('/api/akten/:id/eintraege', (req, res) => {
+  const rows = queryAll(
+    `SELECT e.*, s.name AS author_name
+     FROM akten_eintraege e
+     LEFT JOIN staff s ON e.created_by = s.id
+     WHERE e.akte_id = ?
+     ORDER BY e.created_at DESC`,
+    [Number(req.params.id)]
+  );
+  res.json(rows);
+});
+
+app.post('/api/akten/:id/eintraege', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const akteId = Number(req.params.id);
+  const userId = Number(req.headers['x-user-id']);
+  const { text } = req.body;
+  if (!text || !text.trim()) {
+    return res.status(400).json({ error: 'Text darf nicht leer sein' });
+  }
+  const now = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Berlin' }).replace(' ', 'T');
+  execute(
+    'INSERT INTO akten_eintraege (akte_id, text, created_by, created_at) VALUES (?, ?, ?, ?)',
+    [akteId, text.trim(), userId, now]
+  );
+  res.json({ success: true });
+});
+
+app.delete('/api/akten/:akteId/eintraege/:eintragId', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  const userId = Number(req.headers['x-user-id']);
+  const eintrag = queryOne('SELECT * FROM akten_eintraege WHERE id = ? AND akte_id = ?', [Number(req.params.eintragId), Number(req.params.akteId)]);
+  if (!eintrag) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+
+  // Admin kann alles löschen
+  if (permission === 'Admin') {
+    execute('DELETE FROM akten_eintraege WHERE id = ?', [eintrag.id]);
+    return res.json({ success: true });
+  }
+
+  // Andere: nur eigene Einträge und max 24h alt
+  if (eintrag.created_by !== userId) {
+    return res.status(403).json({ error: 'Sie k\u00f6nnen nur eigene Eintr\u00e4ge l\u00f6schen.' });
+  }
+
+  const created = new Date(eintrag.created_at);
+  const now = new Date();
+  const diffHours = (now - created) / (1000 * 60 * 60);
+  if (diffHours > 24) {
+    return res.status(403).json({ error: 'Eintr\u00e4ge k\u00f6nnen nur innerhalb von 24 Stunden gel\u00f6scht werden.' });
+  }
+
+  execute('DELETE FROM akten_eintraege WHERE id = ?', [eintrag.id]);
+  res.json({ success: true });
 });
 
 app.delete('/api/akten/:id', (req, res) => {

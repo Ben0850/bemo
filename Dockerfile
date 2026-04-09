@@ -8,6 +8,9 @@ RUN npm ci --only=production
 FROM node:20-alpine
 LABEL maintainer="Bemo GmbH"
 
+# LibreOffice for Office → PDF conversion
+RUN apk add --no-cache libreoffice font-noto font-noto-cjk
+
 # Security: non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 

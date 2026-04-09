@@ -13,10 +13,12 @@ services:
       - NODE_ENV=production
       - PORT=3001
       - HOST=0.0.0.0
+      - STAMMDATEN_API_URL=http://stammdaten-api:3010
     volumes:
       - app-data:/app/data
     networks:
       - internal
+      - shared
     expose:
       - "3001"
     healthcheck:
@@ -81,3 +83,5 @@ volumes:
 networks:
   internal:
     driver: bridge
+  shared:
+    external: true

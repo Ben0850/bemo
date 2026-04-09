@@ -347,6 +347,69 @@ async function getDb() {
   `);
 
   try { db.run("ALTER TABLE customer_rebates ADD COLUMN rebate_period TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE customer_rebates ADD COLUMN next_due_date TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE customer_rebates ADD COLUMN is_active INTEGER DEFAULT 1"); } catch(e) {}
+
+  // Customer: Firmenkunden-Erweiterung (Bankverbindung, Steuernr, Rechnungskunde, Mahnstufe)
+  try { db.run("ALTER TABLE customers ADD COLUMN tax_number TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE customers ADD COLUMN bank_iban TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE customers ADD COLUMN bank_bic TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE customers ADD COLUMN bank_holder TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE customers ADD COLUMN bank_name TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE customers ADD COLUMN is_invoice_customer INTEGER DEFAULT 0"); } catch(e) {}
+  try { db.run("ALTER TABLE customers ADD COLUMN dunning_level TEXT DEFAULT ''"); } catch(e) {}
+
+  // Credits: Erweiterte Felder (Art, abgerechneter Zeitraum)
+  try { db.run("ALTER TABLE credits ADD COLUMN credit_type TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE credits ADD COLUMN settled_period TEXT DEFAULT ''"); } catch(e) {}
+
+  // ===== Vermittler-Verwaltung (lokal in Bemo-DB, nicht in Stammdaten-API) =====
+  db.run(`
+    CREATE TABLE IF NOT EXISTS vermittler_management (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vermittler_id INTEGER NOT NULL UNIQUE,
+      bank_iban TEXT DEFAULT '',
+      bank_bic TEXT DEFAULT '',
+      bank_holder TEXT DEFAULT '',
+      bank_name TEXT DEFAULT '',
+      special_agreements TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS vermittler_rebates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vermittler_id INTEGER NOT NULL,
+      rebate_date TEXT NOT NULL,
+      rebate_text TEXT NOT NULL DEFAULT '',
+      rebate_type TEXT NOT NULL DEFAULT '',
+      rebate_period TEXT DEFAULT '',
+      next_due_date TEXT DEFAULT '',
+      is_active INTEGER DEFAULT 1,
+      agreed_with_staff_id INTEGER DEFAULT NULL,
+      created_by_staff_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (agreed_with_staff_id) REFERENCES staff(id),
+      FOREIGN KEY (created_by_staff_id) REFERENCES staff(id)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS vermittler_credits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vermittler_id INTEGER NOT NULL,
+      credit_number TEXT DEFAULT '',
+      credit_date TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      amount_net REAL DEFAULT 0,
+      amount_gross REAL DEFAULT 0,
+      credit_type TEXT DEFAULT '',
+      settled_period TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 
   // Invoice schema additions for v1 milestone (DB-01, DB-02)
   try { db.run("ALTER TABLE invoices ADD COLUMN service_date TEXT DEFAULT ''"); } catch(e) {}
@@ -354,6 +417,7 @@ async function getDb() {
   // GoBD: Firmendaten-Snapshot bei Erstellung einfrieren
   try { db.run("ALTER TABLE invoices ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE credit_notes ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
   // Bank accounts (Bankverbindungen)
   db.run(`
     CREATE TABLE IF NOT EXISTS bank_accounts (
@@ -449,6 +513,15 @@ async function getDb() {
     )
   `);
 
+  // Migration: add mietart and created_by to rentals
+  try { db.run("ALTER TABLE rentals ADD COLUMN mietart TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE rentals ADD COLUMN created_by INTEGER DEFAULT NULL"); } catch(e) {}
+  try { db.run("ALTER TABLE rentals ADD COLUMN status TEXT DEFAULT 'Reservierung'"); } catch(e) {}
+  try { db.run("ALTER TABLE rentals ADD COLUMN start_time TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE rentals ADD COLUMN end_time TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE rentals ADD COLUMN km_start TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE rentals ADD COLUMN km_end TEXT DEFAULT ''"); } catch(e) {}
+
   // Overtime deductions table
   db.run(`
     CREATE TABLE IF NOT EXISTS overtime_deductions (
@@ -460,6 +533,22 @@ async function getDb() {
       created_by INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+    )
+  `);
+
+  // File activity log
+  db.run(`
+    CREATE TABLE IF NOT EXISTS file_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action TEXT NOT NULL,
+      file_key TEXT NOT NULL,
+      filename TEXT NOT NULL DEFAULT '',
+      folder TEXT NOT NULL DEFAULT '',
+      user_id INTEGER,
+      username TEXT NOT NULL DEFAULT '',
+      file_size INTEGER DEFAULT 0,
+      details TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT ''
     )
   `);
 
@@ -557,6 +646,219 @@ async function getDb() {
     db.run('PRAGMA foreign_keys = ON');
     console.error('akten migration failed:', e.message);
   }
+
+  // Migration: add created_by to akten
+  try { db.run("ALTER TABLE akten ADD COLUMN created_by INTEGER DEFAULT NULL"); } catch(e) {}
+
+  // Migration: remove vorlage and notizen columns from akten
+  try {
+    const colCheck = db.exec("PRAGMA table_info(akten)");
+    const hasVorlage = colCheck.length > 0 && colCheck[0].values.some(row => row[1] === 'vorlage');
+    if (hasVorlage) {
+      db.run('PRAGMA foreign_keys = OFF');
+      db.run('BEGIN TRANSACTION');
+      db.run(`
+        CREATE TABLE akten_clean (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          aktennummer     TEXT NOT NULL DEFAULT '' UNIQUE,
+          datum           TEXT NOT NULL DEFAULT '',
+          kunde           TEXT NOT NULL DEFAULT '',
+          anwalt          TEXT NOT NULL DEFAULT '',
+          vermittler      TEXT NOT NULL DEFAULT '',
+          customer_id     INTEGER DEFAULT NULL,
+          vermittler_id   INTEGER DEFAULT NULL,
+          versicherung_id INTEGER DEFAULT NULL,
+          rental_id       INTEGER DEFAULT NULL,
+          unfalldatum     TEXT DEFAULT '',
+          unfallort       TEXT DEFAULT '',
+          polizei_vor_ort INTEGER DEFAULT 0,
+          mietart         TEXT DEFAULT '',
+          wiedervorlage_datum TEXT DEFAULT '',
+          zahlungsstatus  TEXT NOT NULL DEFAULT 'offen',
+          status          TEXT NOT NULL DEFAULT 'Neu Angelegt',
+          created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      db.run(`
+        INSERT INTO akten_clean
+          (id, aktennummer, datum, kunde, anwalt, vermittler,
+           customer_id, vermittler_id, versicherung_id, rental_id,
+           unfalldatum, unfallort, polizei_vor_ort,
+           mietart, wiedervorlage_datum,
+           zahlungsstatus, status, created_at, updated_at)
+        SELECT
+          id, aktennummer, datum, kunde, anwalt, vermittler,
+          customer_id, vermittler_id, versicherung_id, rental_id,
+          unfalldatum, unfallort, polizei_vor_ort,
+          mietart, wiedervorlage_datum,
+          zahlungsstatus, status, created_at, updated_at
+        FROM akten
+      `);
+      db.run('DROP TABLE akten');
+      db.run('ALTER TABLE akten_clean RENAME TO akten');
+      db.run('COMMIT');
+      db.run('PRAGMA foreign_keys = ON');
+      console.log('akten migration: removed vorlage and notizen columns');
+    }
+  } catch (e) {
+    try { db.run('ROLLBACK'); } catch (_) {}
+    db.run('PRAGMA foreign_keys = ON');
+    console.error('akten cleanup migration failed:', e.message);
+  }
+
+  // Akten-Beteiligte (participants, many-per-akte)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS akten_beteiligte (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      akte_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      entity_id INTEGER,
+      name TEXT DEFAULT '',
+      adresse TEXT DEFAULT '',
+      telefon TEXT DEFAULT '',
+      email TEXT DEFAULT '',
+      art TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (akte_id) REFERENCES akten(id) ON DELETE CASCADE
+    )
+  `);
+  // Migration: add columns if missing
+  try { db.run("ALTER TABLE akten_beteiligte ADD COLUMN adresse TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE akten_beteiligte ADD COLUMN telefon TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE akten_beteiligte ADD COLUMN email TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE akten_beteiligte ADD COLUMN art TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE akten_beteiligte ADD COLUMN sort_order INTEGER DEFAULT 0"); } catch(e) {}
+
+  // Fleet vehicle damages
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fleet_damages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fleet_vehicle_id INTEGER NOT NULL,
+      damage_date TEXT NOT NULL DEFAULT '',
+      damage_type TEXT NOT NULL DEFAULT '',
+      repair_cost REAL DEFAULT 0,
+      caused_by TEXT DEFAULT '',
+      status TEXT DEFAULT 'unrepariert',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (fleet_vehicle_id) REFERENCES fleet_vehicles(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Fleet insurance contracts
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fleet_insurance (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fleet_vehicle_id INTEGER NOT NULL,
+      contract_date TEXT NOT NULL DEFAULT '',
+      insurance_name TEXT DEFAULT '',
+      insurance_type TEXT DEFAULT '',
+      annual_premium REAL DEFAULT 0,
+      payment_interval TEXT DEFAULT '',
+      payment_method TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (fleet_vehicle_id) REFERENCES fleet_vehicles(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Fleet vehicle tax
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fleet_tax (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fleet_vehicle_id INTEGER NOT NULL,
+      tax_date TEXT NOT NULL DEFAULT '',
+      tax_year TEXT DEFAULT '',
+      tax_amount REAL DEFAULT 0,
+      payment_method TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (fleet_vehicle_id) REFERENCES fleet_vehicles(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Fleet maintenance documents
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fleet_maintenance_docs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      maintenance_id INTEGER NOT NULL,
+      filename TEXT NOT NULL DEFAULT '',
+      s3_key TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (maintenance_id) REFERENCES fleet_maintenance(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Fleet insurance documents
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fleet_insurance_docs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      insurance_id INTEGER NOT NULL,
+      filename TEXT NOT NULL DEFAULT '',
+      s3_key TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (insurance_id) REFERENCES fleet_insurance(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Fleet damage documents
+  db.run(`
+    CREATE TABLE IF NOT EXISTS fleet_damage_docs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      damage_id INTEGER NOT NULL,
+      filename TEXT NOT NULL DEFAULT '',
+      s3_key TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (damage_id) REFERENCES fleet_damages(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Rental-Beteiligte (participants for rentals)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS rental_beteiligte (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rental_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      entity_id INTEGER,
+      name TEXT DEFAULT '',
+      adresse TEXT DEFAULT '',
+      telefon TEXT DEFAULT '',
+      email TEXT DEFAULT '',
+      art TEXT DEFAULT '',
+      sort_order INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (rental_id) REFERENCES rentals(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Akteneinträge (case entries / notes log)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS akten_eintraege (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      akte_id INTEGER NOT NULL,
+      text TEXT NOT NULL DEFAULT '',
+      created_by INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (akte_id) REFERENCES akten(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES staff(id)
+    )
+  `);
+
+  // Akten-Post (Korrespondenz)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS akten_post (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      akte_id INTEGER NOT NULL,
+      post_date TEXT NOT NULL,
+      sender TEXT DEFAULT '',
+      recipient TEXT DEFAULT '',
+      subject TEXT DEFAULT '',
+      s3_key TEXT NOT NULL DEFAULT '',
+      filename TEXT NOT NULL DEFAULT '',
+      uploaded_by INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (akte_id) REFERENCES akten(id) ON DELETE CASCADE,
+      FOREIGN KEY (uploaded_by) REFERENCES staff(id)
+    )
+  `);
 
   // Phase 1: Audit trail table (DB-05 — GoBD compliance)
   db.run(`
