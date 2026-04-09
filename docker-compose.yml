@@ -84,4 +84,4 @@ networks:
   internal:
     driver: bridge
   shared:
-    external: true
+    external: false
