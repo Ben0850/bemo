@@ -85,6 +85,14 @@ function showToast(message, type = 'success') {
   setTimeout(() => toast.remove(), 3000);
 }
 
+// ===== Office Preload (background conversion when folder is opened) =====
+const _officeExtensions = ['doc','docx','xls','xlsx','ppt','pptx'];
+function preloadOfficeFiles(fileKeys) {
+  const officeKeys = fileKeys.filter(k => _officeExtensions.includes((k.split('.').pop() || '').toLowerCase()));
+  if (officeKeys.length === 0) return;
+  api('/api/files/preload-office', { method: 'POST', body: { keys: officeKeys } }).catch(() => {});
+}
+
 // ===== Office Preview (LibreOffice PDF, loaded as Blob to prevent print dialog) =====
 async function renderOfficePreview(s3Key, ext, container) {
   container.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:16px;font-size:13px;">Konvertiere...</div>';
@@ -4202,6 +4210,7 @@ async function s3LoadFolder(folder) {
     }
 
     listEl.innerHTML = html;
+    preloadOfficeFiles(sortedFiles.map(f => f.key));
   } catch (err) {
     listEl.innerHTML = '<div style="padding:20px;color:var(--danger);text-align:center;">Fehler: ' + escapeHtml(err.message) + '</div>';
   }
@@ -8479,6 +8488,7 @@ async function fvLoadFolder(folder) {
     }
 
     listEl.innerHTML = html;
+    preloadOfficeFiles(result.files.filter(f => f.name && f.name !== '.folder').map(f => f.key));
   } catch (err) {
     listEl.innerHTML = '<div style="padding:20px;color:var(--danger);text-align:center;">Fehler: ' + escapeHtml(err.message) + '</div>';
   }
@@ -12508,6 +12518,7 @@ async function akLoadFolder(folder) {
       html += '<div style="padding:30px;text-align:center;color:var(--text-muted);">Ordner ist leer.</div>';
     }
     listEl.innerHTML = html;
+    preloadOfficeFiles(result.files.filter(f => f.name && f.name !== '.folder').map(f => f.key));
   } catch (err) {
     listEl.innerHTML = '<div style="padding:16px;color:var(--danger);text-align:center;">Fehler: ' + escapeHtml(err.message) + '</div>';
   }
@@ -12680,6 +12691,7 @@ async function rvLoadFolder(folder) {
       html += '<div style="padding:30px;text-align:center;color:var(--text-muted);">Ordner ist leer.</div>';
     }
     listEl.innerHTML = html;
+    preloadOfficeFiles(result.files.filter(f => f.name && f.name !== '.folder').map(f => f.key));
   } catch (err) {
     listEl.innerHTML = '<div style="padding:16px;color:var(--danger);text-align:center;">Fehler: ' + escapeHtml(err.message) + '</div>';
   }

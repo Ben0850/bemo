@@ -3126,26 +3126,26 @@ app.get('/api/files/proxy-download', async (req, res) => {
 
 // Office → PDF conversion for preview (LibreOffice headless)
 const _pdfCache = new Map();
+const _pdfCacheMax = 100;
+const _pdfConverting = new Set(); // keys currently being converted
+let _pdfConvertQueue = [];
+const _pdfMaxConcurrent = 2;
+let _pdfActiveCount = 0;
 const SOFFICE = process.platform === 'win32'
   ? 'C:\\Program Files\\LibreOffice\\program\\soffice.exe'
   : '/usr/bin/libreoffice';
+const OFFICE_EXT = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
 
-app.get('/api/files/office-to-pdf', async (req, res) => {
+async function convertOfficeToPdf(s3Key) {
+  if (_pdfCache.has(s3Key)) return _pdfCache.get(s3Key);
+  if (_pdfConverting.has(s3Key)) return null; // already in progress
+
+  _pdfConverting.add(s3Key);
   try {
-    const { key } = req.query;
-    if (!key) return res.status(400).json({ error: 'key ist Pflichtfeld' });
-
-    if (_pdfCache.has(key)) {
-      const cached = _pdfCache.get(key);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'inline');
-      return res.send(cached);
-    }
-
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bemo-office-'));
-    const ext = (key.split('.').pop() || '').toLowerCase();
+    const ext = (s3Key.split('.').pop() || '').toLowerCase();
     const inputFile = path.join(tmpDir, 'input.' + ext);
-    const command = new GetObjectCommand({ Bucket: getS3Bucket(), Key: key });
+    const command = new GetObjectCommand({ Bucket: getS3Bucket(), Key: s3Key });
     const response = await getS3Client().send(command);
     const chunks = [];
     for await (const chunk of response.Body) chunks.push(chunk);
@@ -3156,7 +3156,7 @@ app.get('/api/files/office-to-pdf', async (req, res) => {
         '--headless', '--invisible', '--nocrashreport', '--nodefault', '--nologo', '--nofirststartwizard', '--norestore',
         '--convert-to', 'pdf', '--outdir', tmpDir, inputFile
       ], { timeout: 30000 }, (err, stdout, stderr) => {
-        if (err) reject(new Error('LibreOffice Konvertierung fehlgeschlagen: ' + (stderr || err.message)));
+        if (err) reject(new Error(stderr || err.message));
         else resolve();
       });
     });
@@ -3164,13 +3164,47 @@ app.get('/api/files/office-to-pdf', async (req, res) => {
     const pdfFile = path.join(tmpDir, 'input.pdf');
     if (!fs.existsSync(pdfFile)) throw new Error('PDF wurde nicht erzeugt');
     const pdfData = fs.readFileSync(pdfFile);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
 
-    if (_pdfCache.size > 50) {
+    // LRU cache: remove oldest if full
+    if (_pdfCache.size >= _pdfCacheMax) {
       const firstKey = _pdfCache.keys().next().value;
       _pdfCache.delete(firstKey);
     }
-    _pdfCache.set(key, pdfData);
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    _pdfCache.set(s3Key, pdfData);
+    return pdfData;
+  } catch (err) {
+    console.error('Office-to-PDF convert error (' + s3Key + '):', err.message);
+    return null;
+  } finally {
+    _pdfConverting.delete(s3Key);
+  }
+}
+
+// Process preload queue (max 2 concurrent)
+function processPreloadQueue() {
+  while (_pdfActiveCount < _pdfMaxConcurrent && _pdfConvertQueue.length > 0) {
+    const key = _pdfConvertQueue.shift();
+    if (_pdfCache.has(key) || _pdfConverting.has(key)) { processPreloadQueue(); return; }
+    _pdfActiveCount++;
+    convertOfficeToPdf(key).finally(() => { _pdfActiveCount--; processPreloadQueue(); });
+  }
+}
+
+// Serve PDF preview
+app.get('/api/files/office-to-pdf', async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) return res.status(400).json({ error: 'key ist Pflichtfeld' });
+
+    if (_pdfCache.has(key)) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'inline');
+      return res.send(_pdfCache.get(key));
+    }
+
+    const pdfData = await convertOfficeToPdf(key);
+    if (!pdfData) return res.status(500).json({ error: 'Konvertierung fehlgeschlagen' });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline');
@@ -3179,6 +3213,19 @@ app.get('/api/files/office-to-pdf', async (req, res) => {
     console.error('Office-to-PDF Error:', err.message);
     res.status(500).json({ error: 'PDF-Konvertierung fehlgeschlagen: ' + err.message });
   }
+});
+
+// Preload: convert all Office files in a folder in background
+app.post('/api/files/preload-office', async (req, res) => {
+  const { keys } = req.body;
+  if (!keys || !Array.isArray(keys)) return res.json({ queued: 0 });
+  const toConvert = keys.filter(k => {
+    const ext = (k.split('.').pop() || '').toLowerCase();
+    return OFFICE_EXT.includes(ext) && !_pdfCache.has(k) && !_pdfConverting.has(k);
+  });
+  _pdfConvertQueue.push(...toConvert);
+  processPreloadQueue();
+  res.json({ queued: toConvert.length, cached: keys.length - toConvert.length });
 });
 
 // File log
