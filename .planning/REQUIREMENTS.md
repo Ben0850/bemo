@@ -9,10 +9,10 @@ Anforderungen für das Modul "Zahlungsverwaltung". Jede mappt in der Roadmap auf
 
 ### Schema & Datenmodell
 
-- [ ] **PAY-DB-01**: Neue Tabelle `invoice_payments` mit Feldern id, invoice_id (FK), direction (in/out), amount, payment_date, payment_method, bank_account_id (FK auf bank_accounts), reference, notes, booked_by, created_at, updated_at
-- [ ] **PAY-DB-02**: Foreign Key Constraint von invoice_payments.invoice_id auf invoices.id (ON DELETE CASCADE — eine gelöschte Rechnung räumt ihre Zahlungen mit ab)
-- [ ] **PAY-DB-03**: CHECK-Constraint auf direction: nur 'in' oder 'out' erlaubt; CHECK-Constraint auf amount > 0
-- [ ] **PAY-DB-04**: Indizes auf (invoice_id, payment_date) und (bank_account_id) für Performance bei Listen und Konto-Auswertungen
+- [x] **PAY-DB-01**: Neue Tabelle `invoice_payments` mit Feldern id, invoice_id (FK), direction (in/out), amount, payment_date, payment_method, bank_account_id (FK auf bank_accounts), reference, notes, booked_by, created_at, updated_at
+- [x] **PAY-DB-02**: Foreign Key Constraint von invoice_payments.invoice_id auf invoices.id (ON DELETE CASCADE — eine gelöschte Rechnung räumt ihre Zahlungen mit ab)
+- [x] **PAY-DB-03**: CHECK-Constraint auf direction: nur 'in' oder 'out' erlaubt; CHECK-Constraint auf amount > 0
+- [x] **PAY-DB-04**: Indizes auf (invoice_id, payment_date) und (bank_account_id) für Performance bei Listen und Konto-Auswertungen
 
 ### Backend & API
 
@@ -65,10 +65,10 @@ Welche Phasen welche Requirements abdecken — vom Roadmapper gefüllt 2026-04-2
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PAY-DB-01 | Phase 4 | Pending |
-| PAY-DB-02 | Phase 4 | Pending |
-| PAY-DB-03 | Phase 4 | Pending |
-| PAY-DB-04 | Phase 4 | Pending |
+| PAY-DB-01 | Phase 4 | Complete |
+| PAY-DB-02 | Phase 4 | Complete |
+| PAY-DB-03 | Phase 4 | Complete |
+| PAY-DB-04 | Phase 4 | Complete |
 | PAY-API-01 | Phase 4 | Pending |
 | PAY-API-02 | Phase 4 | Pending |
 | PAY-API-03 | Phase 4 | Pending |

@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Zahlungsverwaltung
-status: roadmap_complete
-stopped_at: Roadmap v1.1 erstellt — bereit für Phase 4 Planning
-last_updated: "2026-04-28T09:15:00.000Z"
+milestone: v1.0
+milestone_name: — Akten-Modul
+status: unknown
+stopped_at: Plan 04-01 abgeschlossen — invoice_payments-Schema live, Plan 04-02 (REST-API) ist next
+last_updated: "2026-04-28T10:01:22.676Z"
 progress:
   total_phases: 3
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 2
+  completed_plans: 1
 ---
 
 # Project State: Bemo Verwaltungssystem
@@ -24,35 +24,36 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Alle Geschäftsprozesse der Autovermietung zuverlässig in einem System abbilden.
-**Current focus:** Milestone v1.1 — Zahlungsverwaltung (Phasen 4-6)
+**Current focus:** Phase 04 — Schema & Backend
 
 ---
 
 ## Current Position
 
-Phase: Phase 4 — Schema & Backend (Not started)
-Plan: —
-Status: Roadmap complete, awaiting `/gsd:plan-phase 4`
-Last activity: 2026-04-28 — ROADMAP.md geschrieben, 19/19 Requirements gemappt
-
-Progress: [          ] 0/3 phases (0%)
+Phase: 04 (Schema & Backend) — EXECUTING
+Plan: 2 of 2 (Plan 04-01 complete)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 5 (v1.0)
-- Average duration: ~10 min
+- Total plans completed: 6 (5 v1.0 + 1 v1.1)
+- Average duration: ~9 min
 - Milestone v1.0 status: Complete
+- Milestone v1.1 status: Phase 04 in progress (1/2 plans done)
 
 **By Milestone:**
 
 | Milestone | Phases | Status |
 |-----------|--------|--------|
 | v1.0 Akten-Modul | 3 | Complete (2026-03-27) |
-| v1.1 Zahlungsverwaltung | 3 | Roadmap complete, Phase 4 next |
+| v1.1 Zahlungsverwaltung | 3 | Phase 04 executing (1/2 plans) |
 
----
+**Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 04-schema-backend P01 | 1min | 1 | 1 |
 
 ## Accumulated Context
 
@@ -70,6 +71,8 @@ Progress: [          ] 0/3 phases (0%)
 | Rechnungsstatus aus Saldo abgeleitet | Single source of truth, automatische Konsistenz | 2026-04-28 |
 | PAY-STAT-01/02/03 in Phase 5 (mit API-06) | Status-Logik und Listen-Anzeige sind eine verifizierbare Einheit | 2026-04-28 |
 | PAY-STAT-04 in Phase 6 (mit Detail-UI) | Prominente Status-Anzeige gehört zur Detailseite, nicht zur Listen-Phase | 2026-04-28 |
+| FK invoice_payments.bank_account_id ohne ON DELETE CASCADE | Bankkonto-Löschen darf Zahlungshistorie nicht entfernen (GoBD-Konformität) | 2026-04-28 |
+| booked_by als TEXT NOT NULL DEFAULT '' | POST-Handler füllt aus x-user-name-Header, DEFAULT verhindert NULL-Constraint-Probleme bei Direct-SQL-Tests | 2026-04-28 |
 
 ### Existing relevant scaffold (v1.1 context)
 
@@ -93,6 +96,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-28T09:15:00.000Z
-Stopped at: Roadmap v1.1 komplett, 3 Phasen definiert, 19/19 Requirements gemappt
+Last session: 2026-04-28T10:01:22.667Z
+Stopped at: Plan 04-01 abgeschlossen — invoice_payments-Schema live, Plan 04-02 (REST-API) ist next
 Resume: `/gsd:plan-phase 4`
