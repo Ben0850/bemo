@@ -28,7 +28,7 @@ Anforderungen für das Modul "Zahlungsverwaltung". Jede mappt in der Roadmap auf
 - [x] **PAY-STAT-01**: Rechnungs-Saldo wird berechnet als SUM(direction='in') − SUM(direction='out')
 - [x] **PAY-STAT-02**: Rechnungs-Status wird automatisch abgeleitet: 0 → "Offen", >0 und <total_gross → "Teilbezahlt", =total_gross → "Bezahlt", >total_gross → "Überzahlt"
 - [x] **PAY-STAT-03**: Status wird in der Rechnungs-Liste als Badge angezeigt
-- [ ] **PAY-STAT-04**: Status wird in der Rechnungs-Detailseite prominent angezeigt zusammen mit Restbetrag
+- [x] **PAY-STAT-04**: Status wird in der Rechnungs-Detailseite prominent angezeigt zusammen mit Restbetrag
 
 ### Frontend — UI
 
@@ -36,7 +36,7 @@ Anforderungen für das Modul "Zahlungsverwaltung". Jede mappt in der Roadmap auf
 - [ ] **PAY-UI-02**: Button "+ Zahlungseingang" und "+ Zahlungsausgang" in der Rechnungs-Detailseite (oder kombinierter Button mit Richtungs-Auswahl im Formular)
 - [ ] **PAY-UI-03**: Formular mit Feldern: Datum (default heute), Betrag, Bankkonto (Dropdown aus bank_accounts), Zahlungsart (Überweisung/Bar/Kartenzahlung/...), Verwendungszweck/Notiz
 - [ ] **PAY-UI-04**: Bestehende Zahlungen lassen sich aus der Tabelle direkt bearbeiten und löschen (mit Bestätigungs-Dialog)
-- [ ] **PAY-UI-05**: Saldo-Anzeige ("Bereits bezahlt: X €", "Offener Betrag: Y €") über der Zahlungs-Tabelle, plus Status-Badge
+- [x] **PAY-UI-05**: Saldo-Anzeige ("Bereits bezahlt: X €", "Offener Betrag: Y €") über der Zahlungs-Tabelle, plus Status-Badge
 
 ## v2 Requirements (deferred)
 
@@ -78,12 +78,12 @@ Welche Phasen welche Requirements abdecken — vom Roadmapper gefüllt 2026-04-2
 | PAY-STAT-01 | Phase 5 | Complete |
 | PAY-STAT-02 | Phase 5 | Complete |
 | PAY-STAT-03 | Phase 5 | Complete |
-| PAY-STAT-04 | Phase 6 | Pending |
+| PAY-STAT-04 | Phase 6 | Complete |
 | PAY-UI-01 | Phase 6 | Pending |
 | PAY-UI-02 | Phase 6 | Pending |
 | PAY-UI-03 | Phase 6 | Pending |
 | PAY-UI-04 | Phase 6 | Pending |
-| PAY-UI-05 | Phase 6 | Pending |
+| PAY-UI-05 | Phase 6 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 19 total

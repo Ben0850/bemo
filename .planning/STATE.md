@@ -3,19 +3,19 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — Akten-Modul
 status: unknown
-stopped_at: "Plan 05-02 abgeschlossen (Task 1 commit e565725, Task 2 User-Approval erteilt). Phase 5 (Status-Logik & Listen-Integration) Code-vollstaendig — bereit fuer `/gsd:verify-work 5`. Naechster Schritt: `/gsd:plan-phase 6` (Detail-UI & Zahlungserfassung)."
-last_updated: "2026-04-28T11:05:09.097Z"
+stopped_at: "Plan 06-01 abgeschlossen (Task 1 commit 2f7afa8 — loadInvoicePayments + loadBankAccounts; Task 2 commit 59bdf19 — Saldo-Header in renderInvoiceDetail). Naechster Schritt: /gsd:execute-phase 6 (Plan 06-02 Zahlungstabelle + CRUD-Modal)."
+last_updated: "2026-04-28T11:59:16.688Z"
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 6
+  completed_plans: 5
 ---
 
 # Project State: Bemo Verwaltungssystem
 
 **Last updated:** 2026-04-28
-**Session:** Milestone v1.1 Zahlungsverwaltung — Phase 4 + Phase 5 Code-vollstaendig (4/4 Plans), Phase 5 bereit fuer Verification, Phase 6 (Detail-UI) als naechstes
+**Session:** Milestone v1.1 Zahlungsverwaltung — Phase 4 + Phase 5 Code-vollstaendig (4/4 Plans), Phase 5 bereit fuer Verification, Phase 6 in progress (1/2: Saldo-Header + Daten-Loader committed)
 
 ---
 
@@ -24,30 +24,30 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Alle Geschäftsprozesse der Autovermietung zuverlässig in einem System abbilden.
-**Current focus:** Phase 05 abgeschlossen (Code-Stand, User-Approval erteilt) — bereit fuer Verification, dann Phase 06 Detail-UI
+**Current focus:** Phase 06 — Detail-UI & Zahlungserfassung
 
 ---
 
 ## Current Position
 
-Phase: 05 (Status-Logik & Listen-Integration) — COMPLETE (2/2 plans, ready for verification)
-Next: Phase 06 — Detail-UI & Zahlungserfassung (PAY-STAT-04 + PAY-UI-01..05)
+Phase: 06 (Detail-UI & Zahlungserfassung) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 9 (5 v1.0 + 4 v1.1)
-- Average duration: ~6 min (v1.1 plans 4-5)
+- Total plans completed: 10 (5 v1.0 + 5 v1.1)
+- Average duration: ~5 min (v1.1 plans 4-5-6)
 - Milestone v1.0 status: Complete
-- Milestone v1.1 status: Phase 04 complete (2/2), Phase 05 complete (2/2, ready for verification), Phase 06 next
+- Milestone v1.1 status: Phase 04 complete (2/2), Phase 05 complete (2/2, ready for verification), Phase 06 in progress (1/2)
 
 **By Milestone:**
 
 | Milestone | Phases | Status |
 |-----------|--------|--------|
 | v1.0 Akten-Modul | 3 | Complete (2026-03-27) |
-| v1.1 Zahlungsverwaltung | 3 | Phase 04 complete (2/2), Phase 05 complete (2/2), Phase 06 next |
+| v1.1 Zahlungsverwaltung | 3 | Phase 04 complete (2/2), Phase 05 complete (2/2), Phase 06 in progress (1/2) |
 
 **Plan Metrics:**
 
@@ -57,6 +57,7 @@ Next: Phase 06 — Detail-UI & Zahlungserfassung (PAY-STAT-04 + PAY-UI-01..05)
 | Phase 04-schema-backend P02 | 4min | 2 tasks | 1 files |
 | Phase 05-status-logik-listen P01 | 5min | 3 tasks | 1 files |
 | Phase 05-status-logik-listen P02 | 13min | 2 tasks | 1 files |
+| Phase 06-detail-ui-zahlungserfassung P01 | 2min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,9 @@ Next: Phase 06 — Detail-UI & Zahlungserfassung (PAY-STAT-04 + PAY-UI-01..05)
 - [Phase 05-status-logik-listen P02]: Spalte 'Zahlung' additiv neben 'Status' — manueller invoices.status (Workflow) und automatischer payment_status (Geld) sind getrennte Konzepte, beide parallel angezeigt
 - [Phase 05-status-logik-listen P02]: Wiederverwendung bestehender badge-* CSS-Klassen — KEIN neues CSS, kein Stil-Conflict
 - [Phase 05-status-logik-listen P02]: User-Approval erteilt mit Verifikations-Scope-Reservation: Layout/Filter/Badges visuell bestaetigt, volles 5-Status-Uebergangs-E2E erst in Phase 6 — vertretbar weil Backend Plan 05-01 bereits 12/12 E2E-Tests gruen hatte
+- [Phase 06-detail-ui-zahlungserfassung]: Saldo-Header zwischen Page-Header und Kundendaten-Card platziert | PAY-STAT-04 verlangt sofort sichtbaren Status beim Oeffnen | 2026-04-28
+- [Phase 06-detail-ui-zahlungserfassung]: loadBankAccounts mit Modul-Cache + defensive []-Fallback | Bankkonten aendern sich selten, Modal muss immer renderbar sein auch bei API-Fehler | 2026-04-28
+- [Phase 06-detail-ui-zahlungserfassung]: Offener Betrag im Frontend berechnen statt Backend-Feld | total_gross + payment_saldo bereits vorhanden, Subtraktion trivial, kein Roundtrip-Aufwand | 2026-04-28
 
 ### Existing relevant scaffold (v1.1 context)
 
@@ -112,6 +116,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-28T10:57:57Z
-Stopped at: Plan 05-02 abgeschlossen (Task 1 commit e565725, Task 2 User-Approval erteilt). Phase 5 (Status-Logik & Listen-Integration) Code-vollstaendig — bereit fuer `/gsd:verify-work 5`. Naechster Schritt: `/gsd:plan-phase 6` (Detail-UI & Zahlungserfassung).
+Last session: 2026-04-28T11:58:58.389Z
+Stopped at: Plan 06-01 abgeschlossen (Task 1 commit 2f7afa8 — loadInvoicePayments + loadBankAccounts; Task 2 commit 59bdf19 — Saldo-Header in renderInvoiceDetail). Naechster Schritt: /gsd:execute-phase 6 (Plan 06-02 Zahlungstabelle + CRUD-Modal).
 Resume: `/gsd:verify-work 5` oder `/gsd:plan-phase 6`
