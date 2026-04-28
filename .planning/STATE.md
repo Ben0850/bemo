@@ -3,19 +3,19 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — Akten-Modul
 status: unknown
-stopped_at: "Plan 05-01 abgeschlossen — derivePaymentStatus helper + GET /api/invoices und GET /api/invoices/:id liefern payment_saldo+payment_status. Naechster Plan: 05-02 Frontend-Listen"
-last_updated: "2026-04-28T10:39:05.299Z"
+stopped_at: Plan 05-02 abgeschlossen (Task 1 commit e565725, Task 2 User-Approval erteilt). Phase 5 (Status-Logik & Listen-Integration) Code-vollstaendig (2/2 Plans), bereit fuer Verification. Phase 6 (Detail-UI & Zahlungserfassung) als naechstes.
+last_updated: "2026-04-28T11:00:07.729Z"
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State: Bemo Verwaltungssystem
 
 **Last updated:** 2026-04-28
-**Session:** Milestone v1.1 Zahlungsverwaltung — Roadmap erstellt (3 Phasen, 19 Requirements gemappt)
+**Session:** Milestone v1.1 Zahlungsverwaltung — Phase 4 + Phase 5 Code-vollstaendig (4/4 Plans), Phase 5 bereit fuer Verification, Phase 6 (Detail-UI) als naechstes
 
 ---
 
@@ -24,30 +24,30 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Alle Geschäftsprozesse der Autovermietung zuverlässig in einem System abbilden.
-**Current focus:** Phase 05 — Status-Logik & Listen-Integration
+**Current focus:** Phase 05 abgeschlossen (Code-Stand, User-Approval erteilt) — bereit fuer Verification, dann Phase 06 Detail-UI
 
 ---
 
 ## Current Position
 
-Phase: 05 (Status-Logik & Listen-Integration) — EXECUTING
-Plan: 2 of 2
+Phase: 05 (Status-Logik & Listen-Integration) — COMPLETE (2/2 plans, ready for verification)
+Next: Phase 06 — Detail-UI & Zahlungserfassung (PAY-STAT-04 + PAY-UI-01..05)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 7 (5 v1.0 + 2 v1.1)
-- Average duration: ~8 min
+- Total plans completed: 9 (5 v1.0 + 4 v1.1)
+- Average duration: ~6 min (v1.1 plans 4-5)
 - Milestone v1.0 status: Complete
-- Milestone v1.1 status: Phase 04 complete (2/2 plans done), Phase 05 next
+- Milestone v1.1 status: Phase 04 complete (2/2), Phase 05 complete (2/2, ready for verification), Phase 06 next
 
 **By Milestone:**
 
 | Milestone | Phases | Status |
 |-----------|--------|--------|
 | v1.0 Akten-Modul | 3 | Complete (2026-03-27) |
-| v1.1 Zahlungsverwaltung | 3 | Phase 04 complete (2/2 plans), Phase 05 next |
+| v1.1 Zahlungsverwaltung | 3 | Phase 04 complete (2/2), Phase 05 complete (2/2), Phase 06 next |
 
 **Plan Metrics:**
 
@@ -56,6 +56,7 @@ Plan: 2 of 2
 | Phase 04-schema-backend P01 | 1min | 1 | 1 |
 | Phase 04-schema-backend P02 | 4min | 2 tasks | 1 files |
 | Phase 05-status-logik-listen P01 | 5min | 3 tasks | 1 files |
+| Phase 05-status-logik-listen P02 | 13min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -83,6 +84,11 @@ Plan: 2 of 2
 - [Phase 05-status-logik-listen]: Floating-Point-Toleranz 0.005 EUR (halber Cent) verhindert dass 999.9999 als teilbezahlt vs 1000.00 erscheint
 - [Phase 05-status-logik-listen]: Status-Logik in JS, Aggregation in SQL — Refactoring der Toleranzgrenzen aendert nur eine JS-Konstante
 - [Phase 05-status-logik-listen]: Liste nutzt LEFT JOIN+GROUP BY (eine Query, kein n+1), Detail nutzt eigene aggregate queryOne (einfacheres SQL)
+- [Phase 05-status-logik-listen P02]: Frontend Display-Mapping lowercase->Capitalize ('offen'->'Offen', 'ueberzahlt'->'Ueberzahlt' mit 'Ue' statt 'Ü' fuer HTML-Sicherheit)
+- [Phase 05-status-logik-listen P02]: Badge-Farben gray/orange/green/blue — 'ueberzahlt'=blau (Info-State, kein Fehler-State weil Ueberzahlung meist bewusste Vorauszahlung/Skonto-Ausgleich)
+- [Phase 05-status-logik-listen P02]: Spalte 'Zahlung' additiv neben 'Status' — manueller invoices.status (Workflow) und automatischer payment_status (Geld) sind getrennte Konzepte, beide parallel angezeigt
+- [Phase 05-status-logik-listen P02]: Wiederverwendung bestehender badge-* CSS-Klassen — KEIN neues CSS, kein Stil-Conflict
+- [Phase 05-status-logik-listen P02]: User-Approval erteilt mit Verifikations-Scope-Reservation: Layout/Filter/Badges visuell bestaetigt, volles 5-Status-Uebergangs-E2E erst in Phase 6 — vertretbar weil Backend Plan 05-01 bereits 12/12 E2E-Tests gruen hatte
 
 ### Existing relevant scaffold (v1.1 context)
 
@@ -106,6 +112,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-28T10:38:42.635Z
-Stopped at: Plan 05-01 abgeschlossen — derivePaymentStatus helper + GET /api/invoices und GET /api/invoices/:id liefern payment_saldo+payment_status. Naechster Plan: 05-02 Frontend-Listen
-Resume: `/gsd:plan-phase 4`
+Last session: 2026-04-28T10:57:57Z
+Stopped at: Plan 05-02 abgeschlossen (Task 1 commit e565725, Task 2 User-Approval erteilt). Phase 5 (Status-Logik & Listen-Integration) Code-vollstaendig — bereit fuer `/gsd:verify-work 5`. Naechster Schritt: `/gsd:plan-phase 6` (Detail-UI & Zahlungserfassung).
+Resume: `/gsd:verify-work 5` oder `/gsd:plan-phase 6`

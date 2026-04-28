@@ -16,7 +16,7 @@ Drei sequentielle Phasen liefern das Modul: Schema und CRUD-Backend zuerst (Foun
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 4: Schema & Backend** - invoice_payments-Tabelle, FK/Constraints/Indizes und vollständige CRUD-API mit Permission-Guards
-- [ ] **Phase 5: Status-Logik & Listen-Integration** - Saldo-Berechnung, abgeleiteter Rechnungs-Status, Anzeige als Badge in der Rechnungs-Liste
+- [x] **Phase 5: Status-Logik & Listen-Integration** - Saldo-Berechnung, abgeleiteter Rechnungs-Status, Anzeige als Badge in der Rechnungs-Liste (completed 2026-04-28)
 - [ ] **Phase 6: Detail-UI & Zahlungserfassung** - Zahlungs-Block in der Rechnungs-Detailseite mit Tabelle, Formular, Saldo-Anzeige und Bearbeiten/Löschen
 
 ## Phase Details
@@ -70,7 +70,7 @@ Phases execute in numeric order: 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 4. Schema & Backend | 0/2 | Planned | - |
-| 5. Status-Logik & Listen-Integration | 0/2 | Planned | - |
+| 5. Status-Logik & Listen-Integration | 2/2 | Complete   | 2026-04-28 |
 | 6. Detail-UI & Zahlungserfassung | 0/0 | Not started | - |
 
 ---

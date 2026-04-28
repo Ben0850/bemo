@@ -27,7 +27,7 @@ Anforderungen für das Modul "Zahlungsverwaltung". Jede mappt in der Roadmap auf
 
 - [x] **PAY-STAT-01**: Rechnungs-Saldo wird berechnet als SUM(direction='in') − SUM(direction='out')
 - [x] **PAY-STAT-02**: Rechnungs-Status wird automatisch abgeleitet: 0 → "Offen", >0 und <total_gross → "Teilbezahlt", =total_gross → "Bezahlt", >total_gross → "Überzahlt"
-- [ ] **PAY-STAT-03**: Status wird in der Rechnungs-Liste als Badge angezeigt
+- [x] **PAY-STAT-03**: Status wird in der Rechnungs-Liste als Badge angezeigt
 - [ ] **PAY-STAT-04**: Status wird in der Rechnungs-Detailseite prominent angezeigt zusammen mit Restbetrag
 
 ### Frontend — UI
@@ -77,7 +77,7 @@ Welche Phasen welche Requirements abdecken — vom Roadmapper gefüllt 2026-04-2
 | PAY-API-06 | Phase 5 | Complete |
 | PAY-STAT-01 | Phase 5 | Complete |
 | PAY-STAT-02 | Phase 5 | Complete |
-| PAY-STAT-03 | Phase 5 | Pending |
+| PAY-STAT-03 | Phase 5 | Complete |
 | PAY-STAT-04 | Phase 6 | Pending |
 | PAY-UI-01 | Phase 6 | Pending |
 | PAY-UI-02 | Phase 6 | Pending |
