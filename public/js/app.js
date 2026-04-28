@@ -6114,6 +6114,20 @@ function getInvoiceStatusBadge(status) {
   return `<span class="badge badge-${map[status] || 'gray'}">${escapeHtml(status)}</span>`;
 }
 
+// Phase 5 (PAY-STAT-03): Zahlungsstatus-Badge fuer abgeleiteten payment_status aus /api/invoices
+// Backend liefert lowercase ohne Umlaut: 'offen' | 'teilbezahlt' | 'bezahlt' | 'ueberzahlt'
+// Frontend zeigt kapitalisiert.
+function getPaymentStatusBadge(payment_status) {
+  const map = {
+    'offen':       { color: 'gray',   label: 'Offen' },
+    'teilbezahlt': { color: 'orange', label: 'Teilbezahlt' },
+    'bezahlt':     { color: 'green',  label: 'Bezahlt' },
+    'ueberzahlt':  { color: 'blue',   label: 'Ueberzahlt' },
+  };
+  const entry = map[payment_status] || { color: 'gray', label: payment_status || 'Unbekannt' };
+  return `<span class="badge badge-${entry.color}">${escapeHtml(entry.label)}</span>`;
+}
+
 // Globaler Cache aller Rechnungen — wird beim Laden einmal befuellt
 let _allInvoices = [];
 
@@ -6145,6 +6159,7 @@ async function renderInvoices() {
                 <th>Netto</th>
                 <th>Brutto</th>
                 <th>Status</th>
+                <th>Zahlung</th>
                 <th>Aktionen</th>
               </tr>
               <tr class="filter-row">
@@ -6158,6 +6173,15 @@ async function renderInvoices() {
                   <select id="inv-filter-status" onchange="applyInvoiceFilters()" class="filter-input">
                     <option value="">Alle</option>
                     ${INVOICE_STATUSES.map(s => `<option value="${s}">${s}</option>`).join('')}
+                  </select>
+                </td>
+                <td>
+                  <select id="inv-filter-payment-status" onchange="applyInvoiceFilters()" class="filter-input">
+                    <option value="">Alle</option>
+                    <option value="offen">Offen</option>
+                    <option value="teilbezahlt">Teilbezahlt</option>
+                    <option value="bezahlt">Bezahlt</option>
+                    <option value="ueberzahlt">Ueberzahlt</option>
                   </select>
                 </td>
                 <td></td>
@@ -6176,11 +6200,12 @@ async function renderInvoices() {
 }
 
 function applyInvoiceFilters() {
-  const nr       = (document.getElementById('inv-filter-nr')?.value       || '').trim().toLowerCase();
-  const dateStr  = (document.getElementById('inv-filter-date')?.value     || '').trim();
-  const customer = (document.getElementById('inv-filter-customer')?.value || '').trim().toLowerCase();
-  const zahlart  = (document.getElementById('inv-filter-zahlart')?.value  || '').trim().toLowerCase();
-  const status   = (document.getElementById('inv-filter-status')?.value   || '');
+  const nr            = (document.getElementById('inv-filter-nr')?.value            || '').trim().toLowerCase();
+  const dateStr       = (document.getElementById('inv-filter-date')?.value          || '').trim();
+  const customer      = (document.getElementById('inv-filter-customer')?.value      || '').trim().toLowerCase();
+  const zahlart       = (document.getElementById('inv-filter-zahlart')?.value       || '').trim().toLowerCase();
+  const status        = (document.getElementById('inv-filter-status')?.value        || '');
+  const paymentStatus = (document.getElementById('inv-filter-payment-status')?.value || '');
 
   // LIST-05: Datums-Teilsuche
   // "2026"    -> passt auf jedes invoice_date das "2026" enthaelt (alle Jahresrechnungen)
@@ -6207,6 +6232,7 @@ function applyInvoiceFilters() {
     if (customer && !(inv.customer_name || '').toLowerCase().includes(customer)) return false;
     if (zahlart  && !(inv.payment_method || '').toLowerCase().includes(zahlart)) return false;
     if (status   && inv.status !== status)                                   return false;
+    if (paymentStatus && inv.payment_status !== paymentStatus)               return false;
     return true;
   });
 
@@ -6214,7 +6240,7 @@ function applyInvoiceFilters() {
   if (!tbody) return;
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">Keine Rechnungen gefunden.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px;">Keine Rechnungen gefunden.</td></tr>`;
     return;
   }
 
@@ -6227,6 +6253,7 @@ function applyInvoiceFilters() {
       <td>${Number(inv.total_net).toFixed(2)} &euro;</td>
       <td>${Number(inv.total_gross).toFixed(2)} &euro;</td>
       <td>${getInvoiceStatusBadge(inv.status)}</td>
+      <td>${getPaymentStatusBadge(inv.payment_status)}</td>
       <td style="white-space:nowrap;">
         <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); navigate('invoice-detail', ${inv.id})">Öffnen</button>
         <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); window.open('/api/invoices/${inv.id}/pdf','_blank')">PDF</button>
