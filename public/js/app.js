@@ -6128,6 +6128,27 @@ function getPaymentStatusBadge(payment_status) {
   return `<span class="badge badge-${entry.color}">${escapeHtml(entry.label)}</span>`;
 }
 
+// Phase 6 (PAY-UI-01..05): Lädt alle Zahlungen einer Rechnung.
+// Wird vom Header-Saldo-Block (Plan 06-01) und der Zahlungstabelle (Plan 06-02) genutzt.
+// Wirft eine Exception wenn die Rechnung nicht existiert (404 vom Backend).
+async function loadInvoicePayments(invoiceId) {
+  return await api(`/api/invoices/${invoiceId}/payments`);
+}
+
+// Phase 6: Bankkonten-Cache fuer Zahlungs-Modal in Plan 06-02.
+// Konten aendern sich selten -- einmal pro Session laden reicht.
+// Aufruf von _bankAccountsCache=null (z.B. nach CRUD auf bank_accounts) erzwingt Reload.
+let _bankAccountsCache = null;
+async function loadBankAccounts() {
+  if (_bankAccountsCache !== null) return _bankAccountsCache;
+  try {
+    _bankAccountsCache = await api('/api/bank-accounts');
+  } catch (e) {
+    _bankAccountsCache = []; // defensive: bei Fehler leeres Array, Modal kann trotzdem mit "Bar/Kasse" arbeiten
+  }
+  return _bankAccountsCache;
+}
+
 // Globaler Cache aller Rechnungen — wird beim Laden einmal befuellt
 let _allInvoices = [];
 
