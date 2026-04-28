@@ -1359,11 +1359,22 @@ app.get('/api/invoices', (req, res) => {
 });
 
 app.get('/api/invoices/:id', (req, res) => {
+  const id = Number(req.params.id);
   const invoice = queryOne(`SELECT i.*, c.first_name, c.last_name, c.company_name, c.customer_type, c.street, c.zip, c.city, c.email, c.phone
-    FROM invoices i JOIN customers c ON i.customer_id = c.id WHERE i.id = ?`, [Number(req.params.id)]);
+    FROM invoices i JOIN customers c ON i.customer_id = c.id WHERE i.id = ?`, [id]);
   if (!invoice) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
-  const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY position, id', [Number(req.params.id)]);
-  res.json({ ...invoice, items });
+  const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY position, id', [id]);
+  // Phase 5 (PAY-API-06 / PAY-STAT-01/02): payment_saldo + payment_status auch im Detail-Endpoint,
+  // konsistent mit GET /api/invoices. Nutzt eigene aggregate Query (kein zusaetzlicher Loop).
+  const saldoRow = queryOne(
+    `SELECT COALESCE(SUM(CASE WHEN direction='in'  THEN amount ELSE 0 END), 0)
+          - COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END), 0) AS saldo
+     FROM invoice_payments WHERE invoice_id = ?`,
+    [id]
+  );
+  const payment_saldo = Math.round((Number(saldoRow?.saldo) || 0) * 100) / 100;
+  const payment_status = derivePaymentStatus(payment_saldo, invoice.total_gross);
+  res.json({ ...invoice, items, payment_saldo, payment_status });
 });
 
 app.post('/api/invoices', (req, res) => {
