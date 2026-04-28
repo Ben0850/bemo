@@ -35,17 +35,23 @@ Alle Geschäftsprozesse der Autovermietung — von der Kundenverwaltung über Mi
 - ✓ Vermietungs-Modul (Grundstruktur) — existing
 - ✓ Firmendaten-Einstellungen — existing
 - ✓ Programmversion/Changelog — existing
+- ✓ Akten-Modul: Schema (FK-Spalten, Audit-Log, UNIQUE-Constraint) — v1.0
+- ✓ Akten-Modul: Vollseiten-Detailansicht mit Kunden-/Unfall-/Miet-/Vermittler-/Versicherungs-Block — v1.0
+- ✓ Akten-Modul: Formular mit FK-Pickern für Kunde/Vermittler/Versicherung — v1.0
+- ✓ Akten-Modul: Mietart und Wiedervorlagedatum — v1.0
+- ✓ Akten-Modul: Listen-Optimierung mit Filter-Persistenz und Spaltensortierung — v1.0
+- ✓ Stammdaten: Dekra DRS Stundenverrechnungssätze pro PLZ-Bereich — Hotfix
+- ✓ Stammdaten-API: Eigenständiger GitHub-Repo + Privat (online deployment in progress)
 
 ### Active
 
-- [ ] Akten-Modul: Vollständige Akten-Detailseite (Vollseite, kein Modal)
-- [ ] Akten-Modul: Kundendaten-Block mit vollständiger Kontaktanzeige
-- [ ] Akten-Modul: Unfalldaten (Datum, Ort, Polizei Ja/Nein)
-- [ ] Akten-Modul: Mietvorgang-Verknüpfung aus Vermietkalender (Mietbeginn, Mietende, Fahrzeug, Mietdauer)
-- [ ] Akten-Modul: Mietart (Reparaturmiete / Totalschadenmiete)
-- [ ] Akten-Modul: Wiedervorlagedatum
-- [ ] Akten-Modul: Vermittler-Daten-Block
-- [ ] Akten-Modul: Versicherungs-Daten-Block
+- [ ] Zahlungsverwaltung: Zahlungseingänge pro Rechnung erfassen
+- [ ] Zahlungsverwaltung: Zahlungsausgänge (Rückzahlungen) pro Rechnung erfassen
+- [ ] Zahlungsverwaltung: Auswahl des Bankkontos (FK auf bank_accounts)
+- [ ] Zahlungsverwaltung: Zahlungsdatum, Betrag, Zahlungsart, Verwendungszweck/Notiz
+- [ ] Zahlungsverwaltung: Erfassung von Buchungs-User automatisch
+- [ ] Zahlungsverwaltung: Status der Rechnung wird automatisch aus Saldo abgeleitet
+- [ ] Zahlungsverwaltung: Zahlungs-Liste in der Rechnungsdetailseite mit Bearbeiten/Löschen
 
 ### Out of Scope
 
@@ -80,22 +86,24 @@ Alle Geschäftsprozesse der Autovermietung — von der Kundenverwaltung über Mi
 | SQLite statt PostgreSQL | Einfaches Setup, ausreichend für aktuelle Nutzerzahl | ✓ Good |
 | Monolithische app.js | Historisch gewachsen, funktioniert | ⚠️ Revisit |
 | Akten-Modul als separater Meilenstein | Umfang jetzt definiert, eigener Meilenstein v1.0 | ✓ Good |
-| Akten-Detailseite als Vollseite statt Modal | Umfangreiche Verwaltung braucht Platz, Modal zu eingeschränkt | — Pending |
-| FK-Referenzen statt Freitext für Kunde/Vermittler/Versicherung | Konsistenz mit Stammdaten, keine Divergenz bei Namensänderungen | — Pending |
+| Akten-Detailseite als Vollseite statt Modal | Umfangreiche Verwaltung braucht Platz, Modal zu eingeschränkt | ✓ Good |
+| FK-Referenzen statt Freitext für Kunde/Vermittler/Versicherung | Konsistenz mit Stammdaten, keine Divergenz bei Namensänderungen | ✓ Good |
+| invoice_payments als eigene Tabelle statt paid_amount-Spalte | Vollständige Historie für GoBD/Audit, ermöglicht bidirektionale Buchungen (Eingang/Ausgang) | — Pending |
+| Rechnungs-Status wird aus Zahlungssaldo abgeleitet | Single source of truth statt manuell setzbarem Status, automatische Konsistenz | — Pending |
+| FK auf bestehende bank_accounts statt neue Konto-Tabelle | Konten werden bereits in den Einstellungen gepflegt, keine Dopplung | — Pending |
 
-## Current Milestone: v1.0 Akten-Modul
+## Current Milestone: v1.1 Zahlungsverwaltung
 
-**Goal:** Akten-Detailseite als vollständige Verwaltungsseite für Mietvorgänge — mit Kundendaten, Unfalldaten, Mietvorgang, Vermittler und Versicherung auf einen Blick.
+**Goal:** Zahlungsströme pro Rechnung vollständig erfassen — Eingänge und Ausgänge bidirektional, mit Datum, Betrag, Bankkonto, Zahlungsart und automatischer Erfassung des buchenden Mitarbeiters. Der Rechnungsstatus ergibt sich automatisch aus dem Saldo.
 
 **Target features:**
-- Vollseiten-Detailansicht für Akten (kein Modal)
-- Kundendaten-Block mit Telefon und E-Mail
-- Unfalldaten: Datum, Ort, Polizei vor Ort (Ja/Nein)
-- Mietvorgang aus Vermietkalender verknüpfen (Mietbeginn, Mietende, Fahrzeug, Mietdauer in Tagen)
-- Mietart: Reparaturmiete oder Totalschadenmiete
-- Wiedervorlagedatum
-- Vermittler-Daten-Block
-- Versicherungs-Daten-Block
+- Zahlungseingänge pro Rechnung (z.B. Teilzahlung Kunde)
+- Zahlungsausgänge pro Rechnung (z.B. Rückzahlung an Kunde)
+- Auswahl des Bankkontos aus bestehenden Firmen-Konten (`bank_accounts`)
+- Erfassung von Datum, Betrag, Zahlungsart, Verwendungszweck/Notiz
+- Buchender Mitarbeiter wird automatisch festgehalten (booked_by = aktueller User)
+- Rechnungsstatus wird aus Saldo abgeleitet: Offen / Teilbezahlt / Bezahlt / Überzahlt
+- Zahlungs-Liste in der Rechnungs-Detailseite mit "+ Zahlung hinzufügen" und Bearbeiten/Löschen
 
 ---
-*Last updated: 2026-03-26 after milestone v1.0 start*
+*Last updated: 2026-04-28 after start of milestone v1.1*

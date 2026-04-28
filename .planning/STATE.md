@@ -1,59 +1,56 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: unknown
-stopped_at: Completed 03-01-PLAN.md — Akten-Liste 5 Spalten, customer_name JOIN, Filter-Persistenz
-last_updated: "2026-03-27T00:24:41.640Z"
+milestone: v1.1
+milestone_name: Zahlungsverwaltung
+status: defining_requirements
+stopped_at: Milestone v1.1 started — defining requirements
+last_updated: "2026-04-28T08:50:00.000Z"
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 5
-  completed_plans: 5
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State: Bemo Verwaltungssystem
 
-**Last updated:** 2026-03-27
-**Session:** Plan 02-01 executed — enriched Akten detail endpoint and full-page view
+**Last updated:** 2026-04-28
+**Session:** Milestone v1.1 Zahlungsverwaltung gestartet — Anforderungen werden definiert
 
 ---
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-26)
+See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Alle Geschäftsprozesse der Autovermietung zuverlässig in einem System abbilden.
-**Current focus:** Phase 03 — listen-optimierung
+**Current focus:** Milestone v1.1 — Zahlungsverwaltung
 
 ---
 
 ## Current Position
 
-Phase: 03 (listen-optimierung) — COMPLETE
-Plan: 1 of 1 (all plans complete)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-28 — Milestone v1.1 started
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 1
-- Average duration: 8 min
-- Total execution time: 8 min
+- Total plans completed: 5 (v1.0)
+- Average duration: ~10 min
+- Milestone v1.0 status: Complete
 
-**By Phase:**
+**By Milestone:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 01-schema-sicherheit | 1 | 8 min | 8 min |
-
-*Updated after each plan completion*
+| Milestone | Phases | Status |
+|-----------|--------|--------|
+| v1.0 Akten-Modul | 3 | Complete (2026-03-27) |
+| v1.1 Zahlungsverwaltung | TBD | Defining requirements |
 
 ---
-| Phase 01-schema-sicherheit P02 | 2 | 2 tasks | 1 files |
-| Phase 02-detailseite-formular P01 | 2 | 2 tasks | 2 files |
-| Phase 02-detailseite-formular P02 | 2 | 1 tasks | 1 files |
-| Phase 03-listen-optimierung P01 | 15 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -67,24 +64,17 @@ Plan: 1 of 1 (all plans complete)
 | ALTER TABLE vor Reconstruction ausführen | Neue Spalten existieren in Quelltabelle bevor INSERT...SELECT läuft | 2026-03-27 |
 | PRAGMA index_list col 2 als Idempotenz-Guard | Zuverlässig nach Neustart, unabhängig von Index-Namen | 2026-03-27 |
 | akten_history append-only (kein DELETE-Endpoint) | GoBD-Konformität erfordert unveränderliches Audit-Log | 2026-03-27 |
+| invoice_payments als eigene Tabelle | Vollständige Historie für GoBD/Audit, bidirektionale Buchungen | 2026-04-28 |
+| Rechnungsstatus aus Saldo abgeleitet | Single source of truth, automatische Konsistenz | 2026-04-28 |
 
-- [Phase 01-schema-sicherheit]: Permission guard checks x-user-permission header — roles: Admin, Verwaltung, Buchhaltung (SEC-01)
-- [Phase 01-schema-sicherheit]: Audit diff loop skips fields absent from req.body — supports partial PUT without spurious history rows (DB-05)
-- [Phase 02-detailseite-formular]: fetchStammdatenById helper inserted after STAMMDATEN_API_URL consts — all dependencies defined at call time
-- [Phase 02-detailseite-formular]: Legacy text fields shown with amber badge to distinguish pre-FK data from linked Stammdaten records
-- [Phase 02-detailseite-formular]: Vermittler/Versicherung use full-list select (small lists), Kunde uses live search (large list)
-- [Phase 02-detailseite-formular]: Legacy kunde/vermittler text fields set to empty on save — FK fields are source of truth for new records
-- [Phase 02-detailseite-formular]: After-save navigation: currentAkteId && editId routes to detail page, else to list
-- [Phase 03-listen-optimierung]: customer_name || kunde Fallback in Tabelle und Suche haelt Legacy-Akten ohne customer_id sichtbar
-- [Phase 03-listen-optimierung]: _aktenFilterState als Modulvariable fuer Filter-Persistenz ueber SPA-interne Navigation ohne localStorage
+### Existing relevant scaffold (v1.1 context)
 
-### Existing Akten scaffold
-
-- DB table `akten` now has: id, aktennummer (UNIQUE), datum, kunde, anwalt, vorlage, zahlungsstatus, vermittler, status, notizen, customer_id, vermittler_id, versicherung_id, rental_id, unfalldatum, unfallort, polizei_vor_ort, mietart, wiedervorlage_datum, created_at, updated_at
-- DB table `akten_history` now exists (id, akte_id, changed_by, changed_at, field_name, old_value, new_value)
-- CRUD API at `/api/akten` — Write-Endpoints noch ohne Permission-Guards (Plan 02)
-- Frontend: List + Modal (Detail + Form) — kein Full-Page-View (Phase 2)
-- Stammdaten (Vermittler, Anwälte, Versicherungen) über Stammdaten-API Port 3010
+- DB table `invoices`: id, invoice_number (UNIQUE), customer_id, invoice_date, due_date, status, total_net, total_gross, total_vat, payment_method, notes, company_snapshot, created_at, updated_at
+- DB table `invoice_items`: line items (qty, unit_price, totals)
+- DB table `bank_accounts` existiert bereits: id, label, iban, bic, bank_name, is_default
+- API: `/api/invoices` (GET/POST), `/api/invoices/:id` (GET), `/api/bank-accounts` (CRUD)
+- Frontend: `renderInvoices()`, `renderInvoiceDetail()` (Vollseite)
+- AUTH: Nur Verwaltung/Buchhaltung/Admin dürfen Rechnungen anlegen — gleiche Permission-Logik gilt für Zahlungen
 
 ### Pending Todos
 
@@ -92,14 +82,13 @@ None yet.
 
 ### Blockers/Concerns
 
-- UNIQUE-Constraint aktiv: Plan 02 POST-Handler muss leere aktennummer ablehnen (400), da leerer String '' nun nur einmal erlaubt
-- Stammdaten-Service Endpunkt-Pfade verifiziert: /api/vermittler/:id und /api/insurances/:id (aufgeloest durch 02-01)
-- Schadensfahrzeug-Speicherstrategie (Spalten in akten vs. eigene Tabelle) vor Phase 2 entscheiden
+- Stammdaten-API Server-Deployment ist parallel pausiert — siehe `.planning/HANDOFF-stammdaten-deployment.md`
+- Lokal uncommittete Änderungen in Bemo (Dekra-DRS-Frontend, Datenimport-Ordner, Electron-Ordner) — vor Milestone-Commits klären
 
 ---
 
 ## Session Continuity
 
-Last session: 2026-03-27T00:21:31.625Z
-Stopped at: Completed 03-01-PLAN.md — Akten-Liste 5 Spalten, customer_name JOIN, Filter-Persistenz
+Last session: 2026-04-28T08:50:00.000Z
+Stopped at: Milestone v1.1 Zahlungsverwaltung gestartet
 Resume file: None
