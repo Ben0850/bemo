@@ -6149,6 +6149,35 @@ async function loadBankAccounts() {
   return _bankAccountsCache;
 }
 
+// Phase 6 (PAY-STAT-04 + PAY-UI-05): Prominenter Saldo+Status-Header oben in der Rechnungs-Detailseite.
+// Konsumiert payment_saldo + payment_status aus GET /api/invoices/:id (Phase 5 Plan 01).
+// Wiederverwendet getPaymentStatusBadge aus Phase 5 Plan 02 -- KEIN Duplikat.
+function renderInvoicePaymentSaldoHeader(inv) {
+  const paid  = Math.round((Number(inv.payment_saldo)  || 0) * 100) / 100;
+  const gross = Math.round((Number(inv.total_gross)    || 0) * 100) / 100;
+  const open  = Math.round((gross - paid) * 100) / 100;        // kann negativ sein bei ueberzahlt
+  const openColor = open < 0
+    ? 'var(--text-muted)'                                      // ueberzahlt -> dezent
+    : (open === 0 ? 'var(--success, #16a34a)' : 'var(--danger, #dc2626)');
+  return `
+    <div class="card payment-saldo-header" style="padding:16px 20px;display:flex;flex-wrap:wrap;align-items:center;gap:24px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:14px;color:var(--text-muted);">Zahlungsstatus:</span>
+        <span style="font-size:16px;font-weight:600;">${getPaymentStatusBadge(inv.payment_status)}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:14px;color:var(--text-muted);">Bereits bezahlt:</span>
+        <strong style="font-size:16px;">${paid.toFixed(2)} &euro;</strong>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:14px;color:var(--text-muted);">Offener Betrag:</span>
+        <strong style="font-size:16px;color:${openColor};">${open.toFixed(2)} &euro;</strong>
+        ${open < 0 ? '<span style="font-size:12px;color:var(--text-muted);">(ueberzahlt)</span>' : ''}
+      </div>
+    </div>
+  `;
+}
+
 // Globaler Cache aller Rechnungen — wird beim Laden einmal befuellt
 let _allInvoices = [];
 
@@ -6433,6 +6462,8 @@ async function renderInvoiceDetail(id) {
           ${isAdmin() ? `<button class="btn btn-danger" onclick="deleteInvoice(${id})">Löschen</button>` : ''}
         </div>
       </div>
+
+      ${renderInvoicePaymentSaldoHeader(inv)}
 
       <div class="card">
         <div class="card-header"><h3>Kundendaten</h3></div>
