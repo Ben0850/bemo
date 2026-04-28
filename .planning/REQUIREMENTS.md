@@ -16,11 +16,11 @@ Anforderungen für das Modul "Zahlungsverwaltung". Jede mappt in der Roadmap auf
 
 ### Backend & API
 
-- [ ] **PAY-API-01**: GET /api/invoices/:id/payments liefert alle Zahlungen einer Rechnung sortiert nach payment_date
-- [ ] **PAY-API-02**: POST /api/invoices/:id/payments legt eine neue Zahlung an, setzt booked_by automatisch auf den aktuellen User
-- [ ] **PAY-API-03**: PUT /api/payments/:id aktualisiert eine bestehende Zahlung (alle Felder außer booked_by und created_at)
-- [ ] **PAY-API-04**: DELETE /api/payments/:id löscht eine Buchung (mit GoBD-Auswirkungs-Audit-Log oder Soft-Delete-Variante in Phase 2 evaluieren)
-- [ ] **PAY-API-05**: Permission-Guards: nur Verwaltung, Buchhaltung, Admin dürfen Zahlungen anlegen, ändern oder löschen (analog zu Rechnungen)
+- [x] **PAY-API-01**: GET /api/invoices/:id/payments liefert alle Zahlungen einer Rechnung sortiert nach payment_date
+- [x] **PAY-API-02**: POST /api/invoices/:id/payments legt eine neue Zahlung an, setzt booked_by automatisch auf den aktuellen User
+- [x] **PAY-API-03**: PUT /api/payments/:id aktualisiert eine bestehende Zahlung (alle Felder außer booked_by und created_at)
+- [x] **PAY-API-04**: DELETE /api/payments/:id löscht eine Buchung (mit GoBD-Auswirkungs-Audit-Log oder Soft-Delete-Variante in Phase 2 evaluieren)
+- [x] **PAY-API-05**: Permission-Guards: nur Verwaltung, Buchhaltung, Admin dürfen Zahlungen anlegen, ändern oder löschen (analog zu Rechnungen)
 - [ ] **PAY-API-06**: GET /api/invoices liefert pro Rechnung den abgeleiteten payment_status (offen/teilbezahlt/bezahlt/überzahlt) und den Saldo
 
 ### Status-Logik
@@ -69,11 +69,11 @@ Welche Phasen welche Requirements abdecken — vom Roadmapper gefüllt 2026-04-2
 | PAY-DB-02 | Phase 4 | Complete |
 | PAY-DB-03 | Phase 4 | Complete |
 | PAY-DB-04 | Phase 4 | Complete |
-| PAY-API-01 | Phase 4 | Pending |
-| PAY-API-02 | Phase 4 | Pending |
-| PAY-API-03 | Phase 4 | Pending |
-| PAY-API-04 | Phase 4 | Pending |
-| PAY-API-05 | Phase 4 | Pending |
+| PAY-API-01 | Phase 4 | Complete |
+| PAY-API-02 | Phase 4 | Complete |
+| PAY-API-03 | Phase 4 | Complete |
+| PAY-API-04 | Phase 4 | Complete |
+| PAY-API-05 | Phase 4 | Complete |
 | PAY-API-06 | Phase 5 | Pending |
 | PAY-STAT-01 | Phase 5 | Pending |
 | PAY-STAT-02 | Phase 5 | Pending |

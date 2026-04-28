@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — Akten-Modul
 status: unknown
-stopped_at: Plan 04-01 abgeschlossen — invoice_payments-Schema live, Plan 04-02 (REST-API) ist next
-last_updated: "2026-04-28T10:01:22.676Z"
+stopped_at: "Plan 04-02 abgeschlossen — 4 invoice_payments-Endpoints live, Phase 04 (Schema+Backend) komplett. Naechste Phase: 05 Status-Listen"
+last_updated: "2026-04-28T10:08:12.713Z"
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State: Bemo Verwaltungssystem
@@ -30,30 +30,31 @@ See: .planning/PROJECT.md (updated 2026-04-28)
 
 ## Current Position
 
-Phase: 04 (Schema & Backend) — EXECUTING
-Plan: 2 of 2 (Plan 04-01 complete)
+Phase: 04 (Schema & Backend) — COMPLETE (2/2 plans done)
+Next: Phase 05 (Status-Listen)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 6 (5 v1.0 + 1 v1.1)
-- Average duration: ~9 min
+- Total plans completed: 7 (5 v1.0 + 2 v1.1)
+- Average duration: ~8 min
 - Milestone v1.0 status: Complete
-- Milestone v1.1 status: Phase 04 in progress (1/2 plans done)
+- Milestone v1.1 status: Phase 04 complete (2/2 plans done), Phase 05 next
 
 **By Milestone:**
 
 | Milestone | Phases | Status |
 |-----------|--------|--------|
 | v1.0 Akten-Modul | 3 | Complete (2026-03-27) |
-| v1.1 Zahlungsverwaltung | 3 | Phase 04 executing (1/2 plans) |
+| v1.1 Zahlungsverwaltung | 3 | Phase 04 complete (2/2 plans), Phase 05 next |
 
 **Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 04-schema-backend P01 | 1min | 1 | 1 |
+| Phase 04-schema-backend P02 | 4min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -73,6 +74,10 @@ Plan: 2 of 2 (Plan 04-01 complete)
 | PAY-STAT-04 in Phase 6 (mit Detail-UI) | Prominente Status-Anzeige gehört zur Detailseite, nicht zur Listen-Phase | 2026-04-28 |
 | FK invoice_payments.bank_account_id ohne ON DELETE CASCADE | Bankkonto-Löschen darf Zahlungshistorie nicht entfernen (GoBD-Konformität) | 2026-04-28 |
 | booked_by als TEXT NOT NULL DEFAULT '' | POST-Handler füllt aus x-user-name-Header, DEFAULT verhindert NULL-Constraint-Probleme bei Direct-SQL-Tests | 2026-04-28 |
+
+- [Phase 04-schema-backend]: booked_by ausschliesslich aus x-user-name Header (NIE aus Body) — Server-controlled identity
+- [Phase 04-schema-backend]: PUT /api/payments/:id schliesst booked_by und created_at explizit aus UPDATE-SQL aus (PAY-API-03 Unveraenderlichkeit)
+- [Phase 04-schema-backend]: Two-Layer-DELETE-Auth: globales Middleware Whitelist /api/payments/ + Inline-Guard fuer Verwaltung/Buchhaltung/Admin
 
 ### Existing relevant scaffold (v1.1 context)
 
@@ -96,6 +101,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-28T10:01:22.667Z
-Stopped at: Plan 04-01 abgeschlossen — invoice_payments-Schema live, Plan 04-02 (REST-API) ist next
+Last session: 2026-04-28T10:08:12.707Z
+Stopped at: Plan 04-02 abgeschlossen — 4 invoice_payments-Endpoints live, Phase 04 (Schema+Backend) komplett. Naechste Phase: 05 Status-Listen
 Resume: `/gsd:plan-phase 4`
