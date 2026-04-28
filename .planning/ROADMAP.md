@@ -45,7 +45,10 @@ Plans:
   2. Eine GET-Anfrage auf /api/invoices liefert pro Rechnung den abgeleiteten payment_status ("offen" / "teilbezahlt" / "bezahlt" / "überzahlt") sowie den aktuellen Saldo gemäß Regel: 0 → offen, >0 und <total_gross → teilbezahlt, =total_gross → bezahlt, >total_gross → überzahlt
   3. In der Rechnungs-Liste im Frontend erscheint pro Rechnung ein Status-Badge mit dem abgeleiteten Status; eine in Phase 4 angelegte Zahlung verändert den Badge ohne manuellen Status-Eingriff
   4. Eine Test-Rechnung mit Brutto 1000 € zeigt: ohne Zahlung "offen", nach 400 €-Eingang "teilbezahlt", nach weiteren 600 €-Eingang "bezahlt", nach zusätzlichem 100 €-Eingang "überzahlt" — und nach einem 100 €-Ausgang wieder "bezahlt"
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 05-01-PLAN.md — Backend Status-Logik: derivePaymentStatus()-Helper + GET /api/invoices und GET /api/invoices/:id mit payment_saldo + payment_status (PAY-STAT-01, PAY-STAT-02, PAY-API-06)
+- [ ] 05-02-PLAN.md — Frontend Status-Badge: getPaymentStatusBadge() + neue Spalte Zahlung in der Rechnungs-Liste mit Filter (PAY-STAT-03)
 
 ### Phase 6: Detail-UI & Zahlungserfassung
 **Goal**: Anwender können Zahlungen direkt aus der Rechnungs-Detailseite erfassen, einsehen, bearbeiten und löschen — mit voller Saldo-Transparenz und prominenter Status-Anzeige
@@ -67,7 +70,7 @@ Phases execute in numeric order: 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 4. Schema & Backend | 0/2 | Planned | - |
-| 5. Status-Logik & Listen-Integration | 0/0 | Not started | - |
+| 5. Status-Logik & Listen-Integration | 0/2 | Planned | - |
 | 6. Detail-UI & Zahlungserfassung | 0/0 | Not started | - |
 
 ---
