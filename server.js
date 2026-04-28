@@ -1305,6 +1305,24 @@ function generateInvoiceNumber() {
   return prefix + String(nextNum).padStart(3, '0'); // e.g. "032026001"
 }
 
+// Phase 5 (PAY-STAT-01, PAY-STAT-02): Zahlungsstatus aus Saldo ableiten.
+// saldo = SUM(direction='in') - SUM(direction='out') aus invoice_payments
+// Vergleich gegen invoices.total_gross mit Floating-Point-Toleranz von 0.005 EUR
+// (haelfte des kleinsten Cent-Wertes — verhindert dass 999.999999... vs 1000.00 als teilbezahlt gilt)
+function derivePaymentStatus(saldo, total_gross) {
+  const s = Number(saldo) || 0;
+  const g = Number(total_gross) || 0;
+  const TOL = 0.005;
+  // saldo praktisch gleich brutto -> bezahlt (auch wenn beide 0 sind)
+  if (Math.abs(s - g) < TOL) return 'bezahlt';
+  // saldo praktisch 0 oder negativ -> offen
+  if (s < TOL) return 'offen';
+  // saldo deutlich groesser als brutto -> ueberzahlt
+  if (s > g) return 'ueberzahlt';
+  // saldo deutlich kleiner als brutto -> teilbezahlt
+  return 'teilbezahlt';
+}
+
 app.get('/api/invoices', (req, res) => {
   const { status, search, date_from, date_to } = req.query;
   let sql = `SELECT i.*,
