@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Zahlungsverwaltung
-status: defining_requirements
-stopped_at: Milestone v1.1 started — defining requirements
-last_updated: "2026-04-28T08:50:00.000Z"
+status: roadmap_complete
+stopped_at: Roadmap v1.1 erstellt — bereit für Phase 4 Planning
+last_updated: "2026-04-28T09:15:00.000Z"
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -15,7 +15,7 @@ progress:
 # Project State: Bemo Verwaltungssystem
 
 **Last updated:** 2026-04-28
-**Session:** Milestone v1.1 Zahlungsverwaltung gestartet — Anforderungen werden definiert
+**Session:** Milestone v1.1 Zahlungsverwaltung — Roadmap erstellt (3 Phasen, 19 Requirements gemappt)
 
 ---
 
@@ -24,16 +24,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Alle Geschäftsprozesse der Autovermietung zuverlässig in einem System abbilden.
-**Current focus:** Milestone v1.1 — Zahlungsverwaltung
+**Current focus:** Milestone v1.1 — Zahlungsverwaltung (Phasen 4-6)
 
 ---
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Phase 4 — Schema & Backend (Not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-04-28 — Milestone v1.1 started
+Status: Roadmap complete, awaiting `/gsd:plan-phase 4`
+Last activity: 2026-04-28 — ROADMAP.md geschrieben, 19/19 Requirements gemappt
+
+Progress: [          ] 0/3 phases (0%)
 
 ## Performance Metrics
 
@@ -48,7 +50,7 @@ Last activity: 2026-04-28 — Milestone v1.1 started
 | Milestone | Phases | Status |
 |-----------|--------|--------|
 | v1.0 Akten-Modul | 3 | Complete (2026-03-27) |
-| v1.1 Zahlungsverwaltung | TBD | Defining requirements |
+| v1.1 Zahlungsverwaltung | 3 | Roadmap complete, Phase 4 next |
 
 ---
 
@@ -66,6 +68,8 @@ Last activity: 2026-04-28 — Milestone v1.1 started
 | akten_history append-only (kein DELETE-Endpoint) | GoBD-Konformität erfordert unveränderliches Audit-Log | 2026-03-27 |
 | invoice_payments als eigene Tabelle | Vollständige Historie für GoBD/Audit, bidirektionale Buchungen | 2026-04-28 |
 | Rechnungsstatus aus Saldo abgeleitet | Single source of truth, automatische Konsistenz | 2026-04-28 |
+| PAY-STAT-01/02/03 in Phase 5 (mit API-06) | Status-Logik und Listen-Anzeige sind eine verifizierbare Einheit | 2026-04-28 |
+| PAY-STAT-04 in Phase 6 (mit Detail-UI) | Prominente Status-Anzeige gehört zur Detailseite, nicht zur Listen-Phase | 2026-04-28 |
 
 ### Existing relevant scaffold (v1.1 context)
 
@@ -89,6 +93,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-28T08:50:00.000Z
-Stopped at: Milestone v1.1 Zahlungsverwaltung gestartet
-Resume file: None
+Last session: 2026-04-28T09:15:00.000Z
+Stopped at: Roadmap v1.1 komplett, 3 Phasen definiert, 19/19 Requirements gemappt
+Resume: `/gsd:plan-phase 4`

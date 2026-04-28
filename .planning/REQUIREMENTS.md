@@ -61,34 +61,39 @@ Anforderungen für das Modul "Zahlungsverwaltung". Jede mappt in der Roadmap auf
 
 ## Traceability
 
-Welche Phasen welche Requirements abdecken — wird vom Roadmapper gefüllt.
+Welche Phasen welche Requirements abdecken — vom Roadmapper gefüllt 2026-04-28.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PAY-DB-01 | TBD | Pending |
-| PAY-DB-02 | TBD | Pending |
-| PAY-DB-03 | TBD | Pending |
-| PAY-DB-04 | TBD | Pending |
-| PAY-API-01 | TBD | Pending |
-| PAY-API-02 | TBD | Pending |
-| PAY-API-03 | TBD | Pending |
-| PAY-API-04 | TBD | Pending |
-| PAY-API-05 | TBD | Pending |
-| PAY-API-06 | TBD | Pending |
-| PAY-STAT-01 | TBD | Pending |
-| PAY-STAT-02 | TBD | Pending |
-| PAY-STAT-03 | TBD | Pending |
-| PAY-STAT-04 | TBD | Pending |
-| PAY-UI-01 | TBD | Pending |
-| PAY-UI-02 | TBD | Pending |
-| PAY-UI-03 | TBD | Pending |
-| PAY-UI-04 | TBD | Pending |
-| PAY-UI-05 | TBD | Pending |
+| PAY-DB-01 | Phase 4 | Pending |
+| PAY-DB-02 | Phase 4 | Pending |
+| PAY-DB-03 | Phase 4 | Pending |
+| PAY-DB-04 | Phase 4 | Pending |
+| PAY-API-01 | Phase 4 | Pending |
+| PAY-API-02 | Phase 4 | Pending |
+| PAY-API-03 | Phase 4 | Pending |
+| PAY-API-04 | Phase 4 | Pending |
+| PAY-API-05 | Phase 4 | Pending |
+| PAY-API-06 | Phase 5 | Pending |
+| PAY-STAT-01 | Phase 5 | Pending |
+| PAY-STAT-02 | Phase 5 | Pending |
+| PAY-STAT-03 | Phase 5 | Pending |
+| PAY-STAT-04 | Phase 6 | Pending |
+| PAY-UI-01 | Phase 6 | Pending |
+| PAY-UI-02 | Phase 6 | Pending |
+| PAY-UI-03 | Phase 6 | Pending |
+| PAY-UI-04 | Phase 6 | Pending |
+| PAY-UI-05 | Phase 6 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 19 total
-- Mapped to phases: 0 (Roadmapper folgt)
-- Unmapped: 19
+- Mapped to phases: 19 (100%) ✓
+- Unmapped: 0
+
+**Phase verteilt:**
+- Phase 4 (Schema & Backend): 9 Requirements (alle PAY-DB-* + PAY-API-01..05)
+- Phase 5 (Status-Logik & Listen-Integration): 4 Requirements (PAY-API-06, PAY-STAT-01/02/03)
+- Phase 6 (Detail-UI & Zahlungserfassung): 6 Requirements (PAY-STAT-04, alle PAY-UI-*)
 
 ## Vorherige Milestones
 
@@ -98,4 +103,4 @@ Welche Phasen welche Requirements abdecken — wird vom Roadmapper gefüllt.
 
 ---
 *Requirements defined: 2026-04-28*
-*Last updated: 2026-04-28 — Milestone v1.1 gestartet*
+*Traceability gefüllt: 2026-04-28 — Roadmap v1.1 erstellt*

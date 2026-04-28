@@ -1,74 +1,80 @@
-# Roadmap: Akten-Modul v1.0
+# Roadmap: Zahlungsverwaltung v1.1
 
 ## Overview
 
-The Akten-Modul gives Bemo a single, coherent case file for every Unfallersatz rental: customer, accident data, rental vehicle, Vermittler, and Versicherung on one page. Three sequential phases deliver this — schema and security first (the foundation every later save depends on), then the full-page detail view and form upgrade (the primary user-facing deliverable), then list improvements that make the module operationally complete.
+Milestone v1.1 ergänzt das bestehende Rechnungsmodul um vollständige Zahlungsverwaltung — Eingänge und Ausgänge bidirektional pro Rechnung, mit Bankkonto-FK, Datum, Betrag, Zahlungsart, Notiz und automatisch erfasstem Buchungs-User. Der Rechnungsstatus wird nicht mehr manuell gesetzt, sondern aus dem Saldo (SUM in − SUM out) gegen den Brutto-Betrag abgeleitet.
+
+Drei sequentielle Phasen liefern das Modul: Schema und CRUD-Backend zuerst (Foundation für jeden späteren Zugriff), dann die Status-Logik plus Anzeige in der Rechnungs-Liste (damit der neue abgeleitete Status systemweit konsistent erscheint), zuletzt die Detail-UI mit Zahlungs-Tabelle, Formular und Bearbeiten/Löschen (das primäre Anwender-Deliverable).
 
 ## Phases
 
 **Phase Numbering:**
-- Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+- Integer phases (1, 2, 3): Milestone v1.0 (abgeschlossen)
+- Integer phases (4, 5, 6): Milestone v1.1 (aktuell)
+- Decimal phases (z. B. 4.1, 5.1): Urgent insertions (markiert mit INSERTED)
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [x] **Phase 1: Schema & Sicherheit** - FK-Spalten, Audit-Tabelle, UNIQUE-Constraint und Schreibschutz vor jeder UI-Änderung (completed 2026-03-26)
-- [x] **Phase 2: Detailseite & Formular** - Vollseiten-Aktenansicht mit allen Datenblöcken und FK-Dropdowns im Formular (completed 2026-03-27)
-- [x] **Phase 3: Listen-Optimierung** - Akten-Liste mit verbesserter Filterung, Sortierung und Spaltenstruktur (completed 2026-03-27)
+- [ ] **Phase 4: Schema & Backend** - invoice_payments-Tabelle, FK/Constraints/Indizes und vollständige CRUD-API mit Permission-Guards
+- [ ] **Phase 5: Status-Logik & Listen-Integration** - Saldo-Berechnung, abgeleiteter Rechnungs-Status, Anzeige als Badge in der Rechnungs-Liste
+- [ ] **Phase 6: Detail-UI & Zahlungserfassung** - Zahlungs-Block in der Rechnungs-Detailseite mit Tabelle, Formular, Saldo-Anzeige und Bearbeiten/Löschen
 
 ## Phase Details
 
-### Phase 1: Schema & Sicherheit
-**Goal**: Datenbank und Endpoints sind produktionssicher, bevor irgendeine UI FK-Daten speichert
-**Depends on**: Nothing (first phase)
-**Requirements**: DB-01, DB-02, DB-03, DB-04, DB-05, SEC-01
+### Phase 4: Schema & Backend
+**Goal**: Datenbank und Endpoints sind produktionssicher, bevor irgendeine UI Zahlungen schreibt — invoice_payments existiert mit allen Constraints, und CRUD-Endpoints schreiben nur für autorisierte Rollen
+**Depends on**: Nothing (erste Phase des Milestones; baut auf bestehenden invoices/bank_accounts auf)
+**Requirements**: PAY-DB-01, PAY-DB-02, PAY-DB-03, PAY-DB-04, PAY-API-01, PAY-API-02, PAY-API-03, PAY-API-04, PAY-API-05
 **Success Criteria** (what must be TRUE):
-  1. Die akten-Tabelle enthält die FK-Spalten customer_id, vermittler_id, versicherung_id, rental_id neben den bestehenden TEXT-Feldern (kein Datenverlust an existierenden Akten)
-  2. Die akten-Tabelle enthält die Felder unfalldatum, unfallort, polizei_vor_ort, mietart und wiedervorlage_datum
-  3. Die aktennummer-Spalte hat einen UNIQUE-Constraint — ein zweiter INSERT mit derselben Aktennummer wird vom Datenbankfehler abgefangen
-  4. Jeder Schreibversuch auf POST/PUT/DELETE /api/akten von einem Benutzer mit der Rolle "Benutzer" wird mit HTTP 403 abgelehnt
-  5. Jede PUT-Anfrage auf /api/akten/:id erzeugt einen Eintrag in akten_history mit Nutzer-ID, Zeitstempel und den geänderten Feldern
-**Plans**: 2 plans
+  1. Die Tabelle invoice_payments existiert mit allen Feldern (id, invoice_id, direction, amount, payment_date, payment_method, bank_account_id, reference, notes, booked_by, created_at, updated_at) und ist nach Migration auch bei Server-Neustart idempotent vorhanden
+  2. Ein DELETE auf /api/invoices/:id löscht automatisch alle zugehörigen Zahlungseinträge (FK ON DELETE CASCADE), und ein INSERT mit direction außerhalb {'in','out'} oder amount <= 0 wird vom CHECK-Constraint mit Fehler abgewiesen
+  3. Eine GET-Anfrage auf /api/invoices/:id/payments liefert ein chronologisch nach payment_date sortiertes Array aller Zahlungen der Rechnung; eine POST-Anfrage mit gültigem Body legt eine Zahlung an, gibt 201 mit der ID zurück und setzt booked_by automatisch auf den aktuellen User
+  4. PUT /api/payments/:id ändert eine bestehende Zahlung (alle Felder außer booked_by und created_at), DELETE /api/payments/:id entfernt sie — beide Operationen funktionieren mit der eben angelegten ID
+  5. Ein Schreibversuch (POST/PUT/DELETE) von einem User mit Rolle "Benutzer" wird mit HTTP 403 abgelehnt; nur Verwaltung, Buchhaltung und Admin dürfen schreiben (analog zu /api/invoices)
+**Plans**: TBD
 
-Plans:
-- [x] 01-01-PLAN.md — Schema migration: new columns, UNIQUE constraint, akten_history table
-- [x] 01-02-PLAN.md — Endpoint security: permission guards on POST/PUT/DELETE, audit trail write logic
-
-### Phase 2: Detailseite & Formular
-**Goal**: Jeder Akten-Datensatz hat eine vollständige Verwaltungsseite mit allen verknüpften Entitäten auf einen Blick, und neue Akten werden mit FK-Referenzen angelegt
-**Depends on**: Phase 1
-**Requirements**: UI-01, UI-02, UI-03, UI-04, UI-05, UI-06, UI-07, UI-08, UI-09
+### Phase 5: Status-Logik & Listen-Integration
+**Goal**: Der Rechnungs-Status ist nicht mehr manuell gesetzt sondern wird systemweit aus dem Zahlungssaldo abgeleitet — sichtbar in der Rechnungs-Liste als Status-Badge, konsistent über alle Rechnungen
+**Depends on**: Phase 4 (Saldo-Logik braucht invoice_payments)
+**Requirements**: PAY-STAT-01, PAY-STAT-02, PAY-STAT-03, PAY-API-06
 **Success Criteria** (what must be TRUE):
-  1. Ein Klick auf eine Akte in der Liste öffnet eine Vollseite (kein Modal) mit Navigation zurück zur Liste
-  2. Die Detailseite zeigt Kundendaten (Name, Telefon, E-Mail), Unfalldaten (Datum, Ort, Polizei Ja/Nein), Mietvorgang (Kennzeichen, Fahrzeugbezeichnung, Mietbeginn, Mietende, Mietdauer in Tagen) sowie Mietart und Wiedervorlagedatum
-  3. Die Detailseite zeigt den Vermittler-Datenblock und den Versicherungs-Datenblock — bei nicht verknüpften Datensätzen erscheint ein "Nicht verknüpft"-Badge statt einem Fehler
-  4. Das Akten-Formular enthält Dropdown-/Suchfelder für Kunde, Vermittler und Versicherung (statt Freitexteingabe), und eine gespeicherte Akte zeigt die verknüpften Daten korrekt in der Detailseite
-  5. Ein Mietvorgang aus dem Vermietkalender kann im Formular ausgewählt und mit der Akte verknüpft werden
-**Plans**: 2 plans
+  1. Der Saldo einer Rechnung wird serverseitig korrekt als SUM(amount WHERE direction='in') − SUM(amount WHERE direction='out') berechnet und ist über die API abrufbar
+  2. Eine GET-Anfrage auf /api/invoices liefert pro Rechnung den abgeleiteten payment_status ("offen" / "teilbezahlt" / "bezahlt" / "überzahlt") sowie den aktuellen Saldo gemäß Regel: 0 → offen, >0 und <total_gross → teilbezahlt, =total_gross → bezahlt, >total_gross → überzahlt
+  3. In der Rechnungs-Liste im Frontend erscheint pro Rechnung ein Status-Badge mit dem abgeleiteten Status; eine in Phase 4 angelegte Zahlung verändert den Badge ohne manuellen Status-Eingriff
+  4. Eine Test-Rechnung mit Brutto 1000 € zeigt: ohne Zahlung "offen", nach 400 €-Eingang "teilbezahlt", nach weiteren 600 €-Eingang "bezahlt", nach zusätzlichem 100 €-Eingang "überzahlt" — und nach einem 100 €-Ausgang wieder "bezahlt"
+**Plans**: TBD
 
-Plans:
-- [ ] 02-01-PLAN.md — Enriched backend endpoint + full-page detail view with 6 data blocks
-- [ ] 02-02-PLAN.md — Form upgrade with FK pickers for Kunde/Vermittler/Versicherung/Mietvorgang
-
-### Phase 3: Listen-Optimierung
-**Goal**: Die Akten-Liste ist produktionstauglich mit durchsuchbaren, sortierbaren Spalten die den täglichen Workflow unterstützen
-**Depends on**: Phase 2
-**Requirements**: UI-10
+### Phase 6: Detail-UI & Zahlungserfassung
+**Goal**: Anwender können Zahlungen direkt aus der Rechnungs-Detailseite erfassen, einsehen, bearbeiten und löschen — mit voller Saldo-Transparenz und prominenter Status-Anzeige
+**Depends on**: Phase 5 (Status-Logik wird in der Detailseite konsumiert)
+**Requirements**: PAY-STAT-04, PAY-UI-01, PAY-UI-02, PAY-UI-03, PAY-UI-04, PAY-UI-05
 **Success Criteria** (what must be TRUE):
-  1. Die Akten-Liste zeigt relevante Spalten (z. B. Aktennummer, Kunde, Mietart, Status, Wiedervorlage) und lässt sich nach jeder Spalte sortieren
-  2. Die Liste kann nach Aktennummer, Kundenname oder Status gefiltert werden, und der Filter überlebt eine Seitennavigation (zurück von Detailansicht zur Liste)
-**Plans**: 1 plan
-
-Plans:
-- [ ] 03-01-PLAN.md — Akten-Liste: neue Spaltenstruktur (Aktennr./Kunde/Mietart/Status/Wiedervorlage), Filter-Persistenz und customer_name JOIN im Backend
+  1. Die Rechnungs-Detailseite enthält einen "Zahlungen"-Block mit chronologischer Tabelle (Spalten: Datum, Richtung Eingang/Ausgang, Betrag, Konto, Zahlungsart, Buchungs-User, Notiz) — bestehende Zahlungen aus Phase 4 erscheinen dort sofort
+  2. Ein Klick auf "+ Zahlungseingang" oder "+ Zahlungsausgang" öffnet ein Formular mit Feldern Datum (default heute), Betrag, Bankkonto (Dropdown aus bank_accounts), Zahlungsart und Verwendungszweck/Notiz; Speichern legt die Zahlung an und aktualisiert die Tabelle ohne Seitenneuladen
+  3. Über jeder Tabellenzeile ist Bearbeiten verfügbar (öffnet das Formular vorausgefüllt) und Löschen (mit Bestätigungs-Dialog); beide Aktionen aktualisieren Tabelle und Saldo-Block sofort
+  4. Über der Zahlungs-Tabelle sind sichtbar: "Bereits bezahlt: X €", "Offener Betrag: Y €" sowie der Status-Badge (offen/teilbezahlt/bezahlt/überzahlt) — Werte stimmen mit der Server-Berechnung aus Phase 5 überein
+  5. Der Status-Badge und Restbetrag erscheinen prominent im oberen Bereich der Rechnungs-Detailseite (nicht nur unten beim Zahlungs-Block) — der Anwender sieht den Zahlungsstand bereits beim Öffnen einer Rechnung
+**Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3
+Phases execute in numeric order: 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Schema & Sicherheit | 2/2 | Complete   | 2026-03-26 |
-| 2. Detailseite & Formular | 2/2 | Complete   | 2026-03-27 |
-| 3. Listen-Optimierung | 1/1 | Complete   | 2026-03-27 |
+| 4. Schema & Backend | 0/0 | Not started | - |
+| 5. Status-Logik & Listen-Integration | 0/0 | Not started | - |
+| 6. Detail-UI & Zahlungserfassung | 0/0 | Not started | - |
+
+---
+
+## Vorherige Milestones
+
+### v1.0 — Akten-Modul (Complete, 2026-03-27)
+
+3 Phasen, 5 Plans abgeschlossen. Details siehe Git-History und `phases/01-schema-sicherheit/`, `phases/02-detailseite-formular/`, `phases/03-listen-optimierung/`.
+
+- Phase 1: Schema & Sicherheit (Complete 2026-03-26)
+- Phase 2: Detailseite & Formular (Complete 2026-03-27)
+- Phase 3: Listen-Optimierung (Complete 2026-03-27)
