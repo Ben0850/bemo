@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: — Akten-Modul
 status: unknown
-stopped_at: "Plan 04-02 abgeschlossen — 4 invoice_payments-Endpoints live, Phase 04 (Schema+Backend) komplett. Naechste Phase: 05 Status-Listen"
-last_updated: "2026-04-28T10:13:33.305Z"
+stopped_at: "Plan 05-01 abgeschlossen — derivePaymentStatus helper + GET /api/invoices und GET /api/invoices/:id liefern payment_saldo+payment_status. Naechster Plan: 05-02 Frontend-Listen"
+last_updated: "2026-04-28T10:39:05.299Z"
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 4
+  completed_plans: 3
 ---
 
 # Project State: Bemo Verwaltungssystem
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Alle Geschäftsprozesse der Autovermietung zuverlässig in einem System abbilden.
-**Current focus:** Phase 04 — Schema & Backend
+**Current focus:** Phase 05 — Status-Logik & Listen-Integration
 
 ---
 
 ## Current Position
 
-Phase: 04 (Schema & Backend) — COMPLETE (2/2 plans done)
-Next: Phase 05 (Status-Listen)
+Phase: 05 (Status-Logik & Listen-Integration) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Next: Phase 05 (Status-Listen)
 |------|----------|-------|-------|
 | Phase 04-schema-backend P01 | 1min | 1 | 1 |
 | Phase 04-schema-backend P02 | 4min | 2 tasks | 1 files |
+| Phase 05-status-logik-listen P01 | 5min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,10 @@ Next: Phase 05 (Status-Listen)
 - [Phase 04-schema-backend]: booked_by ausschliesslich aus x-user-name Header (NIE aus Body) — Server-controlled identity
 - [Phase 04-schema-backend]: PUT /api/payments/:id schliesst booked_by und created_at explizit aus UPDATE-SQL aus (PAY-API-03 Unveraenderlichkeit)
 - [Phase 04-schema-backend]: Two-Layer-DELETE-Auth: globales Middleware Whitelist /api/payments/ + Inline-Guard fuer Verwaltung/Buchhaltung/Admin
+- [Phase 05-status-logik-listen]: Backend liefert lowercase Status-Strings ohne Umlaut (offen/teilbezahlt/bezahlt/ueberzahlt) — Frontend macht Display-Mapping
+- [Phase 05-status-logik-listen]: Floating-Point-Toleranz 0.005 EUR (halber Cent) verhindert dass 999.9999 als teilbezahlt vs 1000.00 erscheint
+- [Phase 05-status-logik-listen]: Status-Logik in JS, Aggregation in SQL — Refactoring der Toleranzgrenzen aendert nur eine JS-Konstante
+- [Phase 05-status-logik-listen]: Liste nutzt LEFT JOIN+GROUP BY (eine Query, kein n+1), Detail nutzt eigene aggregate queryOne (einfacheres SQL)
 
 ### Existing relevant scaffold (v1.1 context)
 
@@ -101,6 +106,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-28T10:08:12.707Z
-Stopped at: Plan 04-02 abgeschlossen — 4 invoice_payments-Endpoints live, Phase 04 (Schema+Backend) komplett. Naechste Phase: 05 Status-Listen
+Last session: 2026-04-28T10:38:42.635Z
+Stopped at: Plan 05-01 abgeschlossen — derivePaymentStatus helper + GET /api/invoices und GET /api/invoices/:id liefern payment_saldo+payment_status. Naechster Plan: 05-02 Frontend-Listen
 Resume: `/gsd:plan-phase 4`

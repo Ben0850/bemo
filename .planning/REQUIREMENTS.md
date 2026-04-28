@@ -21,12 +21,12 @@ Anforderungen für das Modul "Zahlungsverwaltung". Jede mappt in der Roadmap auf
 - [x] **PAY-API-03**: PUT /api/payments/:id aktualisiert eine bestehende Zahlung (alle Felder außer booked_by und created_at)
 - [x] **PAY-API-04**: DELETE /api/payments/:id löscht eine Buchung (mit GoBD-Auswirkungs-Audit-Log oder Soft-Delete-Variante in Phase 2 evaluieren)
 - [x] **PAY-API-05**: Permission-Guards: nur Verwaltung, Buchhaltung, Admin dürfen Zahlungen anlegen, ändern oder löschen (analog zu Rechnungen)
-- [ ] **PAY-API-06**: GET /api/invoices liefert pro Rechnung den abgeleiteten payment_status (offen/teilbezahlt/bezahlt/überzahlt) und den Saldo
+- [x] **PAY-API-06**: GET /api/invoices liefert pro Rechnung den abgeleiteten payment_status (offen/teilbezahlt/bezahlt/überzahlt) und den Saldo
 
 ### Status-Logik
 
-- [ ] **PAY-STAT-01**: Rechnungs-Saldo wird berechnet als SUM(direction='in') − SUM(direction='out')
-- [ ] **PAY-STAT-02**: Rechnungs-Status wird automatisch abgeleitet: 0 → "Offen", >0 und <total_gross → "Teilbezahlt", =total_gross → "Bezahlt", >total_gross → "Überzahlt"
+- [x] **PAY-STAT-01**: Rechnungs-Saldo wird berechnet als SUM(direction='in') − SUM(direction='out')
+- [x] **PAY-STAT-02**: Rechnungs-Status wird automatisch abgeleitet: 0 → "Offen", >0 und <total_gross → "Teilbezahlt", =total_gross → "Bezahlt", >total_gross → "Überzahlt"
 - [ ] **PAY-STAT-03**: Status wird in der Rechnungs-Liste als Badge angezeigt
 - [ ] **PAY-STAT-04**: Status wird in der Rechnungs-Detailseite prominent angezeigt zusammen mit Restbetrag
 
@@ -74,9 +74,9 @@ Welche Phasen welche Requirements abdecken — vom Roadmapper gefüllt 2026-04-2
 | PAY-API-03 | Phase 4 | Complete |
 | PAY-API-04 | Phase 4 | Complete |
 | PAY-API-05 | Phase 4 | Complete |
-| PAY-API-06 | Phase 5 | Pending |
-| PAY-STAT-01 | Phase 5 | Pending |
-| PAY-STAT-02 | Phase 5 | Pending |
+| PAY-API-06 | Phase 5 | Complete |
+| PAY-STAT-01 | Phase 5 | Complete |
+| PAY-STAT-02 | Phase 5 | Complete |
 | PAY-STAT-03 | Phase 5 | Pending |
 | PAY-STAT-04 | Phase 6 | Pending |
 | PAY-UI-01 | Phase 6 | Pending |
