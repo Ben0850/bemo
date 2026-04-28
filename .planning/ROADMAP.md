@@ -31,7 +31,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Eine GET-Anfrage auf /api/invoices/:id/payments liefert ein chronologisch nach payment_date sortiertes Array aller Zahlungen der Rechnung; eine POST-Anfrage mit gültigem Body legt eine Zahlung an, gibt 201 mit der ID zurück und setzt booked_by automatisch auf den aktuellen User
   4. PUT /api/payments/:id ändert eine bestehende Zahlung (alle Felder außer booked_by und created_at), DELETE /api/payments/:id entfernt sie — beide Operationen funktionieren mit der eben angelegten ID
   5. Ein Schreibversuch (POST/PUT/DELETE) von einem User mit Rolle "Benutzer" wird mit HTTP 403 abgelehnt; nur Verwaltung, Buchhaltung und Admin dürfen schreiben (analog zu /api/invoices)
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 04-01-PLAN.md — invoice_payments-Tabelle mit FK, CHECK-Constraints und Performance-Indizes (PAY-DB-01..04)
+- [ ] 04-02-PLAN.md — CRUD-Endpoints (GET/POST/PUT/DELETE) mit Permission-Guards für Verwaltung/Buchhaltung/Admin (PAY-API-01..05)
 
 ### Phase 5: Status-Logik & Listen-Integration
 **Goal**: Der Rechnungs-Status ist nicht mehr manuell gesetzt sondern wird systemweit aus dem Zahlungssaldo abgeleitet — sichtbar in der Rechnungs-Liste als Status-Badge, konsistent über alle Rechnungen
@@ -63,7 +66,7 @@ Phases execute in numeric order: 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 4. Schema & Backend | 0/0 | Not started | - |
+| 4. Schema & Backend | 0/2 | Planned | - |
 | 5. Status-Logik & Listen-Integration | 0/0 | Not started | - |
 | 6. Detail-UI & Zahlungserfassung | 0/0 | Not started | - |
 
