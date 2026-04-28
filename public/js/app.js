@@ -6537,9 +6537,306 @@ async function renderInvoiceDetail(id) {
           ${renderInvoiceSummary(inv)}
         </div>
       </div>
+
+      <div id="invoice-payments-block-placeholder"></div>
     `;
+
+    // Phase 6 Plan 06-02: Zahlungs-Block laden und rendern (nach initialem Render der Detailseite).
+    // Inner try/catch verhindert, dass ein Payment-Lade-Fehler den ganzen Detail-Render killt.
+    try {
+      const payments = await loadInvoicePayments(id);
+      const placeholder = document.getElementById('invoice-payments-block-placeholder');
+      if (placeholder) {
+        placeholder.outerHTML = renderInvoicePaymentsBlock(payments, inv);
+      }
+    } catch (paymentsErr) {
+      const placeholder = document.getElementById('invoice-payments-block-placeholder');
+      if (placeholder) {
+        placeholder.outerHTML = `<div class="card"><p style="color:var(--danger);">Zahlungen konnten nicht geladen werden: ${escapeHtml(paymentsErr.message)}</p></div>`;
+      }
+    }
   } catch (err) {
     main.innerHTML = `<p style="color:var(--danger);">Fehler: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+// =====================================================================
+// Phase 6 Plan 06-02 (PAY-UI-01..04): Zahlungs-Block in der Rechnungs-Detailseite
+// =====================================================================
+
+// PAY-UI-01: Zahlungs-Block-HTML (Card mit Header + Tabelle + Saldo-Footer).
+// payments = Array (kann leer sein), invoice = aktueller Datensatz fuer Permission-Check + invoice.id.
+function renderInvoicePaymentsBlock(payments, invoice) {
+  const canEdit = canEditInvoice();
+  const invoiceId = invoice.id;
+
+  // Lokale Saldo-Berechnung fuer Tabellen-Footer (Server-Saldo bleibt source of truth fuer den Header)
+  let sumIn = 0, sumOut = 0;
+  payments.forEach(p => {
+    const amt = Number(p.amount) || 0;
+    if (p.direction === 'in') sumIn += amt; else sumOut += amt;
+  });
+  const saldo = Math.round((sumIn - sumOut) * 100) / 100;
+
+  const headerButtons = canEdit ? `
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-sm btn-primary" onclick="openInvoicePaymentForm(${invoiceId}, 'in')">+ Zahlungseingang</button>
+      <button class="btn btn-sm btn-secondary" onclick="openInvoicePaymentForm(${invoiceId}, 'out')">+ Zahlungsausgang</button>
+    </div>
+  ` : '';
+
+  let tableBody = '';
+  if (payments.length === 0) {
+    const colspan = canEdit ? 8 : 7;
+    tableBody = `<tr><td colspan="${colspan}" style="text-align:center;color:var(--text-muted);padding:24px;">Noch keine Zahlungen erfasst.</td></tr>`;
+  } else {
+    tableBody = payments.map(p => {
+      const dir = p.direction === 'in'
+        ? '<span class="badge badge-green">Eingang</span>'
+        : '<span class="badge badge-orange">Ausgang</span>';
+      const konto = p.bank_account_label
+        ? escapeHtml(p.bank_account_label)
+        : '<span style="color:var(--text-muted);">Bar/Kasse</span>';
+      const amountDisplay = (p.direction === 'in' ? '+' : '-') + Number(p.amount).toFixed(2) + ' &euro;';
+      const amountColor = p.direction === 'in' ? 'var(--success, #16a34a)' : 'var(--danger, #dc2626)';
+      const aktionen = canEdit ? `
+        <td style="white-space:nowrap;">
+          <button class="btn btn-sm btn-secondary" onclick="openInvoicePaymentForm(${invoiceId}, '${p.direction}', ${p.id})">Bearbeiten</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteInvoicePayment(${p.id}, ${invoiceId}, '${p.payment_date}', ${Number(p.amount)})">Löschen</button>
+        </td>
+      ` : '';
+      return `
+        <tr>
+          <td>${formatDate(p.payment_date)}</td>
+          <td>${dir}</td>
+          <td style="text-align:right;color:${amountColor};font-weight:600;">${amountDisplay}</td>
+          <td>${konto}</td>
+          <td>${escapeHtml(p.payment_method || '—')}</td>
+          <td>${escapeHtml(p.booked_by || '—')}</td>
+          <td>${escapeHtml(p.notes || '')}</td>
+          ${aktionen}
+        </tr>
+      `;
+    }).join('');
+  }
+
+  const colspanActions = canEdit ? 1 : 0;
+  const saldoFooter = `
+    <tr style="border-top:2px solid var(--border-color, #e5e7eb);background:var(--bg-subtle, #f9fafb);">
+      <td colspan="2" style="text-align:right;font-weight:600;">Saldo (Eingang − Ausgang):</td>
+      <td style="text-align:right;font-weight:700;font-size:15px;">${saldo.toFixed(2)} &euro;</td>
+      <td colspan="${4 + colspanActions}" style="color:var(--text-muted);font-size:12px;">
+        (Eingang: ${sumIn.toFixed(2)} &euro; · Ausgang: ${sumOut.toFixed(2)} &euro;)
+      </td>
+    </tr>
+  `;
+
+  const aktionenTh = canEdit ? '<th style="width:160px;">Aktionen</th>' : '';
+
+  return `
+    <div class="card" id="invoice-payments-card">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <h3>Zahlungen</h3>
+        ${headerButtons}
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:100px;">Datum</th>
+              <th style="width:90px;">Richtung</th>
+              <th style="width:110px;text-align:right;">Betrag</th>
+              <th>Konto</th>
+              <th style="width:130px;">Zahlungsart</th>
+              <th style="width:120px;">Buchungs-User</th>
+              <th>Notiz</th>
+              ${aktionenTh}
+            </tr>
+          </thead>
+          <tbody>
+            ${tableBody}
+            ${payments.length > 0 ? saldoFooter : ''}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// Re-fetcht Invoice + Payments und re-rendert Saldo-Header + Zahlungs-Block.
+// Wird nach jedem Save/Delete aufgerufen, damit Header und Tabelle ohne Page-Reload konsistent bleiben.
+async function refreshInvoicePaymentsBlock(invoiceId) {
+  try {
+    const [inv, payments] = await Promise.all([
+      api(`/api/invoices/${invoiceId}`),
+      loadInvoicePayments(invoiceId)
+    ]);
+
+    // 1. Saldo-Header (Plan 06-01) neu rendern
+    const oldHeader = document.querySelector('.payment-saldo-header');
+    if (oldHeader) {
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = renderInvoicePaymentSaldoHeader(inv);
+      const newHeader = wrapper.firstElementChild;
+      if (newHeader) oldHeader.replaceWith(newHeader);
+    }
+
+    // 2. Zahlungs-Block neu rendern
+    const oldCard = document.getElementById('invoice-payments-card');
+    if (oldCard) {
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = renderInvoicePaymentsBlock(payments, inv);
+      const newCard = wrapper.firstElementChild;
+      if (newCard) oldCard.replaceWith(newCard);
+    }
+  } catch (err) {
+    showToast('Aktualisierung fehlgeschlagen: ' + err.message, 'error');
+  }
+}
+
+// PAY-UI-02 + PAY-UI-03 + PAY-UI-04: Modal-Formular fuer Zahlungs-Anlage / -Bearbeitung.
+// direction: 'in' | 'out' (Vorauswahl). editPaymentId: optional -> PUT-Modus (vorausgefuellt aus existierender Zahlung).
+async function openInvoicePaymentForm(invoiceId, direction, editPaymentId) {
+  if (!canEditInvoice()) {
+    showToast('Keine Berechtigung', 'error');
+    return;
+  }
+
+  const banks = await loadBankAccounts();
+
+  let existing = null;
+  if (editPaymentId) {
+    try {
+      const allPayments = await loadInvoicePayments(invoiceId);
+      existing = allPayments.find(p => p.id === editPaymentId);
+      if (!existing) {
+        showToast('Zahlung nicht gefunden', 'error');
+        return;
+      }
+      direction = existing.direction; // existierende Richtung gewinnt
+    } catch (err) {
+      showToast('Fehler beim Laden der Zahlung: ' + err.message, 'error');
+      return;
+    }
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+  const defaultDate    = existing ? existing.payment_date     : today;
+  const defaultAmount  = existing ? Number(existing.amount).toFixed(2) : '';
+  const defaultBankId  = existing ? (existing.bank_account_id || '') : (banks.find(b => b.is_default)?.id || '');
+  const defaultMethod  = existing ? existing.payment_method   : 'Überweisung';
+  const defaultNotes   = existing ? existing.notes            : '';
+  const defaultRef     = existing ? existing.reference        : '';
+
+  const dirLabel = direction === 'in' ? 'Zahlungseingang' : 'Zahlungsausgang';
+  const titleAction = existing ? 'bearbeiten' : 'erfassen';
+
+  const bankOptions = `
+    <option value="">— Bar / Kasse —</option>
+    ${banks.map(b => `
+      <option value="${b.id}" ${String(b.id) === String(defaultBankId) ? 'selected' : ''}>
+        ${escapeHtml(b.label || b.bank_name || 'Konto')} — ${escapeHtml(b.iban || '')}
+      </option>
+    `).join('')}
+  `;
+
+  const PAYMENT_METHODS = ['Überweisung', 'Bar', 'Kartenzahlung', 'Lastschrift', 'SEPA', 'Sonstige'];
+  const methodOptions = PAYMENT_METHODS.map(m =>
+    `<option value="${m}" ${m === defaultMethod ? 'selected' : ''}>${m}</option>`
+  ).join('');
+
+  openModal(`${dirLabel} ${titleAction}`, `
+    <form id="invoice-payment-form" onsubmit="saveInvoicePayment(event, ${invoiceId}, ${editPaymentId || 'null'})">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Datum <span style="color:var(--danger);">*</span></label>
+          <input type="date" id="pay-date" value="${defaultDate}" required>
+        </div>
+        <div class="form-group">
+          <label>Richtung <span style="color:var(--danger);">*</span></label>
+          <select id="pay-direction" required>
+            <option value="in"  ${direction === 'in'  ? 'selected' : ''}>Eingang</option>
+            <option value="out" ${direction === 'out' ? 'selected' : ''}>Ausgang</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Betrag (€) <span style="color:var(--danger);">*</span></label>
+        <input type="number" id="pay-amount" step="0.01" min="0.01" value="${defaultAmount}" required placeholder="0.00">
+      </div>
+      <div class="form-group">
+        <label>Bankkonto</label>
+        <select id="pay-bank-account">${bankOptions}</select>
+        <small style="color:var(--text-muted);">Leer lassen / "Bar" wählen für Kasse-Buchungen.</small>
+      </div>
+      <div class="form-group">
+        <label>Zahlungsart</label>
+        <select id="pay-method">${methodOptions}</select>
+      </div>
+      <div class="form-group">
+        <label>Verwendungszweck / Referenz</label>
+        <input type="text" id="pay-reference" value="${escapeHtml(defaultRef)}" placeholder="optional">
+      </div>
+      <div class="form-group">
+        <label>Notiz</label>
+        <textarea id="pay-notes" rows="2" placeholder="optional">${escapeHtml(defaultNotes)}</textarea>
+      </div>
+      <div class="form-actions" style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+        <button type="submit" class="btn btn-primary">${existing ? 'Speichern' : 'Anlegen'}</button>
+      </div>
+    </form>
+  `);
+}
+
+// Submit-Handler -- POST bei editPaymentId=null, sonst PUT.
+async function saveInvoicePayment(event, invoiceId, editPaymentId) {
+  event.preventDefault();
+  if (!canEditInvoice()) { showToast('Keine Berechtigung', 'error'); return; }
+
+  const payment_date = document.getElementById('pay-date').value;
+  const direction    = document.getElementById('pay-direction').value;
+  const amount       = parseFloat(document.getElementById('pay-amount').value);
+  const bankRaw      = document.getElementById('pay-bank-account').value;
+  const bank_account_id = bankRaw ? Number(bankRaw) : null;
+  const payment_method  = document.getElementById('pay-method').value;
+  const reference       = document.getElementById('pay-reference').value.trim();
+  const notes           = document.getElementById('pay-notes').value.trim();
+
+  // Frontend-Validierung (Backend macht 400er nochmal sauber)
+  if (!payment_date)                       { showToast('Datum ist Pflichtfeld', 'error'); return; }
+  if (!['in','out'].includes(direction))   { showToast('Richtung ungueltig', 'error'); return; }
+  if (!amount || amount <= 0)              { showToast('Betrag muss > 0 sein', 'error'); return; }
+
+  const body = { direction, amount, payment_date, payment_method, bank_account_id, reference, notes };
+
+  try {
+    if (editPaymentId) {
+      await api(`/api/payments/${editPaymentId}`, { method: 'PUT', body });
+      showToast('Zahlung aktualisiert');
+    } else {
+      await api(`/api/invoices/${invoiceId}/payments`, { method: 'POST', body });
+      showToast(direction === 'in' ? 'Zahlungseingang gebucht' : 'Zahlungsausgang gebucht');
+    }
+    closeModal();
+    await refreshInvoicePaymentsBlock(invoiceId);
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+// PAY-UI-04: Loeschen mit Bestaetigung (Datum + Betrag im confirm-Dialog).
+async function deleteInvoicePayment(paymentId, invoiceId, paymentDate, amount) {
+  if (!canEditInvoice()) { showToast('Keine Berechtigung', 'error'); return; }
+  const dateStr = formatDate(paymentDate);
+  const amtStr = Number(amount).toFixed(2);
+  if (!confirm(`Zahlung vom ${dateStr} ueber ${amtStr} EUR wirklich loeschen?`)) return;
+  try {
+    await api(`/api/payments/${paymentId}`, { method: 'DELETE' });
+    showToast('Zahlung geloescht');
+    await refreshInvoicePaymentsBlock(invoiceId);
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
   }
 }
 
