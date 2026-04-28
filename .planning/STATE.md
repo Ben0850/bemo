@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: — Akten-Modul
 status: unknown
 stopped_at: "Plan 04-02 abgeschlossen — 4 invoice_payments-Endpoints live, Phase 04 (Schema+Backend) komplett. Naechste Phase: 05 Status-Listen"
-last_updated: "2026-04-28T10:08:12.713Z"
+last_updated: "2026-04-28T10:13:33.305Z"
 progress:
   total_phases: 3
   completed_phases: 1
