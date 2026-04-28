@@ -50,11 +50,15 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), env: process.env.NODE_ENV || 'development' });
 });
 
-// Admin-only guard for DELETE requests (except calendar appointments)
+// Admin-only guard for DELETE requests (except calendar, time, files, payments)
 app.use((req, res, next) => {
   if (req.method === 'DELETE') {
     const permission = req.headers['x-user-permission'];
-    if (permission !== 'Admin' && !req.path.startsWith('/api/calendar/') && !req.path.startsWith('/api/time/') && !req.path.startsWith('/api/files/')) {
+    if (permission !== 'Admin'
+        && !req.path.startsWith('/api/calendar/')
+        && !req.path.startsWith('/api/time/')
+        && !req.path.startsWith('/api/files/')
+        && !req.path.startsWith('/api/payments/')) {
       return res.status(403).json({ error: 'Nur Admins dürfen Einträge löschen' });
     }
   }
@@ -1013,7 +1017,7 @@ app.post('/api/scan', async (req, res) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: 'gpt-5.4',
         messages: [
           {
             role: 'system',
@@ -1051,7 +1055,7 @@ Antworte NUR mit dem JSON-Objekt, kein anderer Text.
             ]
           }
         ],
-        max_tokens: 500,
+        max_tokens: 2000,
         temperature: 0,
       })
     });
@@ -1439,6 +1443,25 @@ app.delete('/api/invoice-items/:id', (req, res) => {
   execute('DELETE FROM invoice_items WHERE id = ?', [Number(req.params.id)]);
   if (item) recalcInvoiceTotals(item.invoice_id);
   res.json({ message: 'Position gelöscht' });
+});
+
+// ===== INVOICE PAYMENTS (Phase 4 — Zahlungsverwaltung) =====
+
+// PAY-API-01: Liste aller Zahlungen einer Rechnung, sortiert nach payment_date ASC
+app.get('/api/invoices/:id/payments', (req, res) => {
+  const invoiceId = Number(req.params.id);
+  if (!invoiceId) return res.status(400).json({ error: 'Ungültige Rechnungs-ID' });
+  const invoice = queryOne('SELECT id FROM invoices WHERE id = ?', [invoiceId]);
+  if (!invoice) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
+  const payments = queryAll(
+    `SELECT p.*, b.label AS bank_account_label, b.iban AS bank_account_iban
+     FROM invoice_payments p
+     LEFT JOIN bank_accounts b ON p.bank_account_id = b.id
+     WHERE p.invoice_id = ?
+     ORDER BY p.payment_date ASC, p.id ASC`,
+    [invoiceId]
+  );
+  res.json(payments);
 });
 
 // PDF Generation
@@ -3566,21 +3589,22 @@ app.get('/api/akten/:id/post', (req, res) => {
 
 app.post('/api/akten/:id/post', (req, res) => {
   const userId = Number(req.headers['x-user-id']);
-  const { post_date, sender, recipient, subject, s3_key, filename } = req.body;
+  const { post_date, sender, recipient, subject, s3_key, filename, attachment_count } = req.body;
   if (!filename) return res.status(400).json({ error: 'Dateiname ist Pflichtfeld' });
   const result = execute(
-    'INSERT INTO akten_post (akte_id, post_date, sender, recipient, subject, s3_key, filename, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [Number(req.params.id), post_date || new Date().toISOString().split('T')[0], sender || '', recipient || '', subject || '', s3_key, filename, userId]
+    'INSERT INTO akten_post (akte_id, post_date, sender, recipient, subject, s3_key, filename, uploaded_by, attachment_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [Number(req.params.id), post_date || new Date().toISOString().split('T')[0], sender || '', recipient || '', subject || '', s3_key || '', filename, userId, Number(attachment_count) || 0]
   );
   res.json({ id: result.lastId, message: 'Post eingetragen' });
 });
 
 app.put('/api/akten-post/:id', (req, res) => {
-  const { post_date, sender, recipient, subject, s3_key, filename } = req.body;
+  const { post_date, sender, recipient, subject, s3_key, filename, attachment_count } = req.body;
   let sql = 'UPDATE akten_post SET post_date=?, sender=?, recipient=?, subject=?';
   const params = [post_date || '', sender || '', recipient || '', subject || ''];
   if (s3_key !== undefined) { sql += ', s3_key=?'; params.push(s3_key); }
   if (filename !== undefined) { sql += ', filename=?'; params.push(filename); }
+  if (attachment_count !== undefined) { sql += ', attachment_count=?'; params.push(Number(attachment_count) || 0); }
   sql += ' WHERE id=?';
   params.push(Number(req.params.id));
   execute(sql, params);
@@ -3729,6 +3753,12 @@ app.get('/api/vermittler/:id', proxyStammdatenRequest);
 app.post('/api/vermittler', proxyStammdatenRequest);
 app.put('/api/vermittler/:id', proxyStammdatenRequest);
 app.delete('/api/vermittler/:id', proxyStammdatenRequest);
+
+app.get('/api/dekra-drs', proxyStammdatenRequest);
+app.get('/api/dekra-drs/:id', proxyStammdatenRequest);
+app.post('/api/dekra-drs', proxyStammdatenRequest);
+app.put('/api/dekra-drs/:id', proxyStammdatenRequest);
+app.delete('/api/dekra-drs/:id', proxyStammdatenRequest);
 
 // Fallback: serve index.html
 app.get('*', (req, res) => {
