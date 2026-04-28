@@ -1325,9 +1325,18 @@ function derivePaymentStatus(saldo, total_gross) {
 
 app.get('/api/invoices', (req, res) => {
   const { status, search, date_from, date_to } = req.query;
+  // Phase 5 (PAY-API-06): Eine Query mit LEFT JOIN + GROUP BY berechnet payment_saldo
+  // pro Rechnung — verhindert n+1-Abfragen bei langen Rechnungslisten.
+  // Die invoice_payments-Tabelle hat den Index idx_invoice_payments_invoice_date,
+  // sodass der JOIN auch bei vielen tausend Zahlungen performant bleibt.
   let sql = `SELECT i.*,
-    CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name ELSE c.last_name || ', ' || c.first_name END as customer_name
-    FROM invoices i JOIN customers c ON i.customer_id = c.id WHERE 1=1`;
+    CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name ELSE c.last_name || ', ' || c.first_name END as customer_name,
+    COALESCE(SUM(CASE WHEN p.direction='in'  THEN p.amount ELSE 0 END), 0)
+    - COALESCE(SUM(CASE WHEN p.direction='out' THEN p.amount ELSE 0 END), 0) AS payment_saldo
+    FROM invoices i
+    JOIN customers c ON i.customer_id = c.id
+    LEFT JOIN invoice_payments p ON p.invoice_id = i.id
+    WHERE 1=1`;
   const params = [];
   if (status) { sql += ' AND i.status = ?'; params.push(status); }
   if (date_from) { sql += ' AND i.invoice_date >= ?'; params.push(date_from); }
@@ -1337,8 +1346,16 @@ app.get('/api/invoices', (req, res) => {
     sql += ' AND (i.invoice_number LIKE ? OR c.last_name LIKE ? OR c.first_name LIKE ? OR c.company_name LIKE ?)';
     params.push(term, term, term, term);
   }
-  sql += ' ORDER BY i.invoice_date DESC, i.id DESC';
-  res.json(queryAll(sql, params));
+  sql += ' GROUP BY i.id ORDER BY i.invoice_date DESC, i.id DESC';
+  const rows = queryAll(sql, params);
+  // Phase 5 (PAY-STAT-02): payment_status pro Row in JS ableiten
+  // (Status-Logik in JS statt SQL macht Refactoring der Toleranzgrenzen einfach)
+  const result = rows.map(r => ({
+    ...r,
+    payment_saldo: Math.round((Number(r.payment_saldo) || 0) * 100) / 100, // 2 Nachkommastellen
+    payment_status: derivePaymentStatus(r.payment_saldo, r.total_gross)
+  }));
+  res.json(result);
 });
 
 app.get('/api/invoices/:id', (req, res) => {
