@@ -1464,6 +1464,131 @@ app.get('/api/invoices/:id/payments', (req, res) => {
   res.json(payments);
 });
 
+// PAY-API-02 + PAY-API-05: Neue Zahlung anlegen, booked_by automatisch aus x-user-name
+app.post('/api/invoices/:id/payments', (req, res) => {
+  // Permission-Guard
+  const permission = req.headers['x-user-permission'];
+  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const invoiceId = Number(req.params.id);
+  if (!invoiceId) return res.status(400).json({ error: 'Ungültige Rechnungs-ID' });
+  const invoice = queryOne('SELECT id FROM invoices WHERE id = ?', [invoiceId]);
+  if (!invoice) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
+
+  const { direction, amount, payment_date, payment_method, bank_account_id, reference, notes } = req.body;
+
+  // Body-Validation (vor SQL — klare 400-Antworten)
+  if (!direction || !['in', 'out'].includes(direction)) {
+    return res.status(400).json({ error: "direction muss 'in' oder 'out' sein" });
+  }
+  const amt = Number(amount);
+  if (!amt || amt <= 0) {
+    return res.status(400).json({ error: 'amount muss > 0 sein' });
+  }
+  if (!payment_date || !/^\d{4}-\d{2}-\d{2}$/.test(payment_date)) {
+    return res.status(400).json({ error: 'payment_date muss im Format YYYY-MM-DD sein' });
+  }
+
+  // booked_by automatisch aus Header (nicht aus Body)
+  const bookedBy = req.headers['x-user-name'] || '';
+
+  try {
+    const result = execute(
+      `INSERT INTO invoice_payments
+        (invoice_id, direction, amount, payment_date, payment_method, bank_account_id, reference, notes, booked_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invoiceId,
+        direction,
+        amt,
+        payment_date,
+        payment_method || '',
+        bank_account_id || null,
+        reference || '',
+        notes || '',
+        bookedBy
+      ]
+    );
+    const created = queryOne('SELECT * FROM invoice_payments WHERE id = ?', [result.lastId]);
+    res.status(201).json(created);
+  } catch (e) {
+    res.status(500).json({ error: 'Zahlung konnte nicht angelegt werden: ' + e.message });
+  }
+});
+
+// PAY-API-03 + PAY-API-05: Zahlung ändern (alle Felder außer booked_by und created_at)
+app.put('/api/payments/:id', (req, res) => {
+  // Permission-Guard
+  const permission = req.headers['x-user-permission'];
+  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const paymentId = Number(req.params.id);
+  if (!paymentId) return res.status(400).json({ error: 'Ungültige Zahlungs-ID' });
+  const existing = queryOne('SELECT * FROM invoice_payments WHERE id = ?', [paymentId]);
+  if (!existing) return res.status(404).json({ error: 'Zahlung nicht gefunden' });
+
+  const { direction, amount, payment_date, payment_method, bank_account_id, reference, notes } = req.body;
+
+  // Body-Validation (gleiche Regeln wie POST)
+  if (direction !== undefined && !['in', 'out'].includes(direction)) {
+    return res.status(400).json({ error: "direction muss 'in' oder 'out' sein" });
+  }
+  const amt = (amount !== undefined) ? Number(amount) : existing.amount;
+  if (!amt || amt <= 0) {
+    return res.status(400).json({ error: 'amount muss > 0 sein' });
+  }
+  if (payment_date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(payment_date)) {
+    return res.status(400).json({ error: 'payment_date muss im Format YYYY-MM-DD sein' });
+  }
+
+  // PAY-API-03: booked_by und created_at sind UNVERÄNDERLICH — werden hier NICHT in UPDATE-SQL aufgenommen
+  try {
+    execute(
+      `UPDATE invoice_payments SET
+         direction = ?,
+         amount = ?,
+         payment_date = ?,
+         payment_method = ?,
+         bank_account_id = ?,
+         reference = ?,
+         notes = ?,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        direction || existing.direction,
+        amt,
+        payment_date || existing.payment_date,
+        (payment_method !== undefined) ? payment_method : existing.payment_method,
+        (bank_account_id !== undefined) ? (bank_account_id || null) : existing.bank_account_id,
+        (reference !== undefined) ? reference : existing.reference,
+        (notes !== undefined) ? notes : existing.notes,
+        paymentId
+      ]
+    );
+    const updated = queryOne('SELECT * FROM invoice_payments WHERE id = ?', [paymentId]);
+    res.json(updated);
+  } catch (e) {
+    res.status(500).json({ error: 'Zahlung konnte nicht aktualisiert werden: ' + e.message });
+  }
+});
+
+// PAY-API-04 + PAY-API-05: Zahlung löschen
+app.delete('/api/payments/:id', (req, res) => {
+  // Permission-Guard (das globale Middleware lässt /api/payments/ durch — siehe Zeile 53)
+  const permission = req.headers['x-user-permission'];
+  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const paymentId = Number(req.params.id);
+  if (!paymentId) return res.status(400).json({ error: 'Ungültige Zahlungs-ID' });
+  const existing = queryOne('SELECT id FROM invoice_payments WHERE id = ?', [paymentId]);
+  if (!existing) return res.status(404).json({ error: 'Zahlung nicht gefunden' });
+  execute('DELETE FROM invoice_payments WHERE id = ?', [paymentId]);
+  res.json({ success: true, message: 'Zahlung gelöscht' });
+});
+
 // PDF Generation
 app.get('/api/invoices/:id/pdf', (req, res) => {
   const invoice = queryOne(
