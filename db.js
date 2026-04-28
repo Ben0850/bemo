@@ -431,6 +431,31 @@ async function getDb() {
     )
   `);
 
+  // Phase 4: Zahlungserfassung (PAY-DB-01 bis PAY-DB-04)
+  // invoice_payments — bidirektionale Zahlungsbuchungen (Eingänge + Ausgänge) pro Rechnung
+  db.run(`
+    CREATE TABLE IF NOT EXISTS invoice_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id INTEGER NOT NULL,
+      direction TEXT NOT NULL CHECK (direction IN ('in','out')),
+      amount REAL NOT NULL CHECK (amount > 0),
+      payment_date TEXT NOT NULL,
+      payment_method TEXT DEFAULT '',
+      bank_account_id INTEGER,
+      reference TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      booked_by TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+      FOREIGN KEY (bank_account_id) REFERENCES bank_accounts(id)
+    )
+  `);
+
+  // Performance-Indizes (PAY-DB-04)
+  db.run(`CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice_date ON invoice_payments(invoice_id, payment_date)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_invoice_payments_bank_account ON invoice_payments(bank_account_id)`);
+
   // vat_rate per item for GoBD reproducibility (DB column needed for Phase 5 PDF)
   try { db.run("ALTER TABLE invoice_items ADD COLUMN vat_rate REAL DEFAULT 0.19"); } catch(e) {}
 
@@ -859,6 +884,8 @@ async function getDb() {
       FOREIGN KEY (uploaded_by) REFERENCES staff(id)
     )
   `);
+
+  try { db.run("ALTER TABLE akten_post ADD COLUMN attachment_count INTEGER DEFAULT 0"); } catch(e) {}
 
   // Phase 1: Audit trail table (DB-05 — GoBD compliance)
   db.run(`
