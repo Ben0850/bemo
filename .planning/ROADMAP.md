@@ -60,7 +60,10 @@ Plans:
   3. Über jeder Tabellenzeile ist Bearbeiten verfügbar (öffnet das Formular vorausgefüllt) und Löschen (mit Bestätigungs-Dialog); beide Aktionen aktualisieren Tabelle und Saldo-Block sofort
   4. Über der Zahlungs-Tabelle sind sichtbar: "Bereits bezahlt: X €", "Offener Betrag: Y €" sowie der Status-Badge (offen/teilbezahlt/bezahlt/überzahlt) — Werte stimmen mit der Server-Berechnung aus Phase 5 überein
   5. Der Status-Badge und Restbetrag erscheinen prominent im oberen Bereich der Rechnungs-Detailseite (nicht nur unten beim Zahlungs-Block) — der Anwender sieht den Zahlungsstand bereits beim Öffnen einer Rechnung
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 06-01-PLAN.md — Saldo-Header + Daten-Loader: loadInvoicePayments, loadBankAccounts, renderInvoicePaymentSaldoHeader (PAY-STAT-04, PAY-UI-05)
+- [ ] 06-02-PLAN.md — Zahlungs-Tabelle + Modal-Form + Save/Edit/Delete + Permission-Aware UI + E2E-Checkpoint (PAY-UI-01..04)
 
 ## Progress
 
@@ -71,7 +74,7 @@ Phases execute in numeric order: 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 4. Schema & Backend | 0/2 | Planned | - |
 | 5. Status-Logik & Listen-Integration | 2/2 | Complete   | 2026-04-28 |
-| 6. Detail-UI & Zahlungserfassung | 0/0 | Not started | - |
+| 6. Detail-UI & Zahlungserfassung | 0/2 | Planned | - |
 
 ---
 
