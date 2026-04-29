@@ -14998,6 +14998,9 @@ async function openAddBillingModal() {
       <button class="btn btn-secondary" onclick="closeModal()">Schließen</button>
     </div>
   `, 'modal-wide');
+  // Inline-Override: garantiert mind. 1200px Breite, unabhängig von CSS-Cache
+  const modalEl = document.getElementById('modal');
+  if (modalEl) modalEl.style.maxWidth = '1200px';
   // Lazy-load both lists once for client-side filtering
   try {
     const [invoices, creditNotes] = await Promise.all([
