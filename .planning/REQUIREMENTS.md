@@ -32,10 +32,10 @@ Anforderungen für das Modul "Zahlungsverwaltung". Jede mappt in der Roadmap auf
 
 ### Frontend — UI
 
-- [ ] **PAY-UI-01**: Rechnungs-Detailseite zeigt einen "Zahlungen"-Block mit chronologischer Tabelle (Datum, Richtung Eingang/Ausgang, Betrag, Konto, Zahlungsart, Buchung-User, Notiz)
-- [ ] **PAY-UI-02**: Button "+ Zahlungseingang" und "+ Zahlungsausgang" in der Rechnungs-Detailseite (oder kombinierter Button mit Richtungs-Auswahl im Formular)
-- [ ] **PAY-UI-03**: Formular mit Feldern: Datum (default heute), Betrag, Bankkonto (Dropdown aus bank_accounts), Zahlungsart (Überweisung/Bar/Kartenzahlung/...), Verwendungszweck/Notiz
-- [ ] **PAY-UI-04**: Bestehende Zahlungen lassen sich aus der Tabelle direkt bearbeiten und löschen (mit Bestätigungs-Dialog)
+- [x] **PAY-UI-01**: Rechnungs-Detailseite zeigt einen "Zahlungen"-Block mit chronologischer Tabelle (Datum, Richtung Eingang/Ausgang, Betrag, Konto, Zahlungsart, Buchung-User, Notiz)
+- [x] **PAY-UI-02**: Button "+ Zahlungseingang" und "+ Zahlungsausgang" in der Rechnungs-Detailseite (oder kombinierter Button mit Richtungs-Auswahl im Formular)
+- [x] **PAY-UI-03**: Formular mit Feldern: Datum (default heute), Betrag, Bankkonto (Dropdown aus bank_accounts), Zahlungsart (Überweisung/Bar/Kartenzahlung/...), Verwendungszweck/Notiz
+- [x] **PAY-UI-04**: Bestehende Zahlungen lassen sich aus der Tabelle direkt bearbeiten und löschen (mit Bestätigungs-Dialog)
 - [x] **PAY-UI-05**: Saldo-Anzeige ("Bereits bezahlt: X €", "Offener Betrag: Y €") über der Zahlungs-Tabelle, plus Status-Badge
 
 ## v2 Requirements (deferred)
@@ -79,10 +79,10 @@ Welche Phasen welche Requirements abdecken — vom Roadmapper gefüllt 2026-04-2
 | PAY-STAT-02 | Phase 5 | Complete |
 | PAY-STAT-03 | Phase 5 | Complete |
 | PAY-STAT-04 | Phase 6 | Complete |
-| PAY-UI-01 | Phase 6 | Pending |
-| PAY-UI-02 | Phase 6 | Pending |
-| PAY-UI-03 | Phase 6 | Pending |
-| PAY-UI-04 | Phase 6 | Pending |
+| PAY-UI-01 | Phase 6 | Complete |
+| PAY-UI-02 | Phase 6 | Complete |
+| PAY-UI-03 | Phase 6 | Complete |
+| PAY-UI-04 | Phase 6 | Complete |
 | PAY-UI-05 | Phase 6 | Complete |
 
 **Coverage:**

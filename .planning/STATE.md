@@ -4,12 +4,12 @@ milestone: v1.0
 milestone_name: — Akten-Modul
 status: unknown
 stopped_at: "Plan 06-01 abgeschlossen (Task 1 commit 2f7afa8 — loadInvoicePayments + loadBankAccounts; Task 2 commit 59bdf19 — Saldo-Header in renderInvoiceDetail). Naechster Schritt: /gsd:execute-phase 6 (Plan 06-02 Zahlungstabelle + CRUD-Modal)."
-last_updated: "2026-04-28T11:59:16.688Z"
+last_updated: "2026-04-29T10:26:07.772Z"
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 6
-  completed_plans: 5
+  completed_plans: 6
 ---
 
 # Project State: Bemo Verwaltungssystem
