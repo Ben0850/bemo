@@ -15109,8 +15109,8 @@ async function addBillingItem(type, id) {
       body: { type: type, item_id: id }
     });
     showToast((type === 'invoice' ? 'Rechnung' : 'Gutschrift') + ' hinzugefügt');
+    closeModal();
     loadAkteBilling(currentAkteId);
-    // Modal offen lassen, damit User mehrere hinzufügen kann
   } catch (err) {
     showToast(err.message, 'error');
   }
