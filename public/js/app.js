@@ -14997,7 +14997,7 @@ async function openAddBillingModal() {
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button class="btn btn-secondary" onclick="closeModal()">Schließen</button>
     </div>
-  `);
+  `, 'modal-wide');
   // Lazy-load both lists once for client-side filtering
   try {
     const [invoices, creditNotes] = await Promise.all([
