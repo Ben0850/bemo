@@ -212,6 +212,7 @@ function navigate(page, data) {
     case 'insurances': renderInsurances(); break;
     case 'lawyers': renderLawyers(); break;
     case 'vermittler': renderVermittler(); break;
+    case 'dekra-drs': renderDekraDrs(); break;
     case 'akten': renderAkten(); break;
     case 'akte-detail': renderAkteDetail(data); break;
     case 'calendar': renderCalendar(); break;
@@ -11569,6 +11570,181 @@ async function deleteLawyer(id, name) {
     await api('/api/lawyers/' + id, { method: 'DELETE' });
     showToast('Anwalt gelöscht');
     renderLawyers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ===== PAGE: Dekra DRS =====
+let _dekraData = [];
+let _dekraSort = { field: 'jahr', dir: 'desc' };
+
+async function renderDekraDrs() {
+  const main = document.getElementById('main-content');
+  main.innerHTML = `
+    <div class="page-header">
+      <h2>Dekra DRS</h2>
+      ${isAdmin() ? '<button class="btn btn-primary" onclick="openDekraForm()">+ Neuer Eintrag</button>' : ''}
+    </div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="filter-bar">
+        <div class="form-group" style="flex:1;min-width:250px;">
+          <label>Suche (PLZ oder Jahr)</label>
+          <input type="text" id="dekra-search" placeholder="z.B. 12345 oder 2024" oninput="filterDekra()">
+        </div>
+        <button class="btn btn-secondary" onclick="document.getElementById('dekra-search').value='';filterDekra()">Zurücksetzen</button>
+      </div>
+    </div>
+    <div class="card">
+      <div id="dekra-table-content"><div class="loading">Laden...</div></div>
+    </div>
+  `;
+  try {
+    _dekraData = await api('/api/dekra-drs');
+    renderDekraTable();
+  } catch (err) {
+    document.getElementById('dekra-table-content').innerHTML = '<div class="empty-state"><p>Fehler: ' + escapeHtml(err.message) + '</p></div>';
+  }
+}
+
+function filterDekra() {
+  renderDekraTable();
+}
+
+function sortDekra(field) {
+  if (_dekraSort.field === field) {
+    _dekraSort.dir = _dekraSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _dekraSort.field = field;
+    _dekraSort.dir = 'asc';
+  }
+  renderDekraTable();
+}
+
+function dekraSortIcon(field) {
+  if (_dekraSort.field !== field) return '<span style="opacity:0.3;">&#9650;</span>';
+  return _dekraSort.dir === 'asc' ? '<span>&#9650;</span>' : '<span>&#9660;</span>';
+}
+
+function fmtDekraValue(v) {
+  if (v == null || v === '') return '';
+  const num = parseFloat(String(v).replace(',', '.'));
+  if (isNaN(num)) return escapeHtml(String(v));
+  return num.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+}
+
+function renderDekraTable() {
+  const container = document.getElementById('dekra-table-content');
+  if (!container) return;
+  let data = [..._dekraData];
+  const term = (document.getElementById('dekra-search')?.value || '').toLowerCase().trim();
+
+  if (term) {
+    data = data.filter(d => [d.plz, d.jahr].join(' ').toLowerCase().includes(term));
+  }
+
+  data.sort((a, b) => {
+    const f = _dekraSort.field;
+    const numericFields = ['id', 'jahr', 'plz', 'mechanik', 'karosserie', 'lackierung'];
+    if (numericFields.includes(f)) {
+      const va = parseFloat(String(a[f] || '').replace(',', '.')) || 0;
+      const vb = parseFloat(String(b[f] || '').replace(',', '.')) || 0;
+      return _dekraSort.dir === 'asc' ? va - vb : vb - va;
+    }
+    let va = (a[f] || '').toString().toLowerCase();
+    let vb = (b[f] || '').toString().toLowerCase();
+    return _dekraSort.dir === 'asc' ? va.localeCompare(vb, 'de') : vb.localeCompare(va, 'de');
+  });
+
+  if (data.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>Keine Einträge gefunden.</p></div>';
+    return;
+  }
+
+  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap;';
+  container.innerHTML = `
+    <div style="padding:8px 16px;color:var(--text-muted);font-size:13px;">${data.length} Eintr${data.length !== 1 ? 'äge' : 'ag'}</div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr>
+          <th style="${thStyle}" onclick="sortDekra('plz')">PLZ ${dekraSortIcon('plz')}</th>
+          <th style="${thStyle}" onclick="sortDekra('jahr')">Jahr ${dekraSortIcon('jahr')}</th>
+          <th style="${thStyle}" onclick="sortDekra('mechanik')">Mechanik ${dekraSortIcon('mechanik')}</th>
+          <th style="${thStyle}" onclick="sortDekra('karosserie')">Karosserie ${dekraSortIcon('karosserie')}</th>
+          <th style="${thStyle}" onclick="sortDekra('lackierung')">Lackierung ${dekraSortIcon('lackierung')}</th>
+          ${isAdmin() ? '<th>Aktionen</th>' : ''}
+        </tr></thead>
+        <tbody>
+          ${data.map(d => `<tr>
+            <td><strong>${escapeHtml(String(d.plz || ''))}</strong></td>
+            <td>${escapeHtml(String(d.jahr || ''))}</td>
+            <td>${fmtDekraValue(d.mechanik)}</td>
+            <td>${fmtDekraValue(d.karosserie)}</td>
+            <td>${fmtDekraValue(d.lackierung)}</td>
+            ${isAdmin() ? '<td><div style="display:flex;gap:6px;white-space:nowrap;"><button class="btn btn-sm btn-primary" onclick="openDekraForm(' + d.id + ')">Bearbeiten</button><button class="btn btn-sm btn-danger" onclick="deleteDekra(' + d.id + ',\'' + escapeHtml(String(d.plz || '')) + '\',\'' + escapeHtml(String(d.jahr || '')) + '\')">Löschen</button></div></td>' : ''}
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function openDekraForm(editId) {
+  let d = { jahr: new Date().getFullYear(), plz: '', mechanik: '', karosserie: '', lackierung: '' };
+  if (editId) {
+    try { d = await api('/api/dekra-drs/' + editId); } catch { showToast('Eintrag nicht gefunden', 'error'); return; }
+  }
+  openModal(editId ? 'Dekra DRS bearbeiten' : 'Neuer Dekra DRS Eintrag', `
+    <form onsubmit="saveDekra(event, ${editId || 'null'})">
+      <div style="background:var(--bg);border-radius:var(--radius);padding:14px 16px;margin-bottom:12px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>PLZ *</label><input type="number" id="dekra-plz" value="${escapeHtml(String(d.plz || ''))}" required></div>
+          <div class="form-group"><label>Jahr *</label><input type="number" id="dekra-jahr" value="${escapeHtml(String(d.jahr || ''))}" required></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px;">
+          <div class="form-group"><label>Mechanik (€)</label><input type="number" step="0.01" id="dekra-mechanik" value="${escapeHtml(String(d.mechanik || '').replace(',', '.'))}"></div>
+          <div class="form-group"><label>Karosserie (€)</label><input type="number" step="0.01" id="dekra-karosserie" value="${escapeHtml(String(d.karosserie || '').replace(',', '.'))}"></div>
+          <div class="form-group"><label>Lackierung (€)</label><input type="number" step="0.01" id="dekra-lackierung" value="${escapeHtml(String(d.lackierung || '').replace(',', '.'))}"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">${editId ? 'Speichern' : 'Anlegen'}</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `);
+}
+
+async function saveDekra(e, editId) {
+  e.preventDefault();
+  const data = {
+    plz: document.getElementById('dekra-plz').value,
+    jahr: document.getElementById('dekra-jahr').value,
+    mechanik: document.getElementById('dekra-mechanik').value,
+    karosserie: document.getElementById('dekra-karosserie').value,
+    lackierung: document.getElementById('dekra-lackierung').value
+  };
+  try {
+    if (editId) {
+      await api('/api/dekra-drs/' + editId, { method: 'PUT', body: data });
+      showToast('Eintrag aktualisiert');
+    } else {
+      await api('/api/dekra-drs', { method: 'POST', body: data });
+      showToast('Eintrag angelegt');
+    }
+    closeModal();
+    renderDekraDrs();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteDekra(id, plz, jahr) {
+  if (!confirm('Eintrag PLZ ' + plz + ' / Jahr ' + jahr + ' wirklich löschen?')) return;
+  try {
+    await api('/api/dekra-drs/' + id, { method: 'DELETE' });
+    showToast('Eintrag gelöscht');
+    renderDekraDrs();
   } catch (err) {
     showToast(err.message, 'error');
   }
