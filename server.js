@@ -3848,6 +3848,96 @@ app.delete('/api/akten/:akteId/eintraege/:eintragId', (req, res) => {
   res.json({ success: true });
 });
 
+// ===== Akten <-> Rechnungen/Gutschriften (Many-to-Many) =====
+app.get('/api/akten/:id/billing', (req, res) => {
+  const akteId = Number(req.params.id);
+  if (!queryOne('SELECT id FROM akten WHERE id = ?', [akteId])) {
+    return res.status(404).json({ error: 'Akte nicht gefunden' });
+  }
+  const invoices = queryAll(`
+    SELECT 'invoice' AS type, i.id, i.invoice_number AS number, i.invoice_date AS date,
+           i.payment_method, i.total_net, i.total_gross, i.status,
+           CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name
+                ELSE c.last_name || ', ' || c.first_name END AS customer_name,
+           COALESCE(SUM(CASE WHEN p.direction='in'  THEN p.amount ELSE 0 END), 0)
+           - COALESCE(SUM(CASE WHEN p.direction='out' THEN p.amount ELSE 0 END), 0) AS payment_saldo
+    FROM akten_invoices ai
+    JOIN invoices i ON ai.invoice_id = i.id
+    JOIN customers c ON i.customer_id = c.id
+    LEFT JOIN invoice_payments p ON p.invoice_id = i.id
+    WHERE ai.akte_id = ?
+    GROUP BY i.id
+  `, [akteId]).map(r => ({
+    ...r,
+    payment_saldo: Math.round((Number(r.payment_saldo) || 0) * 100) / 100,
+    payment_status: derivePaymentStatus(r.payment_saldo, r.total_gross)
+  }));
+  const creditNotes = queryAll(`
+    SELECT 'credit_note' AS type, cn.id, cn.credit_number AS number, cn.credit_date AS date,
+           cn.payment_method, cn.total_net, cn.total_gross, cn.status,
+           CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name
+                ELSE c.last_name || ', ' || c.first_name END AS customer_name
+    FROM akten_credit_notes acn
+    JOIN credit_notes cn ON acn.credit_note_id = cn.id
+    JOIN customers c ON cn.customer_id = c.id
+    WHERE acn.akte_id = ?
+  `, [akteId]).map(r => ({ ...r, payment_saldo: null, payment_status: null }));
+  const combined = [...invoices, ...creditNotes].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  res.json(combined);
+});
+
+app.post('/api/akten/:id/billing', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const akteId = Number(req.params.id);
+  const { type, item_id } = req.body || {};
+  if (!['invoice', 'credit_note'].includes(type)) return res.status(400).json({ error: 'type muss invoice oder credit_note sein' });
+  const itemId = Number(item_id);
+  if (!itemId) return res.status(400).json({ error: 'item_id erforderlich' });
+  if (!queryOne('SELECT id FROM akten WHERE id = ?', [akteId])) {
+    return res.status(404).json({ error: 'Akte nicht gefunden' });
+  }
+  if (type === 'invoice') {
+    if (!queryOne('SELECT id FROM invoices WHERE id = ?', [itemId])) {
+      return res.status(404).json({ error: 'Rechnung nicht gefunden' });
+    }
+    try {
+      execute('INSERT INTO akten_invoices (akte_id, invoice_id) VALUES (?, ?)', [akteId, itemId]);
+    } catch (e) {
+      return res.status(409).json({ error: 'Rechnung bereits dieser Akte zugewiesen' });
+    }
+  } else {
+    if (!queryOne('SELECT id FROM credit_notes WHERE id = ?', [itemId])) {
+      return res.status(404).json({ error: 'Gutschrift nicht gefunden' });
+    }
+    try {
+      execute('INSERT INTO akten_credit_notes (akte_id, credit_note_id) VALUES (?, ?)', [akteId, itemId]);
+    } catch (e) {
+      return res.status(409).json({ error: 'Gutschrift bereits dieser Akte zugewiesen' });
+    }
+  }
+  res.status(201).json({ success: true });
+});
+
+app.delete('/api/akten/:id/billing/:type/:itemId', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const akteId = Number(req.params.id);
+  const type = req.params.type;
+  const itemId = Number(req.params.itemId);
+  if (!['invoice', 'credit_note'].includes(type)) return res.status(400).json({ error: 'Ungueltiger Typ' });
+  if (type === 'invoice') {
+    execute('DELETE FROM akten_invoices WHERE akte_id = ? AND invoice_id = ?', [akteId, itemId]);
+  } else {
+    execute('DELETE FROM akten_credit_notes WHERE akte_id = ? AND credit_note_id = ?', [akteId, itemId]);
+  }
+  res.json({ success: true });
+});
+
 app.delete('/api/akten/:id', (req, res) => {
   // SEC-01: Permission guard (explicit — global middleware only allows Admin, this adds Verwaltung/Buchhaltung)
   const permission = req.headers['x-user-permission'];

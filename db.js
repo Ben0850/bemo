@@ -524,6 +524,31 @@ async function getDb() {
     )
   `);
 
+  // Akten <-> Invoices/Credit-Notes (Many-to-Many)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS akten_invoices (
+      akte_id INTEGER NOT NULL,
+      invoice_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (akte_id, invoice_id),
+      FOREIGN KEY (akte_id) REFERENCES akten(id) ON DELETE CASCADE,
+      FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+    )
+  `);
+  try { db.run('CREATE INDEX IF NOT EXISTS idx_akten_invoices_invoice ON akten_invoices(invoice_id)'); } catch(e) {}
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS akten_credit_notes (
+      akte_id INTEGER NOT NULL,
+      credit_note_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (akte_id, credit_note_id),
+      FOREIGN KEY (akte_id) REFERENCES akten(id) ON DELETE CASCADE,
+      FOREIGN KEY (credit_note_id) REFERENCES credit_notes(id) ON DELETE CASCADE
+    )
+  `);
+  try { db.run('CREATE INDEX IF NOT EXISTS idx_akten_credit_notes_credit ON akten_credit_notes(credit_note_id)'); } catch(e) {}
+
   // Rentals (Vermietung)
   db.run(`
     CREATE TABLE IF NOT EXISTS rentals (

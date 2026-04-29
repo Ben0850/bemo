@@ -13611,6 +13611,9 @@ function switchAkteTab(tabName) {
   if (tabName === 'post' && currentAkteId) {
     loadPostList(currentAkteId);
   }
+  if (tabName === 'rechnungen' && currentAkteId) {
+    loadAkteBilling(currentAkteId);
+  }
 }
 
 function switchBeteiligteTab(tabKey) {
@@ -14203,10 +14206,12 @@ async function renderAkteDetail(id) {
       <!-- Tab: Rechnungen & Zahlung -->
       <div class="akte-tab-panel" data-tab="rechnungen" style="display:none;">
         <div class="akte-section">
-          <div style="text-align:center;padding:40px 20px;color:var(--text-muted);">
-            <div style="font-size:32px;margin-bottom:12px;">&#128176;</div>
-            <div style="font-size:15px;font-weight:500;">Rechnungen &amp; Zahlung</div>
-            <div style="font-size:13px;margin-top:4px;">Wird noch ausgearbeitet</div>
+          <div class="page-header" style="margin-bottom:12px;">
+            <h3 style="margin:0;">Rechnungen &amp; Gutschriften</h3>
+            ${canEditInvoice() ? '<button class="btn btn-primary" onclick="openAddBillingModal()">+ Hinzufügen</button>' : ''}
+          </div>
+          <div class="card">
+            <div class="table-wrapper" id="akte-billing-table"><div class="loading" style="padding:24px;text-align:center;color:var(--text-muted);">Laden...</div></div>
           </div>
         </div>
       </div>
@@ -14856,6 +14861,258 @@ async function showBeteiligterDetail(type, entityId) {
     }
   } catch (err) {
     showToast('Fehler beim Laden: ' + (err.message || err), 'error');
+  }
+}
+
+// ===== Akte: Rechnungen & Gutschriften (Billing) =====
+let _addBillingItems = [];
+
+function billingTypeBadge(type) {
+  const isInv = type === 'invoice';
+  const label = isInv ? 'Rechnung' : 'Gutschrift';
+  const bg = isInv ? '#dbeafe' : '#fef3c7';
+  const fg = isInv ? '#1e40af' : '#92400e';
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${bg};color:${fg};">${label}</span>`;
+}
+
+async function loadAkteBilling(akteId) {
+  const container = document.getElementById('akte-billing-table');
+  if (!container) return;
+  try {
+    const items = await api('/api/akten/' + akteId + '/billing');
+    renderAkteBillingTable(items, akteId);
+  } catch (err) {
+    container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--danger);">Fehler: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+function renderAkteBillingTable(items, akteId) {
+  const container = document.getElementById('akte-billing-table');
+  if (!container) return;
+  if (!items || items.length === 0) {
+    container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">Noch keine Rechnungen oder Gutschriften zugeordnet.</div>';
+    return;
+  }
+  const canEdit = canEditInvoice();
+  container.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Typ</th>
+        <th>Nummer</th>
+        <th>Datum</th>
+        <th>Kunde</th>
+        <th>Zahlart</th>
+        <th>Netto</th>
+        <th>Brutto</th>
+        <th>Status</th>
+        <th>Zahlung</th>
+        ${canEdit ? '<th>Aktionen</th>' : ''}
+      </tr></thead>
+      <tbody>
+        ${items.map(it => {
+          const detailPage = it.type === 'invoice' ? 'invoice-detail' : 'credit-detail';
+          const numberSafe = String(it.number || '').replace(/'/g, "\\'");
+          return `<tr class="clickable" ondblclick="navigate('${detailPage}', ${it.id})">
+            <td>${billingTypeBadge(it.type)}</td>
+            <td><strong>${escapeHtml(it.number || '')}</strong></td>
+            <td>${formatDate(it.date)}</td>
+            <td>${escapeHtml(it.customer_name || '')}</td>
+            <td>${escapeHtml(it.payment_method || '')}</td>
+            <td>${Number(it.total_net || 0).toFixed(2)} &euro;</td>
+            <td>${Number(it.total_gross || 0).toFixed(2)} &euro;</td>
+            <td>${it.type === 'invoice' ? getInvoiceStatusBadge(it.status) : getCreditStatusBadge(it.status)}</td>
+            <td>${it.type === 'invoice' ? getPaymentStatusBadge(it.payment_status) : '<span style="color:var(--text-muted);">&mdash;</span>'}</td>
+            ${canEdit ? `<td style="white-space:nowrap;"><button class="btn btn-sm btn-danger" onclick="event.stopPropagation();removeBillingItem('${it.type}', ${it.id}, '${numberSafe}')">Löschen</button></td>` : ''}
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+async function removeBillingItem(type, id, number) {
+  const label = type === 'invoice' ? 'Rechnung' : 'Gutschrift';
+  if (!confirm(label + ' "' + number + '" aus dieser Akte entfernen?\n\n(Die ' + label + ' selbst bleibt erhalten.)')) return;
+  try {
+    await api('/api/akten/' + currentAkteId + '/billing/' + type + '/' + id, { method: 'DELETE' });
+    showToast(label + ' aus Akte entfernt');
+    loadAkteBilling(currentAkteId);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function openAddBillingModal() {
+  if (!currentAkteId) return;
+  openModal('Rechnung oder Gutschrift hinzufügen', `
+    <div style="margin-bottom:12px;color:var(--text-muted);font-size:13px;">Suche nach Rechnung oder Gutschrift, dann auf <strong>Übernehmen</strong> klicken.</div>
+    <div class="card" style="margin-bottom:12px;">
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Typ</th>
+              <th>Nummer</th>
+              <th>Datum</th>
+              <th>Kunde</th>
+              <th>Zahlart</th>
+              <th>Netto</th>
+              <th>Brutto</th>
+              <th>Status</th>
+              <th>Zahlung</th>
+              <th>Aktion</th>
+            </tr>
+            <tr class="filter-row">
+              <td></td>
+              <td><input type="text" id="addbill-nr" placeholder="Suchen..." oninput="applyAddBillingFilters()" class="filter-input"></td>
+              <td><input type="text" id="addbill-date" placeholder="z.B. 03.2026" oninput="applyAddBillingFilters()" class="filter-input"></td>
+              <td><input type="text" id="addbill-customer" placeholder="Suchen..." oninput="applyAddBillingFilters()" class="filter-input"></td>
+              <td><input type="text" id="addbill-zahlart" placeholder="Suchen..." oninput="applyAddBillingFilters()" class="filter-input"></td>
+              <td></td>
+              <td></td>
+              <td>
+                <select id="addbill-status" onchange="applyAddBillingFilters()" class="filter-input">
+                  <option value="">Alle</option>
+                  ${INVOICE_STATUSES.map(s => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+              </td>
+              <td>
+                <select id="addbill-payment-status" onchange="applyAddBillingFilters()" class="filter-input">
+                  <option value="">Alle</option>
+                  <option value="offen">Offen</option>
+                  <option value="teilbezahlt">Teilbezahlt</option>
+                  <option value="bezahlt">Bezahlt</option>
+                  <option value="ueberzahlt">Ueberzahlt</option>
+                </select>
+              </td>
+              <td></td>
+            </tr>
+          </thead>
+          <tbody id="addbill-tbody">
+            <tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:32px;">Suche nach Rechnung oder Gutschrift in den Feldern oben.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal()">Schließen</button>
+    </div>
+  `);
+  // Lazy-load both lists once for client-side filtering
+  try {
+    const [invoices, creditNotes] = await Promise.all([
+      api('/api/invoices'),
+      api('/api/credit-notes')
+    ]);
+    _addBillingItems = [
+      ...invoices.map(i => ({
+        _type: 'invoice',
+        _number: i.invoice_number,
+        _date: i.invoice_date,
+        _customer: i.customer_name,
+        _payment_method: i.payment_method,
+        _total_net: i.total_net,
+        _total_gross: i.total_gross,
+        _status: i.status,
+        _payment_status: i.payment_status,
+        id: i.id,
+        raw: i
+      })),
+      ...creditNotes.map(cn => ({
+        _type: 'credit_note',
+        _number: cn.credit_number,
+        _date: cn.credit_date,
+        _customer: cn.customer_name,
+        _payment_method: cn.payment_method,
+        _total_net: cn.total_net,
+        _total_gross: cn.total_gross,
+        _status: cn.status,
+        _payment_status: null,
+        id: cn.id,
+        raw: cn
+      }))
+    ];
+  } catch (err) {
+    showToast('Fehler beim Laden: ' + err.message, 'error');
+  }
+}
+
+function applyAddBillingFilters() {
+  const nr = (document.getElementById('addbill-nr')?.value || '').trim().toLowerCase();
+  const dateStr = (document.getElementById('addbill-date')?.value || '').trim();
+  const customer = (document.getElementById('addbill-customer')?.value || '').trim().toLowerCase();
+  const zahlart = (document.getElementById('addbill-zahlart')?.value || '').trim().toLowerCase();
+  const status = (document.getElementById('addbill-status')?.value || '');
+  const paymentStatus = (document.getElementById('addbill-payment-status')?.value || '');
+
+  const allEmpty = !nr && !dateStr && !customer && !zahlart && !status && !paymentStatus;
+  const tbody = document.getElementById('addbill-tbody');
+  if (!tbody) return;
+
+  if (allEmpty) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:32px;">Suche nach Rechnung oder Gutschrift in den Feldern oben.</td></tr>`;
+    return;
+  }
+
+  function matchesDate(d) {
+    if (!dateStr) return true;
+    if (!d) return false;
+    const parts = dateStr.split('.');
+    if (parts.length === 2 && parts[0].length <= 2 && parts[1].length === 4) {
+      const mm = parts[0].padStart(2, '0');
+      const yyyy = parts[1];
+      return d.startsWith(yyyy + '-' + mm);
+    }
+    return d.includes(dateStr);
+  }
+
+  const filtered = _addBillingItems.filter(it => {
+    if (nr && !(it._number || '').toLowerCase().includes(nr)) return false;
+    if (!matchesDate(it._date)) return false;
+    if (customer && !(it._customer || '').toLowerCase().includes(customer)) return false;
+    if (zahlart && !(it._payment_method || '').toLowerCase().includes(zahlart)) return false;
+    if (status && it._status !== status) return false;
+    if (paymentStatus) {
+      // Zahlungs-Filter gilt nur für Rechnungen — Gutschriften ausschliessen
+      if (it._type !== 'invoice') return false;
+      if (it._payment_status !== paymentStatus) return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:24px;">Keine Treffer.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.slice(0, 200).map(it => `
+    <tr>
+      <td>${billingTypeBadge(it._type)}</td>
+      <td><strong>${escapeHtml(it._number || '')}</strong></td>
+      <td>${formatDate(it._date)}</td>
+      <td>${escapeHtml(it._customer || '')}</td>
+      <td>${escapeHtml(it._payment_method || '')}</td>
+      <td>${Number(it._total_net || 0).toFixed(2)} &euro;</td>
+      <td>${Number(it._total_gross || 0).toFixed(2)} &euro;</td>
+      <td>${it._type === 'invoice' ? getInvoiceStatusBadge(it._status) : getCreditStatusBadge(it._status)}</td>
+      <td>${it._type === 'invoice' ? getPaymentStatusBadge(it._payment_status) : '<span style="color:var(--text-muted);">&mdash;</span>'}</td>
+      <td><button class="btn btn-sm btn-primary" onclick="addBillingItem('${it._type}', ${it.id})">Übernehmen</button></td>
+    </tr>
+  `).join('') + (filtered.length > 200 ? `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:8px;font-size:12px;">${filtered.length} Treffer — Anzeige auf 200 begrenzt. Filter weiter eingrenzen.</td></tr>` : '');
+}
+
+async function addBillingItem(type, id) {
+  if (!currentAkteId) return;
+  try {
+    await api('/api/akten/' + currentAkteId + '/billing', {
+      method: 'POST',
+      body: { type: type, item_id: id }
+    });
+    showToast((type === 'invoice' ? 'Rechnung' : 'Gutschrift') + ' hinzugefügt');
+    loadAkteBilling(currentAkteId);
+    // Modal offen lassen, damit User mehrere hinzufügen kann
+  } catch (err) {
+    showToast(err.message, 'error');
   }
 }
 
