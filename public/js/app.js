@@ -14894,6 +14894,9 @@ function renderAkteBillingTable(items, akteId) {
     return;
   }
   const canEdit = canEditInvoice();
+  const sumNet = items.reduce((acc, it) => acc + Number(it.total_net || 0), 0);
+  const sumGross = items.reduce((acc, it) => acc + Number(it.total_gross || 0), 0);
+  const totalCols = canEdit ? 10 : 9;
   container.innerHTML = `
     <table>
       <thead><tr>
@@ -14926,6 +14929,14 @@ function renderAkteBillingTable(items, akteId) {
           </tr>`;
         }).join('')}
       </tbody>
+      <tfoot>
+        <tr style="border-top:2px solid var(--border);background:var(--bg);font-weight:600;">
+          <td colspan="5" style="text-align:right;">Gesamt</td>
+          <td>${sumNet.toFixed(2)} &euro;</td>
+          <td>${sumGross.toFixed(2)} &euro;</td>
+          <td colspan="${totalCols - 7}"></td>
+        </tr>
+      </tfoot>
     </table>
   `;
 }
