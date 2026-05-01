@@ -296,6 +296,17 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+// TT.MM.JJJJ HH:MM — für Datei-Modifikationsdatum, Mail-Datum, Akteneinträge etc.
+// Akzeptiert ISO-String, Date-Objekt oder beliebigen Date-konstruierbaren Wert.
+function formatDateTime(input) {
+  if (!input && input !== 0) return '-';
+  const d = (input instanceof Date) ? input : new Date(input);
+  if (isNaN(d.getTime())) return '-';
+  const datePart = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const timePart = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  return `${datePart} ${timePart}`;
+}
+
 function formatMonthOnly(dateStr) {
   if (!dateStr) return '-';
   // Handle both "YYYY-MM" and "YYYY-MM-DD" formats
@@ -380,7 +391,7 @@ async function renderDashboard() {
     const firstName = (loggedInUser.name || '').split(' ')[0];
     const hour = new Date().getHours();
     const greetWord = hour < 12 ? 'Guten Morgen' : hour < 18 ? 'Guten Tag' : 'Guten Abend';
-    const todayStr = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const todayStr = new Date().toLocaleDateString('de-DE', { weekday: 'long' }) + ', ' + formatDate(new Date().toISOString());
 
     const timeClass = timeStatus.stamped_in ? 'active' : timeStatus.on_pause ? 'paused' : 'idle';
     const timeIcon = timeStatus.stamped_in ? '&#9201;' : timeStatus.on_pause ? '&#9646;&#9646;' : '&#9711;';
@@ -1831,16 +1842,6 @@ async function deleteVehicle(vehicleId, customerId) {
   }
 }
 
-// ===== PAGE: Mitarbeiter =====
-const STAFF_ROLES = [
-  { value: 'inspector', label: 'Prüfer' },
-  { value: 'processor', label: 'Bearbeiter' },
-];
-
-function getRoleLabel(role) {
-  return STAFF_ROLES.find(r => r.value === role)?.label || role;
-}
-
 // ===== PAGE: Kalender =====
 const BOOKING_METHODS = ['Über Bemo', 'Über Webseite', 'Telefonisch', 'per Mail', 'Vor Ort', 'Blocker'];
 const BOOKING_COLORS = { 'Über Bemo': 'cal-booking-online', 'Über Webseite': 'cal-booking-online', 'Telefonisch': 'cal-booking-telefonisch', 'per Mail': 'cal-booking-mail', 'Vor Ort': 'cal-booking-vorort', 'Blocker': 'cal-booking-blocker' };
@@ -1918,7 +1919,7 @@ const CAL_END_HOUR = 20;
 const CAL_END_MIN = 0;
 const CAL_START_TOTAL_MIN = CAL_START_HOUR * 60 + CAL_START_MIN;
 const CAL_END_TOTAL_MIN = CAL_END_HOUR * 60 + CAL_END_MIN;
-const PRUEFER_COLORS = ['#2563eb','#059669','#7c3aed','#0891b2','#6366f1','#0d9488','#8b5cf6','#2dd4bf','#4f46e5','#06b6d4'];
+const STAFF_COLORS = ['#2563eb','#059669','#7c3aed','#0891b2','#6366f1','#0d9488','#8b5cf6','#2dd4bf','#4f46e5','#06b6d4'];
 
 function formatCalDate(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
@@ -1953,10 +1954,10 @@ async function renderCalendar() {
       api('/api/staff')
     ]);
 
-    // Build Prüfer color map
-    const prueferList = allStaff.filter(s => s.role === 'inspector' && s.active);
-    const prueferColorMap = {};
-    prueferList.forEach((s, i) => { prueferColorMap[s.id] = PRUEFER_COLORS[i % PRUEFER_COLORS.length]; });
+    // Build staff color map (alle aktiven Kalender-Mitarbeiter)
+    const staffColorList = allStaff.filter(s => s.active && s.has_calendar);
+    const staffColorMap = {};
+    staffColorList.forEach((s, i) => { staffColorMap[s.id] = STAFF_COLORS[i % STAFF_COLORS.length]; });
 
     // Build all available columns: Allgemein + staff members with calendar enabled
     const activeStaff = allStaff.filter(s => s.active);
@@ -1966,7 +1967,7 @@ async function renderCalendar() {
     ));
     const allColumns = [
       { key: 'general', label: 'Allgemein', type: 'general' },
-      ...calendarStaff.map(s => ({ key: `staff:${s.id}`, label: s.name, type: 'staff', staffId: s.id, role: s.role }))
+      ...calendarStaff.map(s => ({ key: `staff:${s.id}`, label: s.name, type: 'staff', staffId: s.id }))
     ];
 
     // Initialize visible columns: from localStorage, or defaults (all visible)
@@ -2042,7 +2043,7 @@ async function renderCalendar() {
         let colorClass = '';
         let inlineColor = '';
         if (col.type === 'staff') {
-          const staffColor = prueferColorMap[col.staffId] || '#6366f1';
+          const staffColor = staffColorMap[col.staffId] || '#6366f1';
           inlineColor = `background:${staffColor};color:#fff;border-left-color:${staffColor};`;
         } else {
           // General column: use Allgemeine Termine color
@@ -2110,7 +2111,7 @@ async function renderCalendar() {
           cardsHtml = g.appointments.map(a => {
             let bgColor = '#0891b2';
             if (col.type === 'staff') {
-              bgColor = prueferColorMap[col.staffId] || '#6366f1';
+              bgColor = staffColorMap[col.staffId] || '#6366f1';
             }
             return `<div class="cal-mobile-card" style="border-left:4px solid ${bgColor};" onclick="openCalendarForm('${a.station}', '${calCurrentDate}', null, ${a.id})">
               <div class="cal-mobile-time">${a.start_time.slice(0,5)} – ${a.end_time.slice(0,5)}</div>
@@ -2149,15 +2150,15 @@ async function renderCalendar() {
         <span style="font-weight:600;">Buchungsart:</span>
         ${CAL_LEGEND_ITEMS.map(l => `<span class="cal-legend-item"><span class="cal-legend-dot ${l.colorClass}"></span> ${l.label}</span>`).join('')}
       </div>
-      ${prueferList.length > 0 ? `<div class="cal-legend" style="margin-bottom:10px;">
-        <span style="font-weight:600;">Außendienst Prüfer:</span>
-        ${prueferList.map(s => `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${prueferColorMap[s.id]};"></span> ${escapeHtml(s.name)}</span>`).join('')}
+      ${staffColorList.length > 0 ? `<div class="cal-legend" style="margin-bottom:10px;">
+        <span style="font-weight:600;">Mitarbeiter:</span>
+        ${staffColorList.map(s => `<span class="cal-legend-item"><span class="cal-legend-dot" style="background:${staffColorMap[s.id]};"></span> ${escapeHtml(s.name)}</span>`).join('')}
       </div>` : ''}
       ${todayVac.length > 0 ? `<div class="cal-vacation-banner">
         ${todayVac.map(v => {
           const typeIcon = v.entry_type === 'Urlaub' ? '\u2708' : v.entry_type === 'Krankheit' ? '\u26A0' : '\u{1F4DA}';
           const bgColor = v.entry_type === 'Urlaub' ? '#dc2626' : v.entry_type === 'Krankheit' ? '#b91c1c' : '#7c3aed';
-          return `<span class="cal-vac-tag" style="background:${bgColor};">${typeIcon} ${escapeHtml(v.staff_name)} – ${escapeHtml(v.entry_type)} (${v.start_date} bis ${v.end_date})</span>`;
+          return `<span class="cal-vac-tag" style="background:${bgColor};">${typeIcon} ${escapeHtml(v.staff_name)} – ${escapeHtml(v.entry_type)} (${formatDate(v.start_date)} bis ${formatDate(v.end_date)})</span>`;
         }).join('')}
       </div>` : ''}
       <div class="cal-scroll-wrapper" style="overflow-y:auto;max-height:calc(100vh - 180px);">
@@ -2688,13 +2689,6 @@ async function renderStaff() {
       <div class="card">
         <div class="filter-bar">
           <div class="form-group">
-            <label>Funktion</label>
-            <select id="staff-filter-role" onchange="filterStaffTable()">
-              <option value="">Alle</option>
-              ${STAFF_ROLES.map(r => `<option value="${r.value}">${r.label}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group">
             <label>Status</label>
             <select id="staff-filter-active" onchange="filterStaffTable()">
               <option value="1">Nur aktive</option>
@@ -2710,7 +2704,6 @@ async function renderStaff() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Funktion</th>
                 <th>Freigabelevel</th>
                 <th>Kalender</th>
                 <th>Status</th>
@@ -2735,9 +2728,8 @@ async function renderStaff() {
 
 function renderStaffRow(s) {
   return `
-    <tr data-role="${escapeHtml(s.role)}" data-active="${s.active}">
+    <tr data-active="${s.active}">
       <td><strong>${escapeHtml(s.name)}</strong></td>
-      <td>${getRoleLabel(s.role)}</td>
       <td>${escapeHtml(s.permission_level || 'Benutzer')}</td>
       <td>${s.has_calendar ? '<span class="badge badge-blue">Ja</span>' : '<span class="badge badge-gray">Nein</span>'}</td>
       <td>
@@ -2756,21 +2748,18 @@ function renderStaffRow(s) {
 }
 
 function filterStaffTable() {
-  const roleFilter = document.getElementById('staff-filter-role').value;
   const activeFilter = document.getElementById('staff-filter-active').value;
   const rows = document.querySelectorAll('#staff-table-body tr');
 
   rows.forEach(row => {
-    const role = row.dataset.role;
     const active = row.dataset.active;
-    const matchRole = !roleFilter || role === roleFilter;
     const matchActive = activeFilter === '' || active === activeFilter;
-    row.style.display = (matchRole && matchActive) ? '' : 'none';
+    row.style.display = matchActive ? '' : 'none';
   });
 }
 
 async function openStaffForm(id) {
-  let staff = { name: '', role: '', station: '', password: '', permission_level: 'Benutzer', active: 1, has_calendar: 1, calendar_visibility: 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days: 30, weekly_hours: 40, work_days: '1,2,3,4,5', entry_date: '', exit_date: '', email: '', street: '', zip: '', city: '', phone_private: '', phone_business: '', emergency_name: '', emergency_phone: '', default_station_id: null, username: '' };
+  let staff = { name: '', station: '', password: '', permission_level: 'Benutzer', active: 1, has_calendar: 1, calendar_visibility: 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days: 30, weekly_hours: 40, work_days: '1,2,3,4,5', entry_date: '', exit_date: '', email: '', street: '', zip: '', city: '', phone_private: '', phone_business: '', emergency_name: '', emergency_phone: '', default_station_id: null, username: '' };
   let perYearDays = {};
   let perYearBonus = {};
 
@@ -2809,31 +2798,27 @@ async function openStaffForm(id) {
 
   const title = id ? 'Mitarbeiter bearbeiten' : 'Neuer Mitarbeiter';
   const html = `
-    <form id="staff-form" onsubmit="saveStaff(event, ${id || 'null'})">
+    <form id="staff-form" onsubmit="saveStaff(event, ${id || 'null'})" autocomplete="off">
+      <!-- Dummy-Felder, die Browser-Autofill abfangen statt die echten Felder zu belegen -->
+      <input type="text" name="fake-username" style="display:none;" tabindex="-1" autocomplete="username">
+      <input type="password" name="fake-password" style="display:none;" tabindex="-1" autocomplete="current-password">
       <div class="form-group">
         <label>Name *</label>
-        <input type="text" name="name" value="${escapeHtml(staff.name)}" required>
-      </div>
-      <div class="form-group">
-        <label>Funktion *</label>
-        <select name="role" required>
-          <option value="">-- Auswählen --</option>
-          ${STAFF_ROLES.map(r => `<option value="${r.value}" ${staff.role === r.value ? 'selected' : ''}>${r.label}</option>`).join('')}
-        </select>
+        <input type="text" name="name" value="${escapeHtml(staff.name)}" required autocomplete="off">
       </div>
       <div class="form-row">
         <div class="form-group">
           <label>Benutzername</label>
-          <input type="text" name="username" value="${escapeHtml(staff.username || '')}" placeholder="Login-Name" autocomplete="off">
+          <input type="text" name="username" value="${escapeHtml(staff.username || '')}" placeholder="Login-Name" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore>
         </div>
         <div class="form-group">
           <label>Passwort</label>
-          <input type="password" name="password" value="${escapeHtml(staff.password || '')}">
+          <input type="password" name="password" value="${escapeHtml(staff.password || '')}" autocomplete="new-password" data-lpignore="true" data-1p-ignore>
         </div>
       </div>
       <div class="form-group">
         <label>E-Mail</label>
-        <input type="email" name="email" value="${escapeHtml(staff.email || '')}">
+        <input type="email" name="email" value="${escapeHtml(staff.email || '')}" autocomplete="off">
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -2980,7 +2965,6 @@ async function saveStaff(e, id) {
 
   const data = {
     name: form.name.value.trim(),
-    role: form.role.value,
     station: '',
     password: pw,
     permission_level: form.permission_level.value,
@@ -3368,8 +3352,8 @@ function renderVacationList(entries) {
             const typeColor = e.entry_type === 'Urlaub' ? 'badge-blue' : e.entry_type === 'Krankheit' ? 'badge-red' : 'badge-yellow';
             return `<tr>
               <td><span class="badge ${typeColor}">${escapeHtml(e.entry_type)}${e.half_day ? ' (½)' : ''}</span></td>
-              <td>${e.start_date}</td>
-              <td>${e.end_date}</td>
+              <td>${formatDate(e.start_date)}</td>
+              <td>${formatDate(e.end_date)}</td>
               <td>${String(wd).replace('.', ',')}</td>
               <td>${escapeHtml(e.notes || '')}</td>
               <td>
@@ -3761,8 +3745,8 @@ async function renderVacationRequests(filters) {
           return `<tr>
             <td><strong>${escapeHtml(e.staff_name)}</strong></td>
             <td>${escapeHtml(e.entry_type)}</td>
-            <td>${e.start_date}</td>
-            <td>${e.end_date}</td>
+            <td>${formatDate(e.start_date)}</td>
+            <td>${formatDate(e.end_date)}</td>
             <td>${wd}</td>
             <td>${escapeHtml(e.notes || '')}</td>
             <td><span class="badge ${statusColor}">${escapeHtml(e.status)}</span></td>
@@ -4190,7 +4174,7 @@ async function s3LoadFolder(folder) {
     // Files
     sortedFiles.forEach(f => {
       const sizeStr = f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size / 1024).toFixed(1) + ' KB' : (f.size / 1048576).toFixed(1) + ' MB';
-      const dateStr = f.modified ? new Date(f.modified).toLocaleString('de-DE') : '\u2014';
+      const dateStr = f.modified ? formatDateTime(f.modified) : '\u2014';
       const ext = (f.name.split('.').pop() || '').toLowerCase();
       const icon = s3FileIcon(ext);
 
@@ -4461,7 +4445,7 @@ async function s3Preview(key, filename) {
     } else if (ext === 'msg') {
       try {
         const msg = await api('/api/files/msg-preview?key=' + encodeURIComponent(key));
-        const fmtDate = msg.date ? new Date(msg.date).toLocaleString('de-DE') : '—';
+        const fmtDate = msg.date ? formatDateTime(msg.date) : '—';
         contentHtml = '<div style="text-align:left;max-height:75vh;overflow:auto;">'
           + '<div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:10px;">'
           + '<div style="display:grid;grid-template-columns:80px 1fr;gap:6px 12px;font-size:14px;">'
@@ -4528,7 +4512,7 @@ async function s3ShowInlinePreview(key, filename) {
     } else if (ext === 'msg') {
       try {
         const msg = await api('/api/files/msg-preview?key=' + encodeURIComponent(key));
-        const fmtDate = msg.date ? new Date(msg.date).toLocaleString('de-DE') : '—';
+        const fmtDate = msg.date ? formatDateTime(msg.date) : '—';
         html = '<div style="width:100%;height:100%;overflow:auto;text-align:left;">'
           + '<div style="background:var(--bg);border-radius:6px;padding:14px 16px;margin-bottom:10px;">'
           + '<div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">E-Mail</div>'
@@ -6315,11 +6299,16 @@ function applyInvoiceFilters() {
 
 // --- New Invoice Modal ---
 let newInvoiceCustomerId = null;
+let newInvoiceVermittlerId = null;
+let _newInvoiceVermittlerCache = null; // Cache der Vermittler-Liste fürs Modal
 
 // FORM-01: Kunde wird aus Kundenliste gewählt via searchInvoiceCustomer() + selectInvoiceCustomer()
 // Keine Freitexteingabe -- createInvoice() blockiert ohne gesetztes newInvoiceCustomerId
 async function openNewInvoiceModal() {
   newInvoiceCustomerId = null;
+  newInvoiceVermittlerId = null;
+  // Vermittler-Liste vorladen (Stammdaten-API)
+  try { _newInvoiceVermittlerCache = await api('/api/vermittler'); } catch(e) { _newInvoiceVermittlerCache = []; }
   const today = new Date().toISOString().split('T')[0];
   const due = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
   let banks = [];
@@ -6337,12 +6326,25 @@ async function openNewInvoiceModal() {
     </div>`;
   }
   openModal('Neue Rechnung', `
-    <div class="form-group" style="position:relative;">
+    <div class="form-group" id="inv-customer-search-wrapper">
       <label>Kunde suchen</label>
-      <input type="text" id="inv-customer-search" placeholder="Name oder Firma eingeben..." oninput="searchInvoiceCustomer()" autocomplete="off">
-      <div class="search-dropdown" id="inv-customer-dropdown"></div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="inv-customer-search" placeholder="Name oder Firma eingeben..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();searchInvoiceCustomer();}" autocomplete="off">
+        <button type="button" class="btn btn-primary" onclick="searchInvoiceCustomer()">Suchen</button>
+      </div>
+      <div id="inv-customer-results" style="margin-top:8px;max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none;"></div>
     </div>
     <div id="inv-customer-selected" style="display:none;margin-bottom:16px;"></div>
+    <div class="form-group" id="inv-vermittler-search-wrapper">
+      <label>Vermittler <small style="color:var(--text-muted);font-weight:normal;">(optional)</small></label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="inv-vermittler-search" placeholder="Vermittler suchen (Name, Ort)..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();searchInvoiceVermittler();}" autocomplete="off">
+        <button type="button" class="btn btn-primary" onclick="searchInvoiceVermittler()">Suchen</button>
+      </div>
+      <div id="inv-vermittler-results" style="margin-top:8px;max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none;"></div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:4px;" id="inv-vermittler-empty-hint">kein Vermittler</div>
+    </div>
+    <div id="inv-vermittler-selected" style="display:none;margin-bottom:16px;"></div>
     <div class="form-row">
       <div class="form-group">
         <label>Rechnungsdatum</label>
@@ -6379,31 +6381,44 @@ async function openNewInvoiceModal() {
 
 async function searchInvoiceCustomer() {
   const term = document.getElementById('inv-customer-search').value.trim();
-  const dropdown = document.getElementById('inv-customer-dropdown');
-  if (term.length < 2) { dropdown.style.display = 'none'; return; }
+  const resultsEl = document.getElementById('inv-customer-results');
+  if (!resultsEl) return;
+  if (!term) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; return; }
+  let customers = [];
   try {
-    const customers = await api(`/api/customers?search=${encodeURIComponent(term)}`);
-    if (customers.length === 0) {
-      dropdown.innerHTML = '<div class="search-dropdown-item" style="color:var(--text-muted);">Keine Kunden gefunden</div>';
-    } else {
-      dropdown.innerHTML = customers.slice(0, 10).map(c => {
-        const name = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? c.company_name : `${c.last_name}, ${c.first_name}`;
-        const sub = c.city ? ` — ${c.city}` : '';
-        return `<div class="search-dropdown-item" onclick="selectInvoiceCustomer(${c.id}, '${escapeHtml(name)}${escapeHtml(sub)}')">${escapeHtml(name)}${escapeHtml(sub)}</div>`;
-      }).join('');
-    }
-    dropdown.style.display = 'block';
+    customers = await api(`/api/customers?search=${encodeURIComponent(term)}`);
   } catch (err) {
-    dropdown.style.display = 'none';
+    resultsEl.style.display = 'block';
+    resultsEl.innerHTML = '<div style="padding:12px;color:var(--danger);text-align:center;">Fehler beim Laden: ' + escapeHtml(err.message || '') + '</div>';
+    return;
   }
+  resultsEl.style.display = 'block';
+  if (customers.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);text-align:center;">Keine Kunden gefunden</div>';
+    return;
+  }
+  resultsEl.innerHTML = '<table class="data-table miet-pick-table" style="margin:0;font-size:13px;user-select:none;"><thead><tr>'
+    + '<th>Name</th><th>Ort</th><th>Telefon</th>'
+    + '</tr></thead><tbody>'
+    + customers.slice(0, 50).map(c => {
+        const name = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? (c.company_name || '') : `${c.last_name || ''}, ${c.first_name || ''}`;
+        const ort = [c.zip, c.city].filter(Boolean).join(' ') || '-';
+        const location = [c.zip, c.city].filter(Boolean).join(' ');
+        const display = location ? `${name} - ${location}` : name;
+        const safe = escapeHtml(display).replace(/'/g, "\\'");
+        return `<tr style="cursor:pointer;" onclick="selectInvoiceCustomer(${c.id}, '${safe}')">
+          <td><strong>${escapeHtml(name || '-')}</strong></td>
+          <td>${escapeHtml(ort)}</td>
+          <td>${escapeHtml(c.phone || '-')}</td>
+        </tr>`;
+      }).join('')
+    + '</tbody></table>';
 }
 
 function selectInvoiceCustomer(id, displayName) {
   newInvoiceCustomerId = id;
-  const dropdown = document.getElementById('inv-customer-dropdown');
-  if (dropdown) dropdown.style.display = 'none';
-  const searchInput = document.getElementById('inv-customer-search');
-  if (searchInput) searchInput.style.display = 'none';
+  const wrap = document.getElementById('inv-customer-search-wrapper');
+  if (wrap) wrap.style.display = 'none';
   document.getElementById('inv-customer-selected').style.display = '';
   document.getElementById('inv-customer-selected').innerHTML = `
     <div class="search-selected">
@@ -6416,10 +6431,150 @@ function selectInvoiceCustomer(id, displayName) {
 function clearInvoiceCustomer() {
   newInvoiceCustomerId = null;
   document.getElementById('inv-customer-selected').style.display = 'none';
+  document.getElementById('inv-customer-selected').innerHTML = '';
+  const wrap = document.getElementById('inv-customer-search-wrapper');
+  if (wrap) wrap.style.display = '';
   const searchInput = document.getElementById('inv-customer-search');
-  searchInput.style.display = '';
-  searchInput.value = '';
-  searchInput.focus();
+  if (searchInput) { searchInput.value = ''; searchInput.focus(); }
+  const resultsEl = document.getElementById('inv-customer-results');
+  if (resultsEl) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; }
+}
+
+function searchInvoiceVermittler() {
+  const term = (document.getElementById('inv-vermittler-search').value || '').trim().toLowerCase();
+  const resultsEl = document.getElementById('inv-vermittler-results');
+  if (!resultsEl) return;
+  if (!term) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; return; }
+  const matches = (_newInvoiceVermittlerCache || []).filter(v => {
+    const haystack = ((v.name || '') + ' ' + (v.ansprechpartner || '') + ' ' + (v.ort || '') + ' ' + (v.plz || '') + ' ' + (v.strasse || '')).toLowerCase();
+    return haystack.includes(term);
+  });
+  resultsEl.style.display = 'block';
+  if (matches.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);text-align:center;">Keine Vermittler gefunden</div>';
+    return;
+  }
+  resultsEl.innerHTML = '<table class="data-table miet-pick-table" style="margin:0;font-size:13px;user-select:none;"><thead><tr>'
+    + '<th>Name</th><th>Ort</th><th>Telefon</th>'
+    + '</tr></thead><tbody>'
+    + matches.slice(0, 50).map(v => {
+        const ort = [v.plz, v.ort].filter(Boolean).join(' ') || '-';
+        const location = [v.plz, v.ort].filter(Boolean).join(' ');
+        const display = location ? `${v.name || ''} - ${location}` : (v.name || '');
+        const safe = escapeHtml(display).replace(/'/g, "\\'");
+        return `<tr style="cursor:pointer;" onclick="selectInvoiceVermittler(${v.id}, '${safe}')">
+          <td><strong>${escapeHtml(v.name || '-')}</strong></td>
+          <td>${escapeHtml(ort)}</td>
+          <td>${escapeHtml(v.telefon || '-')}</td>
+        </tr>`;
+      }).join('')
+    + '</tbody></table>';
+}
+
+function selectInvoiceVermittler(id, displayName) {
+  newInvoiceVermittlerId = id;
+  document.getElementById('inv-vermittler-search-wrapper').style.display = 'none';
+  document.getElementById('inv-vermittler-selected').style.display = '';
+  document.getElementById('inv-vermittler-selected').innerHTML = `
+    <div class="search-selected">
+      <span>${displayName}</span>
+      <button class="btn btn-sm btn-secondary" onclick="clearInvoiceVermittler()">Ändern</button>
+    </div>
+  `;
+}
+
+function clearInvoiceVermittler() {
+  newInvoiceVermittlerId = null;
+  document.getElementById('inv-vermittler-selected').style.display = 'none';
+  document.getElementById('inv-vermittler-selected').innerHTML = '';
+  const wrap = document.getElementById('inv-vermittler-search-wrapper');
+  wrap.style.display = '';
+  const inp = document.getElementById('inv-vermittler-search');
+  inp.value = '';
+  inp.focus();
+  // Vorherige Trefferliste verwerfen
+  const resultsEl = document.getElementById('inv-vermittler-results');
+  if (resultsEl) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; }
+}
+
+// === Vermittler-Picker für bestehende Rechnung (post-Erstellung änderbar) ===
+let _invVermPickerList = [];
+let _invVermPickerInvoiceId = null;
+
+async function openInvoiceVermittlerPicker(invoiceId) {
+  _invVermPickerInvoiceId = invoiceId;
+  try {
+    _invVermPickerList = await api('/api/vermittler');
+  } catch (err) {
+    showToast('Vermittler konnten nicht geladen werden: ' + (err.message || err), 'error');
+    return;
+  }
+  openModal('Vermittler auswählen', `
+    <div class="form-group">
+      <label>Vermittler suchen (Name, Ort)</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="inv-verm-pick-search" placeholder="z.B. Werkstatt Müller" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();doInvoiceVermittlerSearch();}" autocomplete="off">
+        <button type="button" class="btn btn-primary" onclick="doInvoiceVermittlerSearch()">Suchen</button>
+      </div>
+    </div>
+    <div id="inv-verm-pick-results" style="max-height:360px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none;"></div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Vermittler anklicken zum Übernehmen</div>
+    <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
+      <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+    </div>
+  `);
+  setTimeout(() => { const inp = document.getElementById('inv-verm-pick-search'); if (inp) inp.focus(); }, 0);
+}
+
+function doInvoiceVermittlerSearch() {
+  const term = (document.getElementById('inv-verm-pick-search').value || '').trim().toLowerCase();
+  const resultsEl = document.getElementById('inv-verm-pick-results');
+  if (!resultsEl) return;
+  if (!term) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; return; }
+  const matches = _invVermPickerList.filter(v => {
+    const haystack = ((v.name || '') + ' ' + (v.ansprechpartner || '') + ' ' + (v.ort || '') + ' ' + (v.plz || '') + ' ' + (v.strasse || '')).toLowerCase();
+    return haystack.includes(term);
+  });
+  resultsEl.style.display = 'block';
+  if (matches.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center;">Keine Vermittler gefunden</div>';
+    return;
+  }
+  resultsEl.innerHTML = '<table class="data-table miet-pick-table" style="margin:0;font-size:13px;user-select:none;"><thead><tr>'
+    + '<th>Name</th><th>Ort</th><th>Telefon</th>'
+    + '</tr></thead><tbody>'
+    + matches.slice(0, 50).map(v => {
+        const ort = [v.plz, v.ort].filter(Boolean).join(' ') || '-';
+        return `<tr style="cursor:pointer;" onclick="selectInvoiceVermittlerPick(${v.id})">
+          <td><strong>${escapeHtml(v.name || '-')}</strong></td>
+          <td>${escapeHtml(ort)}</td>
+          <td>${escapeHtml(v.telefon || '-')}</td>
+        </tr>`;
+      }).join('')
+    + '</tbody></table>';
+}
+
+async function selectInvoiceVermittlerPick(vermittlerId) {
+  if (!_invVermPickerInvoiceId || !vermittlerId) return;
+  try {
+    await api('/api/invoices/' + _invVermPickerInvoiceId, { method: 'PUT', body: { vermittler_id: vermittlerId } });
+    closeModal();
+    showToast('Vermittler übernommen');
+    renderInvoiceDetail(_invVermPickerInvoiceId);
+  } catch (err) {
+    showToast('Fehler: ' + (err.message || err), 'error');
+  }
+}
+
+async function removeInvoiceVermittler(invoiceId) {
+  if (!confirm('Vermittler von dieser Rechnung entfernen?')) return;
+  try {
+    await api('/api/invoices/' + invoiceId, { method: 'PUT', body: { vermittler_id: null } });
+    showToast('Vermittler entfernt');
+    renderInvoiceDetail(invoiceId);
+  } catch (err) {
+    showToast('Fehler: ' + (err.message || err), 'error');
+  }
 }
 
 async function createInvoice() {
@@ -6435,7 +6590,7 @@ async function createInvoice() {
   const bank_account_id = bankEl ? Number(bankEl.value) || null : null;
   if (bankEl && !bank_account_id) { showToast('Bitte eine Bankverbindung auswählen', 'error'); return; }
   try {
-    const result = await api('/api/invoices', { method: 'POST', body: { customer_id: newInvoiceCustomerId, invoice_date: date, due_date: due, service_date: serviceDate, payment_method: paymentMethod, notes: notes, bank_account_id } });
+    const result = await api('/api/invoices', { method: 'POST', body: { customer_id: newInvoiceCustomerId, vermittler_id: newInvoiceVermittlerId, invoice_date: date, due_date: due, service_date: serviceDate, payment_method: paymentMethod, notes: notes, bank_account_id } });
     closeModal();
     showToast(`Rechnung ${result.invoice_number} erstellt`);
     navigate('invoice-detail', result.id);
@@ -6474,6 +6629,28 @@ async function renderInvoiceDetail(id) {
           <div class="info-item"><div class="info-label">Telefon</div><div class="info-value">${escapeHtml(inv.phone)}</div></div>
           <div class="info-item"><div class="info-label">E-Mail</div><div class="info-value">${escapeHtml(inv.email)}</div></div>
         </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+          <h3>Vermittlerdaten</h3>
+          <div style="display:flex;gap:8px;">
+            ${inv.vermittler_obj
+              ? `<button class="btn btn-sm btn-secondary" onclick="openInvoiceVermittlerPicker(${id})">Ändern</button>
+                 <button class="btn btn-sm btn-danger" onclick="removeInvoiceVermittler(${id})">Löschen</button>`
+              : `<button class="btn btn-sm btn-primary" onclick="openInvoiceVermittlerPicker(${id})">+ Hinzufügen</button>`}
+          </div>
+        </div>
+        ${inv.vermittler_obj ? `
+        <div class="customer-info-grid">
+          <div class="info-item"><div class="info-label">Vermittler</div><div class="info-value">${escapeHtml(inv.vermittler_obj.name || '')}</div></div>
+          <div class="info-item"><div class="info-label">Adresse</div><div class="info-value">${escapeHtml(inv.vermittler_obj.strasse || '')}<br>${escapeHtml(inv.vermittler_obj.plz || '')} ${escapeHtml(inv.vermittler_obj.ort || '')}</div></div>
+          <div class="info-item"><div class="info-label">Telefon</div><div class="info-value">${escapeHtml(inv.vermittler_obj.telefon || '')}</div></div>
+          <div class="info-item"><div class="info-label">E-Mail</div><div class="info-value">${escapeHtml(inv.vermittler_obj.email || '')}</div></div>
+        </div>
+        ` : `
+        <div style="padding:12px 16px;color:var(--text-muted);">kein Vermittler</div>
+        `}
       </div>
 
       <div class="card">
@@ -7189,10 +7366,13 @@ async function openNewCreditNoteModal() {
     </div>`;
   }
   openModal('Neue Gutschrift', `
-    <div class="form-group" style="position:relative;">
+    <div class="form-group" id="cn-customer-search-wrapper">
       <label>Kunde suchen</label>
-      <input type="text" id="cn-customer-search" placeholder="Name oder Firma eingeben..." oninput="searchCreditCustomer()" autocomplete="off">
-      <div class="search-dropdown" id="cn-customer-dropdown"></div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="cn-customer-search" placeholder="Name oder Firma eingeben..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();searchCreditCustomer();}" autocomplete="off">
+        <button type="button" class="btn btn-primary" onclick="searchCreditCustomer()">Suchen</button>
+      </div>
+      <div id="cn-customer-results" style="margin-top:8px;max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none;"></div>
     </div>
     <div id="cn-customer-selected" style="display:none;margin-bottom:16px;"></div>
     <div class="form-group">
@@ -7220,29 +7400,44 @@ async function openNewCreditNoteModal() {
 
 async function searchCreditCustomer() {
   const term = document.getElementById('cn-customer-search').value.trim();
-  const dropdown = document.getElementById('cn-customer-dropdown');
-  if (term.length < 2) { dropdown.style.display = 'none'; return; }
+  const resultsEl = document.getElementById('cn-customer-results');
+  if (!resultsEl) return;
+  if (!term) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; return; }
+  let customers = [];
   try {
-    const customers = await api(`/api/customers?search=${encodeURIComponent(term)}`);
-    if (customers.length === 0) {
-      dropdown.innerHTML = '<div class="search-dropdown-item" style="color:var(--text-muted);">Keine Kunden gefunden</div>';
-    } else {
-      dropdown.innerHTML = customers.slice(0, 10).map(c => {
-        const name = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? c.company_name : `${c.last_name}, ${c.first_name}`;
-        const sub = c.city ? ` — ${c.city}` : '';
-        return `<div class="search-dropdown-item" onclick="selectCreditCustomer(${c.id}, '${escapeHtml(name)}${escapeHtml(sub)}')">${escapeHtml(name)}${escapeHtml(sub)}</div>`;
-      }).join('');
-    }
-    dropdown.style.display = 'block';
+    customers = await api(`/api/customers?search=${encodeURIComponent(term)}`);
   } catch (err) {
-    dropdown.style.display = 'none';
+    resultsEl.style.display = 'block';
+    resultsEl.innerHTML = '<div style="padding:12px;color:var(--danger);text-align:center;">Fehler beim Laden: ' + escapeHtml(err.message || '') + '</div>';
+    return;
   }
+  resultsEl.style.display = 'block';
+  if (customers.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);text-align:center;">Keine Kunden gefunden</div>';
+    return;
+  }
+  resultsEl.innerHTML = '<table class="data-table miet-pick-table" style="margin:0;font-size:13px;user-select:none;"><thead><tr>'
+    + '<th>Name</th><th>Ort</th><th>Telefon</th>'
+    + '</tr></thead><tbody>'
+    + customers.slice(0, 50).map(c => {
+        const name = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? (c.company_name || '') : `${c.last_name || ''}, ${c.first_name || ''}`;
+        const ort = [c.zip, c.city].filter(Boolean).join(' ') || '-';
+        const location = [c.zip, c.city].filter(Boolean).join(' ');
+        const display = location ? `${name} - ${location}` : name;
+        const safe = escapeHtml(display).replace(/'/g, "\\'");
+        return `<tr style="cursor:pointer;" onclick="selectCreditCustomer(${c.id}, '${safe}')">
+          <td><strong>${escapeHtml(name || '-')}</strong></td>
+          <td>${escapeHtml(ort)}</td>
+          <td>${escapeHtml(c.phone || '-')}</td>
+        </tr>`;
+      }).join('')
+    + '</tbody></table>';
 }
 
 function selectCreditCustomer(id, displayName) {
   newCreditCustomerId = id;
-  document.getElementById('cn-customer-dropdown').style.display = 'none';
-  document.getElementById('cn-customer-search').style.display = 'none';
+  const wrap = document.getElementById('cn-customer-search-wrapper');
+  if (wrap) wrap.style.display = 'none';
   document.getElementById('cn-customer-selected').style.display = '';
   document.getElementById('cn-customer-selected').innerHTML = `
     <div class="search-selected">
@@ -7255,10 +7450,13 @@ function selectCreditCustomer(id, displayName) {
 function clearCreditCustomer() {
   newCreditCustomerId = null;
   document.getElementById('cn-customer-selected').style.display = 'none';
+  document.getElementById('cn-customer-selected').innerHTML = '';
+  const wrap = document.getElementById('cn-customer-search-wrapper');
+  if (wrap) wrap.style.display = '';
   const searchInput = document.getElementById('cn-customer-search');
-  searchInput.style.display = '';
-  searchInput.value = '';
-  searchInput.focus();
+  if (searchInput) { searchInput.value = ''; searchInput.focus(); }
+  const resultsEl = document.getElementById('cn-customer-results');
+  if (resultsEl) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; }
 }
 
 async function createCreditNote() {
@@ -7972,6 +8170,16 @@ function sortFleetVehicles(list) {
   });
 }
 
+function transmissionBadge(t) {
+  if (t === 'Schalter') {
+    return '<span title="Schalter" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:700;background:linear-gradient(135deg,#10b981,#047857);color:#fff;box-shadow:0 1px 3px rgba(4,120,87,0.4);letter-spacing:0;">S</span>';
+  }
+  if (t === 'Automatik') {
+    return '<span title="Automatik" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:700;background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;box-shadow:0 1px 3px rgba(109,40,217,0.4);letter-spacing:0;">A</span>';
+  }
+  return '<span style="color:var(--text-muted);">–</span>';
+}
+
 async function renderFuhrpark() {
   const main = document.getElementById('main-content');
   try {
@@ -7991,7 +8199,7 @@ async function renderFuhrpark() {
       html += '<div class="empty-state"><p>Keine Kurzzeit-Fahrzeuge vorhanden.</p></div>';
     } else {
       html += '<table class="data-table"><thead><tr>';
-      html += '<th style="cursor:pointer;" onclick="sortFleet(\'id\')">Nr.' + fleetSortIcon('id') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'plate\')">Kennzeichen' + fleetSortIcon('plate') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'manufacturer\')">Hersteller' + fleetSortIcon('manufacturer') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'model\')">Modell' + fleetSortIcon('model') + '</th><th>Typ</th><th>KM-Stand</th><th>N\u00e4chster T\u00dcV</th><th>N\u00e4chste Wartung</th><th>Status</th><th>Aktionen</th>';
+      html += '<th style="cursor:pointer;" onclick="sortFleet(\'id\')">Nr.' + fleetSortIcon('id') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'plate\')">Kennzeichen' + fleetSortIcon('plate') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'manufacturer\')">Hersteller' + fleetSortIcon('manufacturer') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'model\')">Modell' + fleetSortIcon('model') + '</th><th style="text-align:center;">Getriebe</th><th>KM-Stand</th><th>N\u00e4chster T\u00dcV</th><th>N\u00e4chste Wartung</th><th>Status</th><th>Aktionen</th>';
       html += '</tr></thead><tbody>';
       kurzzeit.forEach(v => {
         const warnings = getFleetWarnings(v);
@@ -8004,7 +8212,7 @@ async function renderFuhrpark() {
           <td><strong>${escapeHtml(v.license_plate || '-')}</strong></td>
           <td>${escapeHtml(v.manufacturer)}</td>
           <td>${escapeHtml(v.model)}</td>
-          <td>${escapeHtml(v.vehicle_type || '-')}</td>
+          <td style="text-align:center;">${transmissionBadge(v.transmission)}</td>
           <td>${v.latest_km ? Number(v.latest_km).toLocaleString('de-DE') + ' km' : '-'}</td>
           <td>${formatDate(v.next_tuev_date)}</td>
           <td>${maintInfo.length > 0 ? maintInfo.join(' / ') : '-'}</td>
@@ -8025,7 +8233,7 @@ async function renderFuhrpark() {
       html += '<div class="empty-state"><p>Keine Langzeit-Fahrzeuge vorhanden.</p></div>';
     } else {
       html += '<table class="data-table"><thead><tr>';
-      html += '<th style="cursor:pointer;" onclick="sortFleet(\'id\')">Nr.' + fleetSortIcon('id') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'plate\')">Kennzeichen' + fleetSortIcon('plate') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'manufacturer\')">Hersteller' + fleetSortIcon('manufacturer') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'model\')">Modell' + fleetSortIcon('model') + '</th><th>Typ</th><th>Zugewiesen an</th><th>KM-Stand</th><th>N\u00e4chster T\u00dcV</th><th>Status</th><th>Aktionen</th>';
+      html += '<th style="cursor:pointer;" onclick="sortFleet(\'id\')">Nr.' + fleetSortIcon('id') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'plate\')">Kennzeichen' + fleetSortIcon('plate') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'manufacturer\')">Hersteller' + fleetSortIcon('manufacturer') + '</th><th style="cursor:pointer;" onclick="sortFleet(\'model\')">Modell' + fleetSortIcon('model') + '</th><th style="text-align:center;">Getriebe</th><th>Zugewiesen an</th><th>KM-Stand</th><th>N\u00e4chster T\u00dcV</th><th>Status</th><th>Aktionen</th>';
       html += '</tr></thead><tbody>';
       langzeit.forEach(v => {
         const warnings = getFleetWarnings(v);
@@ -8035,7 +8243,7 @@ async function renderFuhrpark() {
           <td><strong>${escapeHtml(v.license_plate || '-')}</strong></td>
           <td>${escapeHtml(v.manufacturer)}</td>
           <td>${escapeHtml(v.model)}</td>
-          <td>${escapeHtml(v.vehicle_type || '-')}</td>
+          <td style="text-align:center;">${transmissionBadge(v.transmission)}</td>
           <td><strong>${escapeHtml(v.assigned_customer_name || '-')}</strong></td>
           <td>${v.latest_km ? Number(v.latest_km).toLocaleString('de-DE') + ' km' : '-'}</td>
           <td>${formatDate(v.next_tuev_date)}</td>
@@ -8126,6 +8334,9 @@ async function renderFuhrparkDetail(id) {
             ${cell('FIN', fmt(data.vin))}
             ${cell('Erstzulassung', data.first_registration ? fmt(formatDate(data.first_registration)) : fmt(''))}
             ${cell('N\u00e4chster T\u00dcV', data.next_tuev_date ? fmt(formatDate(data.next_tuev_date)) : fmt(''))}
+            ${cell('Fahrzeuggruppe', fmt(data.vehicle_group))}
+            ${cell('Getriebe', fmt(data.transmission))}
+            ${cell('Antrieb', fmt(data.fuel_type))}
             ${cell('Mietart', data.rental_type === 'lang' ? '<span class="badge badge-yellow">Langzeit</span>' : '<span class="badge badge-green">Kurzzeit</span>')}
             ${data.rental_type === 'lang' && data.assigned_customer_name ? cell('Zugewiesen an', fmt(data.assigned_customer_name + (data.assigned_contact_person ? ' (Fahrer: ' + data.assigned_contact_person + ')' : ''))) : ''}
             ${cell('Notizen', fmt(data.notes))}
@@ -8220,7 +8431,7 @@ async function renderFuhrparkDetail(id) {
 }
 
 async function openFleetVehicleForm(id) {
-  let vehicle = { manufacturer: '', model: '', vehicle_type: '', vin: '', license_plate: '', first_registration: '', next_tuev_date: '', notes: '', rental_type: 'kurz', assigned_customer_id: null, assigned_customer_name: '', assigned_contact_person: '' };
+  let vehicle = { manufacturer: '', model: '', vehicle_type: '', vin: '', license_plate: '', first_registration: '', next_tuev_date: '', notes: '', rental_type: 'kurz', assigned_customer_id: null, assigned_customer_name: '', assigned_contact_person: '', vehicle_group: '', transmission: '', fuel_type: '' };
   let staffList = [];
 
   try {
@@ -8288,6 +8499,36 @@ async function openFleetVehicleForm(id) {
             <option value="lang" ${vehicle.rental_type === 'lang' ? 'selected' : ''}>Langzeitvermietung</option>
           </select>
         </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Fahrzeuggruppe</label>
+          <select name="vehicle_group">
+            <option value="">-- Auswählen --</option>
+            ${[1,2,3,4,5,6,7,8].map(g => `<option value="Gruppe ${g}" ${vehicle.vehicle_group === 'Gruppe ' + g ? 'selected' : ''}>Gruppe ${g}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Getriebe</label>
+          <select name="transmission">
+            <option value="">-- Auswählen --</option>
+            <option value="Schalter" ${vehicle.transmission === 'Schalter' ? 'selected' : ''}>Schalter</option>
+            <option value="Automatik" ${vehicle.transmission === 'Automatik' ? 'selected' : ''}>Automatik</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Antrieb</label>
+          <select name="fuel_type">
+            <option value="">-- Auswählen --</option>
+            <option value="Benzin" ${vehicle.fuel_type === 'Benzin' ? 'selected' : ''}>Benzin</option>
+            <option value="Diesel" ${vehicle.fuel_type === 'Diesel' ? 'selected' : ''}>Diesel</option>
+            <option value="Hybrid" ${vehicle.fuel_type === 'Hybrid' ? 'selected' : ''}>Hybrid</option>
+            <option value="Elektro" ${vehicle.fuel_type === 'Elektro' ? 'selected' : ''}>Elektro</option>
+          </select>
+        </div>
+        <div class="form-group"></div>
       </div>
       <div id="fleet-assigned-to-group" style="${vehicle.rental_type === 'lang' ? '' : 'display:none;'}">
         <div class="form-group" style="position:relative;">
@@ -8410,6 +8651,9 @@ async function saveFleetVehicle(e, id) {
     assigned_customer_id: document.getElementById('fleet-assigned-customer-id').value || null,
     assigned_contact_person: form.assigned_contact_person ? form.assigned_contact_person.value.trim() : '',
     notes: form.notes.value.trim(),
+    vehicle_group: form.vehicle_group ? form.vehicle_group.value : '',
+    transmission: form.transmission ? form.transmission.value : '',
+    fuel_type: form.fuel_type ? form.fuel_type.value : '',
   };
   try {
     if (id) {
@@ -8848,7 +9092,7 @@ async function fvLoadFolder(folder) {
     // Files
     result.files.filter(f => f.name && f.name !== '.folder').forEach(f => {
       const sizeStr = f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size / 1024).toFixed(1) + ' KB' : (f.size / 1048576).toFixed(1) + ' MB';
-      const dateStr = f.modified ? new Date(f.modified).toLocaleString('de-DE') : '\u2014';
+      const dateStr = f.modified ? formatDateTime(f.modified) : '\u2014';
       const ext = (f.name.split('.').pop() || '').toLowerCase();
       const icon = s3FileIcon(ext);
       const b64Key = btoa(unescape(encodeURIComponent(f.key)));
@@ -9073,7 +9317,7 @@ function renderFleetInsuranceTable(insurance, vehicleId) {
   }
   let html = `<table class="data-table">
     <thead><tr>
-      <th>Datum</th><th>Versicherung</th><th>Art</th><th>Jahresbeitrag</th><th>Zahlungsintervall</th><th>Zahlungsart</th><th>Status</th>
+      <th>Datum</th><th>Versicherung</th><th>Art</th><th>Jahresbeitrag</th><th>Selbstbeteiligung</th><th>SF-Klasse</th><th>Zahlungsintervall</th><th>Zahlungsart</th><th>Status</th>
     </tr></thead><tbody>`;
   insurance.forEach((ins, idx) => {
     const isActive = idx === 0;
@@ -9081,11 +9325,16 @@ function renderFleetInsuranceTable(insurance, vehicleId) {
     const statusBadge = isActive
       ? '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:#fff;background:#15803d;">aktiv</span>'
       : '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:#fff;background:#9ca3af;">inaktiv</span>';
+    const deductibleDisplay = ins.deductible && Number(ins.deductible) > 0
+      ? Number(ins.deductible).toLocaleString('de-DE', { minimumFractionDigits: 2 }) + ' \u20ac'
+      : '-';
     html += `<tr style="${rowStyle}" onclick="openFleetInsuranceEdit(${ins.id}, ${vehicleId})">
       <td>${formatDate(ins.contract_date)}</td>
       <td>${escapeHtml(ins.insurance_name || '-')}</td>
       <td>${escapeHtml(ins.insurance_type || '-')}</td>
       <td>${Number(ins.annual_premium || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })} \u20ac</td>
+      <td>${deductibleDisplay}</td>
+      <td>${escapeHtml(ins.sf_class || '-')}</td>
       <td>${escapeHtml(ins.payment_interval || '-')}</td>
       <td>${escapeHtml(ins.payment_method || '-')}</td>
       <td>${statusBadge}</td>
@@ -9112,6 +9361,15 @@ function openFleetInsuranceForm(vehicleId) {
           </select>
         </div>
         <div class="form-group"><label>Jahresbeitrag (\u20ac)</label><input type="number" id="fi-premium" step="0.01" min="0" value="0"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group"><label>Selbstbeteiligung (\u20ac)</label><input type="number" id="fi-deductible" step="0.01" min="0" value="0"></div>
+        <div class="form-group"><label>SF-Klasse</label>
+          <select id="fi-sfclass">
+            <option value="">-- Ausw\u00e4hlen --</option>
+            ${Array.from({length:15},(_,i)=>i+1).map(n => `<option value="${n}">${n}</option>`).join('')}
+          </select>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div class="form-group"><label>Zahlungsintervall</label>
@@ -9149,6 +9407,8 @@ async function saveFleetInsurance(e, vehicleId) {
       annual_premium: document.getElementById('fi-premium').value,
       payment_interval: document.getElementById('fi-interval').value,
       payment_method: document.getElementById('fi-method').value,
+      deductible: document.getElementById('fi-deductible').value,
+      sf_class: document.getElementById('fi-sfclass').value,
     }});
     closeModal();
     showToast('Vertrag gespeichert');
@@ -9190,6 +9450,15 @@ async function openFleetInsuranceEdit(insId, vehicleId) {
             </select>
           </div>
           <div class="form-group"><label>Jahresbeitrag (\u20ac)</label><input type="number" id="fi-premium" step="0.01" min="0" value="${ins.annual_premium || 0}"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group"><label>Selbstbeteiligung (\u20ac)</label><input type="number" id="fi-deductible" step="0.01" min="0" value="${ins.deductible || 0}"></div>
+          <div class="form-group"><label>SF-Klasse</label>
+            <select id="fi-sfclass">
+              <option value="">-- Ausw\u00e4hlen --</option>
+              ${Array.from({length:15},(_,i)=>i+1).map(n => `<option value="${n}" ${String(ins.sf_class) === String(n) ? 'selected' : ''}>${n}</option>`).join('')}
+            </select>
+          </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
           <div class="form-group"><label>Zahlungsintervall</label>
@@ -9249,6 +9518,8 @@ async function updateFleetInsurance(e, insId, vehicleId) {
       annual_premium: document.getElementById('fi-premium').value,
       payment_interval: document.getElementById('fi-interval').value,
       payment_method: document.getElementById('fi-method').value,
+      deductible: document.getElementById('fi-deductible').value,
+      sf_class: document.getElementById('fi-sfclass').value,
     }});
     closeModal();
     showToast('Vertrag aktualisiert');
@@ -9436,6 +9707,7 @@ function openFleetDamageForm(vehicleId) {
           <select id="fd-type" required>
             <option value="">-- Ausw\u00e4hlen --</option>
             <option value="Vollkasko">Vollkasko</option>
+            <option value="Teilkasko">Teilkasko</option>
             <option value="Haftpflicht">Haftpflicht</option>
             <option value="Kundenschaden">Kundenschaden</option>
             <option value="Mitarbeiterschaden">Mitarbeiterschaden</option>
@@ -9501,6 +9773,7 @@ async function openFleetDamageEdit(damageId, vehicleId) {
           <div class="form-group"><label>Schadensart *</label>
             <select id="fd-type" required>
               <option value="Vollkasko" ${d.damage_type === 'Vollkasko' ? 'selected' : ''}>Vollkasko</option>
+              <option value="Teilkasko" ${d.damage_type === 'Teilkasko' ? 'selected' : ''}>Teilkasko</option>
               <option value="Haftpflicht" ${d.damage_type === 'Haftpflicht' ? 'selected' : ''}>Haftpflicht</option>
               <option value="Kundenschaden" ${d.damage_type === 'Kundenschaden' ? 'selected' : ''}>Kundenschaden</option>
               <option value="Mitarbeiterschaden" ${d.damage_type === 'Mitarbeiterschaden' ? 'selected' : ''}>Mitarbeiterschaden</option>
@@ -13016,8 +13289,28 @@ async function doRbetSearch() {
 let _akCurrentPath = '';
 let _akRootPath = '';
 
+function akUpdateDropzoneState() {
+  const drop = document.getElementById('ak-dropzone');
+  if (!drop) return;
+  const isRoot = _akCurrentPath === _akRootPath;
+  const txt = drop.querySelector('.s3-dropzone-text');
+  const sub = drop.querySelector('.s3-dropzone-sub');
+  if (isRoot) {
+    drop.style.opacity = '0.5';
+    drop.style.cursor = 'not-allowed';
+    if (txt) txt.textContent = 'Ablage auf der Hauptebene gesperrt';
+    if (sub) sub.innerHTML = 'Bitte zuerst einen Hauptordner öffnen';
+  } else {
+    drop.style.opacity = '';
+    drop.style.cursor = '';
+    if (txt) txt.textContent = 'Dateien hierher ziehen';
+    if (sub) sub.innerHTML = 'oder <a href="#" onclick="event.preventDefault();document.getElementById(\'ak-file-input\').click()">Dateien auswählen</a>';
+  }
+}
+
 async function akLoadFolder(folder) {
   _akCurrentPath = folder;
+  akUpdateDropzoneState();
   const listEl = document.getElementById('ak-file-list');
   const bcEl = document.getElementById('ak-breadcrumb');
   if (!listEl) return;
@@ -13057,7 +13350,7 @@ async function akLoadFolder(folder) {
 
     result.files.filter(f => f.name && f.name !== '.folder').forEach(f => {
       const sizeStr = f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size / 1024).toFixed(1) + ' KB' : (f.size / 1048576).toFixed(1) + ' MB';
-      const dateStr = f.modified ? new Date(f.modified).toLocaleString('de-DE') : '\u2014';
+      const dateStr = f.modified ? formatDateTime(f.modified) : '\u2014';
       const icon = s3FileIcon((f.name.split('.').pop() || '').toLowerCase());
       const b64Key = btoa(unescape(encodeURIComponent(f.key)));
       const b64Name = btoa(unescape(encodeURIComponent(f.name)));
@@ -13130,6 +13423,8 @@ function akFolderCtx(e, folderPath) {
 }
 
 function akEmptyCtx(e) {
+  // Auf der Hauptebene kein Kontextmenü (kein Ordner anlegen erlaubt)
+  if (_akCurrentPath === _akRootPath) return;
   s3CloseCtx();
   const menu = document.createElement('div');
   menu.id = 's3-ctx-menu'; menu.className = 's3-context-menu';
@@ -13140,6 +13435,10 @@ function akEmptyCtx(e) {
 }
 
 function akCreateFolder() {
+  if (_akCurrentPath === _akRootPath) {
+    showToast('Auf der Hauptebene können keine Ordner angelegt werden. Bitte zuerst einen Hauptordner öffnen.', 'error');
+    return;
+  }
   const name = prompt('Ordnername:');
   if (!name || !name.trim()) return;
   api('/api/files/upload', { method: 'POST', body: { folder: _akCurrentPath + '/' + name.trim().replace(/[\/\\]/g, ''), filename: '.folder', data: btoa(' '), content_type: 'text/plain' } })
@@ -13169,6 +13468,12 @@ async function akDeleteFolder(folderPath) {
 }
 
 async function akUploadFiles(files) {
+  if (_akCurrentPath === _akRootPath) {
+    showToast('Auf der Hauptebene können keine Dateien abgelegt werden. Bitte zuerst einen Hauptordner öffnen.', 'error');
+    const input = document.getElementById('ak-file-input');
+    if (input) input.value = '';
+    return;
+  }
   for (const file of files) {
     const reader = new FileReader();
     await new Promise(resolve => {
@@ -13230,7 +13535,7 @@ async function rvLoadFolder(folder) {
 
     result.files.filter(f => f.name && f.name !== '.folder').forEach(f => {
       const sizeStr = f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size / 1024).toFixed(1) + ' KB' : (f.size / 1048576).toFixed(1) + ' MB';
-      const dateStr = f.modified ? new Date(f.modified).toLocaleString('de-DE') : '\u2014';
+      const dateStr = f.modified ? formatDateTime(f.modified) : '\u2014';
       const icon = s3FileIcon((f.name.split('.').pop() || '').toLowerCase());
       const b64Key = btoa(unescape(encodeURIComponent(f.key)));
       const b64Name = btoa(unescape(encodeURIComponent(f.name)));
@@ -13610,6 +13915,7 @@ function switchAkteTab(tabName) {
   }
   if (tabName === 'post' && currentAkteId) {
     loadPostList(currentAkteId);
+    loadKommunikationList(currentAkteId);
   }
   if (tabName === 'rechnungen' && currentAkteId) {
     loadAkteBilling(currentAkteId);
@@ -13749,6 +14055,12 @@ function closeBeteiligtePopover() {
 
 function onBetTypeChange() {
   const type = document.getElementById('bet-type-select').value;
+  // Beim Wechsel des Typs Auswahl + Selected-Display zurücksetzen
+  _selectedBetEntity = null;
+  const sel = document.getElementById('bet-selected-display');
+  if (sel) { sel.style.display = 'none'; sel.innerHTML = ''; }
+  const wrapper = document.getElementById('bet-search-input-wrapper');
+  if (wrapper) wrapper.style.display = '';
 
   if (type === 'sonstige') {
     document.getElementById('bet-search-area').style.display = 'none';
@@ -13772,9 +14084,50 @@ function onBetTypeChange() {
 }
 
 let _betSearchTimer = null;
+let _selectedBetEntity = null; // { id, label }
 function onBetSearchInput() {
   clearTimeout(_betSearchTimer);
+  // Auswahl verwerfen, sobald der Nutzer den Suchbegriff ändert
+  _selectedBetEntity = null;
+  const footer = document.getElementById('bet-popover-footer-area');
+  if (footer) footer.style.display = 'none';
   _betSearchTimer = setTimeout(() => doBetSearch(), 250);
+}
+
+function selectBetResult(entityId, label) {
+  _selectedBetEntity = { id: entityId, label };
+  // Suchfeld + Trefferliste ausblenden
+  const wrapper = document.getElementById('bet-search-input-wrapper');
+  if (wrapper) wrapper.style.display = 'none';
+  const resultsEl = document.getElementById('bet-search-results');
+  if (resultsEl) resultsEl.innerHTML = '';
+  // Selected-Anzeige einblenden (gleiches Pattern wie bei Rechnungs-Kundenselect)
+  const sel = document.getElementById('bet-selected-display');
+  if (sel) {
+    sel.style.display = 'block';
+    sel.innerHTML = `
+      <div class="search-selected">
+        <span>${escapeHtml(label)}</span>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="clearBetSelection()">Ändern</button>
+      </div>`;
+  }
+  // Footer mit Übernehmen-Button einblenden
+  const footer = document.getElementById('bet-popover-footer-area');
+  if (footer) footer.style.display = 'flex';
+}
+
+function clearBetSelection() {
+  _selectedBetEntity = null;
+  const sel = document.getElementById('bet-selected-display');
+  if (sel) { sel.style.display = 'none'; sel.innerHTML = ''; }
+  const wrapper = document.getElementById('bet-search-input-wrapper');
+  if (wrapper) wrapper.style.display = '';
+  const input = document.getElementById('bet-search-input');
+  if (input) { input.value = ''; input.focus(); }
+  const resultsEl = document.getElementById('bet-search-results');
+  if (resultsEl) resultsEl.innerHTML = '';
+  const footer = document.getElementById('bet-popover-footer-area');
+  if (footer) footer.style.display = 'none';
 }
 
 async function doBetSearch() {
@@ -13789,8 +14142,10 @@ async function doBetSearch() {
     if (type === 'kunde') {
       const list = await api(`/api/customers?search=${encodeURIComponent(term)}`);
       items = list.slice(0, 15).map(c => {
-        const n = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? c.company_name : `${c.last_name}, ${c.first_name}`;
-        return { id: c.id, label: n, sub: c.city || '' };
+        const n = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? (c.company_name || '') : `${c.last_name || ''}, ${c.first_name || ''}`;
+        const location = [c.zip, c.city].filter(Boolean).join(' ');
+        const label = location ? `${n} - ${location}` : n;
+        return { id: c.id, label, sub: '' };
       });
     } else if (type === 'vermittler' || type === 'werkstatt') {
       const list = await api('/api/vermittler');
@@ -13812,12 +14167,13 @@ async function doBetSearch() {
     if (items.length === 0) {
       resultsEl.innerHTML = '<div class="bet-search-item" style="color:var(--text-muted);cursor:default;">Keine Ergebnisse</div>';
     } else {
-      resultsEl.innerHTML = items.map(it =>
-        `<div class="bet-search-item" ondblclick="onBetResultDblClick(${it.id}, '${escapeHtml(it.label).replace(/'/g, "\\'")}')">
+      resultsEl.innerHTML = items.map(it => {
+        const safeLabel = escapeHtml(it.label).replace(/'/g, "\\'");
+        return `<div class="bet-search-item" data-id="${it.id}" onclick="selectBetResult(${it.id}, '${safeLabel}')">
           <span>${escapeHtml(it.label)}</span>
           ${it.sub ? '<span style="font-size:11px;color:var(--text-muted);margin-left:8px;">' + escapeHtml(it.sub) + '</span>' : ''}
-        </div>`
-      ).join('');
+        </div>`;
+      }).join('');
     }
   } catch (err) {
     resultsEl.innerHTML = '<div class="bet-search-item" style="color:var(--danger);cursor:default;">Fehler beim Laden</div>';
@@ -13845,12 +14201,26 @@ async function onBetResultDblClick(entityId, label) {
 async function confirmBeteiligter() {
   const type = document.getElementById('bet-type-select').value;
   if (!type) return;
-  if (type !== 'sonstige') {
-    showToast('Bitte Doppelklick auf ein Suchergebnis', 'error');
-    return;
-  }
   const akteId = currentAkteId;
   if (!akteId) return;
+
+  // Entity-basierte Typen: gewählten Eintrag übernehmen
+  if (type !== 'sonstige') {
+    if (!_selectedBetEntity) {
+      showToast('Bitte Eintrag in der Liste auswählen', 'error');
+      return;
+    }
+    try {
+      await api(`/api/akten/${akteId}/beteiligte`, { method: 'POST', body: { type, entity_id: _selectedBetEntity.id, name: _selectedBetEntity.label } });
+      _selectedBetEntity = null;
+      closeBeteiligtePopover();
+      showToast('Beteiligter hinzugefügt');
+      renderAkteDetail(akteId);
+    } catch (err) {
+      showToast('Fehler: ' + (err.message || err), 'error');
+    }
+    return;
+  }
 
   const name = document.getElementById('bet-son-name').value.trim();
   const adresse = document.getElementById('bet-son-adresse').value.trim();
@@ -14016,7 +14386,8 @@ async function renderAkteDetail(id) {
         ${cell('Mietbeginn', r.start_date ? fmt(formatDate(r.start_date)) : fmt(''))}
         ${cell('Mietende', r.end_date ? fmt(formatDate(r.end_date)) : fmt(''))}
         ${cell('Mietdauer', dauer !== null ? dauer + ' Tage' : fmt(''))}
-        ${cell('Mietart', fmt(r.mietart))}`;
+        ${cell('Mietart', fmt(r.mietart))}
+        ${cell('Status', r.status ? rentalStatusBadge(r.status) : fmt(''))}`;
     } else {
       mietvorgangHtml = `<div style="color:var(--text-muted);">Kein Mietvorgang verkn\u00fcpft</div>`;
     }
@@ -14189,15 +14560,32 @@ async function renderAkteDetail(id) {
             Datei hierher ziehen zum Hinzufügen
           </div>
         </div>
-        <div id="post-split-container" style="display:grid;grid-template-columns:1fr 6px 1fr;gap:0;height:calc(100vh - 420px);min-height:280px;">
+        <div id="post-split-container" style="display:grid;grid-template-columns:1fr 6px 1fr;gap:0;height:380px;min-height:240px;">
           <div class="card" style="padding:0;border-radius:var(--radius) 0 0 var(--radius);overflow:hidden;display:flex;flex-direction:column;min-width:0;">
             <div id="post-list" style="flex:1;overflow-y:auto;"></div>
           </div>
           <div style="cursor:col-resize;background:var(--border);transition:background 0.15s;" onmousedown="startPanelResize(event,'post-split-container')"></div>
           <div class="card" style="padding:0;border-radius:0 var(--radius) var(--radius) 0;overflow:hidden;display:flex;flex-direction:column;min-width:0;">
-            <div style="padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg);font-size:13px;font-weight:600;color:var(--text-muted);flex-shrink:0;">Vorschau</div>
+            <div style="padding:8px 12px;border-bottom:2px solid var(--border);background:var(--bg);font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:0.3px;flex-shrink:0;">VORSCHAU</div>
             <div id="post-preview-panel" style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:16px;">
               <div style="text-align:center;color:var(--text-muted);"><div style="font-size:40px;margin-bottom:8px;">&#128065;</div><div style="font-size:13px;">Post anklicken für Vorschau</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin:24px 0 12px;align-items:center;">
+          <button class="btn btn-sm btn-primary" onclick="openKommunikationForm(${a.id})">+ Telefonat hinzufügen</button>
+          <div style="flex:1;font-size:13px;font-weight:600;color:var(--text-muted);padding-left:8px;">Telefonate</div>
+        </div>
+        <div id="komm-split-container" style="display:grid;grid-template-columns:1fr 6px 1fr;gap:0;height:380px;min-height:240px;">
+          <div class="card" style="padding:0;border-radius:var(--radius) 0 0 var(--radius);overflow:hidden;display:flex;flex-direction:column;min-width:0;">
+            <div id="komm-list" style="flex:1;overflow-y:auto;"></div>
+          </div>
+          <div style="cursor:col-resize;background:var(--border);transition:background 0.15s;" onmousedown="startPanelResize(event,'komm-split-container')"></div>
+          <div class="card" style="padding:0;border-radius:0 var(--radius) var(--radius) 0;overflow:hidden;display:flex;flex-direction:column;min-width:0;">
+            <div style="padding:8px 12px;border-bottom:2px solid var(--border);background:var(--bg);font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:0.3px;flex-shrink:0;">GESPRÄCHSNOTIZ</div>
+            <div id="komm-preview-panel" style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:16px;">
+              <div style="text-align:center;color:var(--text-muted);"><div style="font-size:40px;margin-bottom:8px;">&#128222;</div><div style="font-size:13px;">Telefonat anklicken für Notiz</div></div>
             </div>
           </div>
         </div>
@@ -14212,6 +14600,14 @@ async function renderAkteDetail(id) {
           </div>
           <div class="card">
             <div class="table-wrapper" id="akte-billing-table"><div class="loading" style="padding:24px;text-align:center;color:var(--text-muted);">Laden...</div></div>
+          </div>
+        </div>
+        <div class="akte-section" style="margin-top:20px;">
+          <div class="page-header" style="margin-bottom:12px;">
+            <h3 style="margin:0;">Zahlungsströme</h3>
+          </div>
+          <div class="card">
+            <div class="table-wrapper" id="akte-payments-table"><div class="loading" style="padding:24px;text-align:center;color:var(--text-muted);">Laden...</div></div>
           </div>
         </div>
       </div>
@@ -14259,12 +14655,12 @@ async function renderAkteDetail(id) {
 
             <!-- Search area (for all entity-based types) -->
             <div id="bet-search-area" style="display:none;">
-              <div class="form-group" style="position:relative;">
+              <div class="form-group" id="bet-search-input-wrapper" style="position:relative;">
                 <label id="bet-search-label">Suchen</label>
                 <input type="text" id="bet-search-input" placeholder="Suchen..." oninput="onBetSearchInput()" autocomplete="off">
                 <div class="bet-search-results" id="bet-search-results"></div>
               </div>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Doppelklick auf ein Ergebnis zum \u00dcbernehmen</div>
+              <div class="form-group" id="bet-selected-display" style="display:none;"></div>
             </div>
 
             <!-- Sonstige Beteiligter manual fields -->
@@ -14319,17 +14715,22 @@ async function loadPostList(akteId) {
       listEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);"><div style="font-size:32px;margin-bottom:8px;">&#128231;</div><div style="font-size:13px;">Noch keine Post vorhanden</div></div>';
       return;
     }
-    const grid = 'display:grid;grid-template-columns:40px 80px 1fr 1fr 1fr;gap:0 10px;align-items:center;padding:8px 12px;font-size:13px;';
+    const grid = 'display:grid;grid-template-columns:40px 80px 36px 2fr 1fr;gap:0 10px;align-items:center;padding:8px 12px;font-size:13px;';
     let html = '<div style="' + grid + 'position:sticky;top:0;background:var(--bg);border-bottom:2px solid var(--border);z-index:1;font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:0.3px;">'
-      + '<div>Nr.</div><div>Datum</div><div>Von</div><div>An</div><div>Eingetragen von</div></div>';
+      + '<div>Nr.</div><div>Datum</div><div style="text-align:center;" title="Richtung">↕</div><div>Beteiligter</div><div>Eingetragen von</div></div>';
     posts.forEach(p => {
       const b64k = btoa(unescape(encodeURIComponent(p.s3_key)));
       const b64n = btoa(unescape(encodeURIComponent(p.filename)));
+      const isOut = p.direction === 'ausgehend';
+      const dirBadge = isOut
+        ? '<span title="Ausgehend" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:700;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;box-shadow:0 1px 3px rgba(217,119,6,0.4);letter-spacing:0;">A</span>'
+        : '<span title="Eingehend" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:700;background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff;box-shadow:0 1px 3px rgba(29,78,216,0.4);letter-spacing:0;">E</span>';
+      const participantDisplay = p.participant || p.sender || p.recipient || '-';
       html += '<div class="s3-row" style="' + grid + 'cursor:pointer;border-bottom:1px solid var(--border);" onclick="postItemClick(' + p.id + ',\'' + b64k + '\',\'' + b64n + '\')" oncontextmenu="event.preventDefault();postContextMenu(event,' + p.id + ',\'' + b64k + '\',' + p.akte_id + ')">'
         + '<div style="font-weight:600;">' + p.id + '</div>'
         + '<div>' + formatDate(p.post_date) + '</div>'
-        + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(p.sender || '-') + '</div>'
-        + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(p.recipient || '-') + '</div>'
+        + '<div style="text-align:center;">' + dirBadge + '</div>'
+        + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(participantDisplay) + '</div>'
         + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">' + escapeHtml(p.uploader_name || '-') + '</div>'
         + '</div>';
     });
@@ -14399,7 +14800,7 @@ function postItemClick(postId, b64Key, b64Name) {
   } else if (ext === 'msg') {
     panel.style.padding = '16px';
     api('/api/files/msg-preview?key=' + encodeURIComponent(key)).then(msg => {
-      const fmtDate = msg.date ? new Date(msg.date).toLocaleString('de-DE') : '';
+      const fmtDate = msg.date ? formatDateTime(msg.date) : '';
       panel.innerHTML = '<div style="width:100%;text-align:left;overflow:auto;">'
         + '<div style="display:grid;grid-template-columns:80px 1fr;gap:6px 12px;font-size:13px;margin-bottom:12px;">'
         + '<div style="color:var(--text-muted);font-weight:600;">Betreff</div><div style="font-weight:600;">' + escapeHtml(msg.subject || '') + '</div>'
@@ -14431,23 +14832,84 @@ async function handlePostDrop(event, akteId, aktennummer) {
   openPostMetaDialog(files.length === 1 ? files[0].name : files.length + ' Dateien');
 }
 
-function openPostMetaDialog(fileLabel) {
+const POST_SUBJECTS = ['Gutachten', 'Anschreiben', 'Abrechnungsschreiben', 'Prüfbericht'];
+const POST_BET_TYPE_LABELS = { kunde: 'Kunde', vermittler: 'Vermittler', werkstatt: 'Werkstatt', versicherung: 'Versicherung', anwalt: 'Anwalt', sonstige: 'Sonstige' };
+
+async function buildPostBeteiligteOptions(akteId) {
+  let options = '<option value="">-- bitte wählen --</option>';
+  try {
+    const beteiligte = await api(`/api/akten/${akteId}/beteiligte`);
+    beteiligte.forEach(b => {
+      const typeLabel = POST_BET_TYPE_LABELS[b.type] || b.type || 'Beteiligter';
+      const display = `${typeLabel} - ${b.name || ''}`;
+      options += `<option value="${escapeHtml(display)}">${escapeHtml(display)}</option>`;
+    });
+  } catch (e) { /* leer ist OK */ }
+  options += '<option value="__custom__">Sonstiger Beteiligter</option>';
+  return options;
+}
+
+function buildPostSubjectOptions() {
+  let opts = '<option value="">-- bitte wählen --</option>';
+  POST_SUBJECTS.forEach(s => { opts += `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`; });
+  opts += '<option value="__custom__">Sonstiges</option>';
+  return opts;
+}
+
+function bindPostCustomToggle(selectId, customWrapperId) {
+  const sel = document.getElementById(selectId);
+  const wrap = document.getElementById(customWrapperId);
+  if (!sel || !wrap) return;
+  const update = () => { wrap.style.display = (sel.value === '__custom__') ? '' : 'none'; };
+  sel.addEventListener('change', update);
+  update();
+}
+
+function readPostFieldValue(selectId, customInputId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return '';
+  if (sel.value === '__custom__') {
+    const inp = document.getElementById(customInputId);
+    return inp ? inp.value.trim() : '';
+  }
+  return sel.value;
+}
+
+async function openPostMetaDialog(fileLabel) {
   const existing = document.getElementById('post-meta-overlay');
   if (existing) existing.remove();
+  const beteiligteOptions = await buildPostBeteiligteOptions(_pendingPostAkteId);
+  const subjectOptions = buildPostSubjectOptions();
   const overlay = document.createElement('div');
   overlay.id = 'post-meta-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:12px;padding:24px 28px;max-width:420px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,0.25);">
+    <div style="background:#fff;border-radius:12px;padding:24px 28px;max-width:420px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,0.25);max-height:90vh;overflow-y:auto;">
       <h3 style="margin:0 0 4px;font-size:17px;">Post erfassen</h3>
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">${escapeHtml(fileLabel)}</div>
       <form id="post-meta-form">
-        <div class="form-group"><label>Datum</label><input type="date" id="pm-date" value="${localDateStr(new Date())}"></div>
-        <div class="form-row">
-          <div class="form-group"><label>Von <span style="color:var(--danger);">*</span></label><input type="text" id="pm-sender" placeholder="Absender" required></div>
-          <div class="form-group"><label>An <span style="color:var(--danger);">*</span></label><input type="text" id="pm-recipient" placeholder="Empfänger" required></div>
+        <div class="form-group">
+          <label>Richtung <span style="color:var(--danger);">*</span></label>
+          <div style="display:flex;gap:16px;padding:6px 0;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400;"><input type="radio" name="pm-direction" value="eingehend" checked> Eingehend</label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400;"><input type="radio" name="pm-direction" value="ausgehend"> Ausgehend</label>
+          </div>
         </div>
-        <div class="form-group"><label>Betreff</label><input type="text" id="pm-subject" placeholder="Betreff (optional)"></div>
+        <div class="form-group"><label>Datum</label><input type="date" id="pm-date" value="${localDateStr(new Date())}"></div>
+        <div class="form-group">
+          <label>Beteiligter <span style="color:var(--danger);">*</span></label>
+          <select id="pm-participant-select" required>${beteiligteOptions}</select>
+        </div>
+        <div class="form-group" id="pm-participant-custom-wrapper" style="display:none;">
+          <input type="text" id="pm-participant-custom" placeholder="Beteiligten manuell eintragen">
+        </div>
+        <div class="form-group">
+          <label>Betreff</label>
+          <select id="pm-subject-select">${subjectOptions}</select>
+        </div>
+        <div class="form-group" id="pm-subject-custom-wrapper" style="display:none;">
+          <input type="text" id="pm-subject-custom" placeholder="Betreff manuell eintragen">
+        </div>
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Speichern</button>
           <button type="button" class="btn btn-secondary" onclick="document.getElementById('post-meta-overlay').remove();">Abbrechen</button>
@@ -14455,21 +14917,24 @@ function openPostMetaDialog(fileLabel) {
       </form>
     </div>`;
   document.body.appendChild(overlay);
-  document.getElementById('pm-sender').focus();
+  bindPostCustomToggle('pm-participant-select', 'pm-participant-custom-wrapper');
+  bindPostCustomToggle('pm-subject-select', 'pm-subject-custom-wrapper');
+  document.getElementById('pm-participant-select').focus();
   document.getElementById('post-meta-form').onsubmit = async (e) => {
     e.preventDefault();
-    const sender = document.getElementById('pm-sender').value.trim();
-    const recipient = document.getElementById('pm-recipient').value.trim();
-    const subject = document.getElementById('pm-subject').value.trim();
+    const participant = readPostFieldValue('pm-participant-select', 'pm-participant-custom');
+    if (!participant) { showToast('Bitte Beteiligten auswählen oder eintragen', 'error'); return; }
+    const subject = readPostFieldValue('pm-subject-select', 'pm-subject-custom');
     const postDate = document.getElementById('pm-date').value;
+    const direction = (document.querySelector('input[name="pm-direction"]:checked')?.value) || 'eingehend';
     overlay.remove();
     for (const file of _pendingPostFiles) {
-      await uploadPostFile(_pendingPostAkteId, _pendingPostAktennummer, file, postDate, sender, recipient, subject);
+      await uploadPostFile(_pendingPostAkteId, _pendingPostAktennummer, file, postDate, participant, subject, direction);
     }
   };
 }
 
-async function uploadPostFile(akteId, aktennummer, file, postDate, sender, recipient, subject) {
+async function uploadPostFile(akteId, aktennummer, file, postDate, participant, subject, direction) {
   const folder = 'Akten/' + aktennummer + '/Korrespondenz';
   const ext = (file.name.split('.').pop() || '').toLowerCase();
   const reader = new FileReader();
@@ -14477,13 +14942,15 @@ async function uploadPostFile(akteId, aktennummer, file, postDate, sender, recip
     reader.onload = async () => {
       try {
         // Create DB entry first to get the ID
-        const entry = await api(`/api/akten/${akteId}/post`, { method: 'POST', body: { post_date: postDate || localDateStr(new Date()), sender: sender || '', recipient: recipient || '', subject: subject || '', s3_key: '', filename: file.name } });
+        const dir = direction || 'eingehend';
+        const part = participant || '';
+        const entry = await api(`/api/akten/${akteId}/post`, { method: 'POST', body: { post_date: postDate || localDateStr(new Date()), participant: part, subject: subject || '', s3_key: '', filename: file.name, direction: dir } });
         const newFilename = entry.id + '.' + ext;
         const s3Key = folder + '/' + newFilename;
         // Upload with ID as filename
         await api('/api/files/upload', { method: 'POST', body: { folder, filename: newFilename, data: reader.result.split(',')[1], content_type: file.type } });
         // Update entry with correct s3_key and filename
-        await api(`/api/akten-post/${entry.id}`, { method: 'PUT', body: { post_date: postDate || localDateStr(new Date()), sender: sender || '', recipient: recipient || '', subject: subject || '', s3_key: s3Key, filename: newFilename } });
+        await api(`/api/akten-post/${entry.id}`, { method: 'PUT', body: { post_date: postDate || localDateStr(new Date()), participant: part, subject: subject || '', s3_key: s3Key, filename: newFilename, direction: dir } });
       } catch (e) { showToast('Upload fehlgeschlagen: ' + e.message, 'error'); }
       resolve();
     };
@@ -14493,23 +14960,41 @@ async function uploadPostFile(akteId, aktennummer, file, postDate, sender, recip
   loadPostList(akteId);
 }
 
-function openPostUploadForm(akteId, aktennummer) {
+async function openPostUploadForm(akteId, aktennummer) {
   const existing = document.getElementById('post-upload-overlay');
   if (existing) existing.remove();
+  const beteiligteOptions = await buildPostBeteiligteOptions(akteId);
+  const subjectOptions = buildPostSubjectOptions();
   const overlay = document.createElement('div');
   overlay.id = 'post-upload-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:500px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,0.25);">
+    <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:500px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,0.25);max-height:90vh;overflow-y:auto;">
       <h3 style="margin:0 0 16px;font-size:17px;">Post hinzufügen</h3>
       <form id="post-upload-form">
+        <div class="form-group">
+          <label>Richtung <span style="color:var(--danger);">*</span></label>
+          <div style="display:flex;gap:16px;padding:6px 0;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400;"><input type="radio" name="post-direction" value="eingehend" checked> Eingehend</label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400;"><input type="radio" name="post-direction" value="ausgehend"> Ausgehend</label>
+          </div>
+        </div>
         <div class="form-group"><label>Datei <span style="color:var(--danger);">*</span> <span style="font-weight:400;color:var(--text-muted);">(PDF, MSG, EML)</span></label><input type="file" id="post-file" accept=".pdf,.msg,.eml" required></div>
         <div class="form-group"><label>Datum</label><input type="date" id="post-date" value="${localDateStr(new Date())}"></div>
-        <div class="form-row">
-          <div class="form-group"><label>Von <span style="color:var(--danger);">*</span></label><input type="text" id="post-sender" placeholder="Absender" required></div>
-          <div class="form-group"><label>An <span style="color:var(--danger);">*</span></label><input type="text" id="post-recipient" placeholder="Empfänger" required></div>
+        <div class="form-group">
+          <label>Beteiligter <span style="color:var(--danger);">*</span></label>
+          <select id="post-participant-select" required>${beteiligteOptions}</select>
         </div>
-        <div class="form-group"><label>Betreff</label><input type="text" id="post-subject" placeholder="Betreff (optional)"></div>
+        <div class="form-group" id="post-participant-custom-wrapper" style="display:none;">
+          <input type="text" id="post-participant-custom" placeholder="Beteiligten manuell eintragen">
+        </div>
+        <div class="form-group">
+          <label>Betreff</label>
+          <select id="post-subject-select">${subjectOptions}</select>
+        </div>
+        <div class="form-group" id="post-subject-custom-wrapper" style="display:none;">
+          <input type="text" id="post-subject-custom" placeholder="Betreff manuell eintragen">
+        </div>
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Hochladen</button>
           <button type="button" class="btn btn-secondary" onclick="document.getElementById('post-upload-overlay').remove();">Abbrechen</button>
@@ -14517,6 +15002,8 @@ function openPostUploadForm(akteId, aktennummer) {
       </form>
     </div>`;
   document.body.appendChild(overlay);
+  bindPostCustomToggle('post-participant-select', 'post-participant-custom-wrapper');
+  bindPostCustomToggle('post-subject-select', 'post-subject-custom-wrapper');
   document.getElementById('post-upload-form').onsubmit = async (e) => {
     e.preventDefault();
     const file = document.getElementById('post-file').files[0];
@@ -14528,21 +15015,191 @@ function openPostUploadForm(akteId, aktennummer) {
     reader.onload = async () => {
       try {
         const postDate = document.getElementById('post-date').value;
-        const sender = document.getElementById('post-sender').value.trim();
-        const recipient = document.getElementById('post-recipient').value.trim();
-        const subject = document.getElementById('post-subject').value.trim();
+        const participant = readPostFieldValue('post-participant-select', 'post-participant-custom');
+        if (!participant) { showToast('Bitte Beteiligten auswählen oder eintragen', 'error'); return; }
+        const subject = readPostFieldValue('post-subject-select', 'post-subject-custom');
+        const direction = (document.querySelector('input[name="post-direction"]:checked')?.value) || 'eingehend';
         // Create entry first to get ID
-        const entry = await api(`/api/akten/${akteId}/post`, { method: 'POST', body: { post_date: postDate, sender, recipient, subject, s3_key: '', filename: file.name } });
+        const entry = await api(`/api/akten/${akteId}/post`, { method: 'POST', body: { post_date: postDate, participant, subject, s3_key: '', filename: file.name, direction } });
         const newFilename = entry.id + '.' + ext;
         const s3Key = folder + '/' + newFilename;
         await api('/api/files/upload', { method: 'POST', body: { folder, filename: newFilename, data: reader.result.split(',')[1], content_type: file.type } });
-        await api(`/api/akten-post/${entry.id}`, { method: 'PUT', body: { post_date: postDate, sender, recipient, subject, s3_key: s3Key, filename: newFilename } });
+        await api(`/api/akten-post/${entry.id}`, { method: 'PUT', body: { post_date: postDate, participant, subject, s3_key: s3Key, filename: newFilename, direction } });
         showToast('Post hochgeladen');
         overlay.remove();
         loadPostList(akteId);
       } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
     };
     reader.readAsDataURL(file);
+  };
+}
+
+// === Akten-Kommunikation (Telefonate & Notizen) ===
+async function loadKommunikationList(akteId) {
+  const listEl = document.getElementById('komm-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center;">Laden...</div>';
+  try {
+    const entries = await api(`/api/akten/${akteId}/kommunikation`);
+    if (!entries.length) {
+      listEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);"><div style="font-size:32px;margin-bottom:8px;">&#128222;</div><div style="font-size:13px;">Noch keine Telefonate erfasst</div></div>';
+      return;
+    }
+    const grid = 'display:grid;grid-template-columns:40px 90px 28px 1.4fr 1.6fr 1fr;gap:0 10px;align-items:center;padding:8px 12px;font-size:13px;';
+    let html = '<div style="' + grid + 'position:sticky;top:0;background:var(--bg);border-bottom:2px solid var(--border);z-index:1;font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:0.3px;">'
+      + '<div>Nr.</div><div>Datum</div><div style="text-align:center;" title="Richtung">↕</div><div>Beteiligter</div><div>Betreff</div><div>Eingetragen von</div></div>';
+    entries.forEach(k => {
+      const dirBadge = (k.direction === 'ausgehend')
+        ? '<span title="Ausgehend" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:700;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;box-shadow:0 1px 3px rgba(217,119,6,0.4);">A</span>'
+        : '<span title="Eingehend" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:700;background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff;box-shadow:0 1px 3px rgba(29,78,216,0.4);">E</span>';
+      const dateStr = formatDate(k.entry_date) + (k.entry_time ? ' ' + escapeHtml(k.entry_time) : '');
+      html += '<div class="s3-row" style="' + grid + 'cursor:pointer;border-bottom:1px solid var(--border);" onclick="kommItemClick(' + k.id + ')" oncontextmenu="event.preventDefault();kommContextMenu(event,' + k.id + ',' + akteId + ')">'
+        + '<div style="font-weight:600;">' + k.id + '</div>'
+        + '<div style="font-size:12px;">' + dateStr + '</div>'
+        + '<div style="text-align:center;">' + dirBadge + '</div>'
+        + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(k.participant || '-') + '</div>'
+        + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(k.subject || '-') + '</div>'
+        + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">' + escapeHtml(k.author_name || '-') + '</div>'
+        + '</div>';
+    });
+    listEl.innerHTML = html;
+    listEl._kommData = entries;
+  } catch (err) {
+    listEl.innerHTML = '<div style="padding:16px;color:var(--danger);text-align:center;">Fehler: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+function kommItemClick(id) {
+  const listEl = document.getElementById('komm-list');
+  const panel = document.getElementById('komm-preview-panel');
+  if (!listEl || !panel) return;
+  const k = (listEl._kommData || []).find(x => x.id === id);
+  if (!k) return;
+  document.querySelectorAll('#komm-list .s3-row').forEach(r => r.style.background = '');
+  if (event && event.currentTarget) event.currentTarget.style.background = 'var(--primary-light)';
+  const dirLabel = (k.direction === 'ausgehend') ? 'Ausgehend' : 'Eingehend';
+  const dateStr = formatDate(k.entry_date) + (k.entry_time ? ' ' + escapeHtml(k.entry_time) : '');
+  panel.style.padding = '16px';
+  panel.style.alignItems = 'flex-start';
+  panel.style.justifyContent = 'flex-start';
+  panel.innerHTML = '<div style="width:100%;text-align:left;">'
+    + '<div style="display:grid;grid-template-columns:110px 1fr;gap:6px 12px;font-size:13px;margin-bottom:14px;">'
+    + '<div style="color:var(--text-muted);font-weight:600;">Richtung</div><div style="font-weight:600;">' + escapeHtml(dirLabel) + '</div>'
+    + '<div style="color:var(--text-muted);font-weight:600;">Datum</div><div>' + dateStr + '</div>'
+    + '<div style="color:var(--text-muted);font-weight:600;">Beteiligter</div><div>' + escapeHtml(k.participant || '-') + '</div>'
+    + '<div style="color:var(--text-muted);font-weight:600;">Betreff</div><div>' + escapeHtml(k.subject || '-') + '</div>'
+    + '<div style="color:var(--text-muted);font-weight:600;">Eingetragen von</div><div>' + escapeHtml(k.author_name || '-') + '</div>'
+    + '</div>'
+    + '<div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">Gesprächsnotiz</div>'
+    + '<div style="background:var(--bg);border-radius:6px;padding:12px;font-size:13px;white-space:pre-wrap;word-break:break-word;min-height:80px;">' + (k.content ? escapeHtml(k.content) : '<span style="color:var(--text-muted);">(Keine Notiz)</span>') + '</div>'
+    + '<div style="margin-top:14px;display:flex;gap:8px;">'
+    +   '<button class="btn btn-sm btn-secondary" onclick="openKommunikationForm(' + k.akte_id + ',' + k.id + ')">Bearbeiten</button>'
+    +   '<button class="btn btn-sm btn-danger" onclick="deleteKommunikation(' + k.id + ',' + k.akte_id + ')">Löschen</button>'
+    + '</div>'
+    + '</div>';
+}
+
+function kommContextMenu(e, id, akteId) {
+  s3CloseCtx();
+  const menu = document.createElement('div');
+  menu.id = 's3-ctx-menu';
+  menu.className = 's3-context-menu';
+  menu.innerHTML = `
+    <div class="s3-ctx-item" onclick="s3CloseCtx();openKommunikationForm(${akteId}, ${id})"><span style="width:20px;text-align:center;">&#9998;</span> Bearbeiten</div>
+    <div class="s3-ctx-divider"></div>
+    <div class="s3-ctx-item s3-ctx-danger" onclick="s3CloseCtx();deleteKommunikation(${id}, ${akteId})"><span style="width:20px;text-align:center;">&#10006;</span> Löschen</div>
+  `;
+  menu.style.left = e.pageX + 'px';
+  menu.style.top = e.pageY + 'px';
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (e.pageX - rect.width) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (e.pageY - rect.height) + 'px';
+  setTimeout(() => document.addEventListener('click', s3CloseCtx, { once: true }), 0);
+}
+
+async function deleteKommunikation(id, akteId) {
+  if (!confirm('Telefonat #' + id + ' wirklich löschen?')) return;
+  try {
+    await api('/api/akten-kommunikation/' + id, { method: 'DELETE' });
+    showToast('Telefonat gelöscht');
+    const panel = document.getElementById('komm-preview-panel');
+    if (panel) {
+      panel.style.padding = '16px';
+      panel.style.alignItems = 'center';
+      panel.style.justifyContent = 'center';
+      panel.innerHTML = '<div style="text-align:center;color:var(--text-muted);"><div style="font-size:40px;margin-bottom:8px;">&#128222;</div><div style="font-size:13px;">Telefonat anklicken für Notiz</div></div>';
+    }
+    loadKommunikationList(akteId);
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+function openKommunikationForm(akteId, editId) {
+  const existing = document.getElementById('komm-form-overlay');
+  if (existing) existing.remove();
+  const listEl = document.getElementById('komm-list');
+  const k = editId ? (listEl?._kommData || []).find(x => x.id === editId) : null;
+  const isEdit = !!k;
+  const now = new Date();
+  const defaultDate = k ? k.entry_date : localDateStr(now);
+  const defaultTime = k ? (k.entry_time || '') : (now.toTimeString().slice(0,5));
+  const defaultDir = k ? (k.direction || 'eingehend') : 'eingehend';
+  const defaultParticipant = k ? (k.participant || '') : '';
+  const defaultSubject = k ? (k.subject || '') : '';
+  const defaultContent = k ? (k.content || '') : '';
+  const overlay = document.createElement('div');
+  overlay.id = 'komm-form-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:560px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,0.25);max-height:90vh;overflow-y:auto;">
+      <h3 style="margin:0 0 16px;font-size:17px;">${isEdit ? 'Telefonat bearbeiten' : 'Telefonat hinzufügen'}</h3>
+      <form id="komm-form">
+        <div class="form-group">
+          <label>Richtung <span style="color:var(--danger);">*</span></label>
+          <div style="display:flex;gap:16px;padding:6px 0;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400;"><input type="radio" name="komm-direction" value="eingehend" ${defaultDir === 'eingehend' ? 'checked' : ''}> Eingehend</label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:400;"><input type="radio" name="komm-direction" value="ausgehend" ${defaultDir === 'ausgehend' ? 'checked' : ''}> Ausgehend</label>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Datum <span style="color:var(--danger);">*</span></label><input type="date" id="komm-date" value="${defaultDate}" required></div>
+          <div class="form-group"><label>Uhrzeit</label><input type="time" id="komm-time" value="${defaultTime}"></div>
+        </div>
+        <div class="form-group"><label>Beteiligter <span style="color:var(--danger);">*</span></label><input type="text" id="komm-participant" placeholder="Name / Firma" value="${escapeHtml(defaultParticipant)}" required></div>
+        <div class="form-group"><label>Betreff</label><input type="text" id="komm-subject" placeholder="Kurzes Stichwort (optional)" value="${escapeHtml(defaultSubject)}"></div>
+        <div class="form-group"><label>Gesprächsnotiz / Zusammenfassung</label><textarea id="komm-content" rows="6" placeholder="Inhalt des Gesprächs" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border:1px solid var(--border);border-radius:6px;resize:vertical;">${escapeHtml(defaultContent)}</textarea></div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">${isEdit ? 'Speichern' : 'Hinzufügen'}</button>
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('komm-form-overlay').remove();">Abbrechen</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('komm-participant').focus();
+  document.getElementById('komm-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const direction = (document.querySelector('input[name="komm-direction"]:checked')?.value) || 'eingehend';
+    const entry_date = document.getElementById('komm-date').value;
+    const entry_time = document.getElementById('komm-time').value;
+    const participant = document.getElementById('komm-participant').value.trim();
+    const subject = document.getElementById('komm-subject').value.trim();
+    const content = document.getElementById('komm-content').value;
+    const body = { entry_type: 'Telefon', direction, entry_date, entry_time, participant, subject, content };
+    try {
+      if (isEdit) {
+        await api('/api/akten-kommunikation/' + editId, { method: 'PUT', body });
+        showToast('Telefonat aktualisiert');
+      } else {
+        await api(`/api/akten/${akteId}/kommunikation`, { method: 'POST', body });
+        showToast('Telefonat hinzugefügt');
+      }
+      overlay.remove();
+      loadKommunikationList(akteId);
+    } catch (err) {
+      showToast('Fehler: ' + err.message, 'error');
+    }
   };
 }
 
@@ -14557,13 +15214,11 @@ async function loadEintraege(akteId) {
       return;
     }
     listEl.innerHTML = entries.map((e, idx) => {
-      const dt = e.created_at ? new Date(e.created_at) : new Date();
-      const dateStr = dt.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      const timeStr = dt.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+      const fmtDate = e.created_at ? formatDateTime(e.created_at) : formatDateTime(new Date());
       const plainText = e.text.replace(/<[^>]*>/g, '');
       const preview = plainText.length > 60 ? plainText.substring(0, 60) + '\u2026' : plainText;
       return `<div class="eintraege-item" data-idx="${idx}" onclick="selectEintrag(${idx})" oncontextmenu="event.preventDefault();eintragContextMenu(event, ${idx})"
-        <span class="eintraege-item-date">${escapeHtml(dateStr)}, ${escapeHtml(timeStr)}</span>
+        <span class="eintraege-item-date">${escapeHtml(fmtDate)}</span>
         <span class="eintraege-item-preview">${escapeHtml(preview)}</span>
         <span class="eintraege-item-author">${escapeHtml(e.author_name || 'Unbekannt')}</span>
       </div>`;
@@ -14619,10 +15274,6 @@ function selectEintrag(idx) {
   const item = document.querySelector(`.eintraege-item[data-idx="${idx}"]`);
   if (item) item.classList.add('active');
 
-  const dt = e.created_at ? new Date(e.created_at) : new Date();
-  const dateStr = dt.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const timeStr = dt.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-
   const detailEl = document.getElementById('eintraege-detail');
   detailEl.innerHTML = `
     <div class="eintraege-detail-text">${e.text}</div>
@@ -14662,37 +15313,131 @@ async function saveEintrag() {
 }
 
 // === Mietvorgang Picker ===
+let _mietPickerRentals = [];
+let _mietPickerMatches = [];
+let _mietPickerSortField = null;
+let _mietPickerSortDir = 'asc';
+
 async function openMietvorgangPicker() {
   if (!currentAkteId) return;
   try {
-    const rentals = await api('/api/rentals');
-    const options = rentals.map(r =>
-      `<option value="${r.id}">${escapeHtml(r.license_plate || '')} ${escapeHtml((r.manufacturer || '') + ' ' + (r.model || ''))} \u00b7 ${r.start_date ? formatDate(r.start_date) : ''}\u2013${r.end_date ? formatDate(r.end_date) : ''}${r.customer_name ? ' \u00b7 ' + escapeHtml(r.customer_name) : ''}</option>`
-    ).join('');
-    openModal('Mietvorgang zuweisen', `
-      <form onsubmit="saveMietvorgangPick(event)">
-        <div class="form-group">
-          <label>Mietvorgang ausw\u00e4hlen</label>
-          <select id="pick-rental-id" required>
-            <option value="">\u2014 bitte w\u00e4hlen \u2014</option>
-            ${options}
-          </select>
-        </div>
-        <div style="display:flex;gap:10px;margin-top:16px;">
-          <button type="submit" class="btn btn-primary">\u00dcbernehmen</button>
-          <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
-        </div>
-      </form>
-    `);
+    _mietPickerRentals = await api('/api/rentals');
   } catch (err) {
-    showToast('Fehler: ' + (err.message || err), 'error');
+    showToast('Fehler beim Laden: ' + (err.message || err), 'error');
+    return;
   }
+  _mietPickerMatches = [];
+  _mietPickerSortField = null;
+  _mietPickerSortDir = 'asc';
+  openModal('Mietvorgang zuweisen', `
+    <div class="form-group">
+      <label>Mietvorgang suchen (Kennzeichen, Fahrzeug, Datum, Kunde)</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="miet-pick-search" placeholder="z.B. K-AB 123 oder Mustermann oder 03.2026" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();doMietvorgangSearch();}" autocomplete="off">
+        <button type="button" class="btn btn-primary" onclick="doMietvorgangSearch()">Suchen</button>
+      </div>
+    </div>
+    <div id="miet-pick-results" style="max-height:360px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none;"></div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Mietvorgang anklicken zum \u00dcbernehmen \u00b7 Spaltenkopf f\u00fcr Sortierung</div>
+    <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
+      <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+    </div>
+  `, 'modal-wide');
+  setTimeout(() => { const inp = document.getElementById('miet-pick-search'); if (inp) inp.focus(); }, 0);
 }
 
-async function saveMietvorgangPick(e) {
-  e.preventDefault();
-  const rentalId = Number(document.getElementById('pick-rental-id').value);
-  if (!rentalId) return;
+function _mietPickerSortIcon(field) {
+  if (_mietPickerSortField !== field) return '<span style="opacity:0.3;margin-left:4px;">\u2195</span>';
+  return _mietPickerSortDir === 'asc' ? '<span style="margin-left:4px;">\u25b2</span>' : '<span style="margin-left:4px;">\u25bc</span>';
+}
+
+function _mietPickerCompare(a, b, field) {
+  let va, vb;
+  switch (field) {
+    case 'id': va = Number(a.id) || 0; vb = Number(b.id) || 0; break;
+    case 'license_plate': va = (a.license_plate || '').toLowerCase(); vb = (b.license_plate || '').toLowerCase(); break;
+    case 'fahrzeug': va = ((a.manufacturer || '') + ' ' + (a.model || '')).toLowerCase(); vb = ((b.manufacturer || '') + ' ' + (b.model || '')).toLowerCase(); break;
+    case 'start_date': va = a.start_date || ''; vb = b.start_date || ''; break;
+    case 'customer_name': va = (a.customer_name || '').toLowerCase(); vb = (b.customer_name || '').toLowerCase(); break;
+    case 'status': va = (a.status || '').toLowerCase(); vb = (b.status || '').toLowerCase(); break;
+    default: return 0;
+  }
+  if (va < vb) return _mietPickerSortDir === 'asc' ? -1 : 1;
+  if (va > vb) return _mietPickerSortDir === 'asc' ? 1 : -1;
+  return 0;
+}
+
+function sortMietPicker(field) {
+  if (_mietPickerSortField === field) {
+    _mietPickerSortDir = _mietPickerSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _mietPickerSortField = field;
+    _mietPickerSortDir = 'asc';
+  }
+  _renderMietPickerResults();
+}
+
+function _renderMietPickerResults() {
+  const resultsEl = document.getElementById('miet-pick-results');
+  if (!resultsEl) return;
+  if (_mietPickerMatches.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center;">Keine Mietvorg\u00e4nge gefunden</div>';
+    return;
+  }
+  const sorted = _mietPickerSortField
+    ? [..._mietPickerMatches].sort((a, b) => _mietPickerCompare(a, b, _mietPickerSortField))
+    : _mietPickerMatches;
+  const th = (label, field) =>
+    `<th style="cursor:pointer;user-select:none;" onclick="sortMietPicker('${field}')">${label}${_mietPickerSortIcon(field)}</th>`;
+  resultsEl.innerHTML = '<table class="data-table miet-pick-table" style="margin:0;font-size:13px;user-select:none;"><thead><tr>'
+    + th('Nr.', 'id')
+    + th('Kennzeichen', 'license_plate')
+    + th('Fahrzeug', 'fahrzeug')
+    + th('Zeitraum', 'start_date')
+    + th('Kunde', 'customer_name')
+    + th('Status', 'status')
+    + '</tr></thead><tbody>'
+    + sorted.slice(0, 50).map(r => {
+        const fzg = ((r.manufacturer || '') + ' ' + (r.model || '')).trim() || '-';
+        const zeitraum = (r.start_date ? formatDate(r.start_date) : '?') + ' \u2013 ' + (r.end_date ? formatDate(r.end_date) : '?');
+        return `<tr class="miet-pick-row" style="cursor:pointer;" onclick="selectMietvorgang(${r.id})">
+          <td><strong>${r.id}</strong></td>
+          <td><strong>${escapeHtml(r.license_plate || '-')}</strong></td>
+          <td>${escapeHtml(fzg)}</td>
+          <td>${zeitraum}</td>
+          <td>${escapeHtml(r.customer_name || '-')}</td>
+          <td>${r.status ? rentalStatusBadge(r.status) : '-'}</td>
+        </tr>`;
+      }).join('')
+    + '</tbody></table>';
+}
+
+function doMietvorgangSearch() {
+  const term = (document.getElementById('miet-pick-search').value || '').trim().toLowerCase();
+  const resultsEl = document.getElementById('miet-pick-results');
+  if (!resultsEl) return;
+  if (!term) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; _mietPickerMatches = []; return; }
+  _mietPickerMatches = _mietPickerRentals.filter(r => {
+    const haystack = [
+      r.license_plate || '',
+      r.manufacturer || '',
+      r.model || '',
+      r.customer_name || '',
+      r.start_date || '',
+      r.end_date || '',
+      r.start_date ? formatDate(r.start_date) : '',
+      r.end_date ? formatDate(r.end_date) : '',
+      r.mietart || '',
+      r.status || ''
+    ].join(' ').toLowerCase();
+    return haystack.includes(term);
+  });
+  resultsEl.style.display = 'block';
+  _renderMietPickerResults();
+}
+
+async function selectMietvorgang(rentalId) {
+  if (!currentAkteId || !rentalId) return;
   try {
     await api('/api/akten/' + currentAkteId, { method: 'PUT', body: { rental_id: rentalId } });
     closeModal();
@@ -14884,6 +15629,78 @@ async function loadAkteBilling(akteId) {
   } catch (err) {
     container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--danger);">Fehler: ' + escapeHtml(err.message) + '</div>';
   }
+  loadAktePayments(akteId);
+}
+
+async function loadAktePayments(akteId) {
+  const container = document.getElementById('akte-payments-table');
+  if (!container) return;
+  try {
+    const payments = await api('/api/akten/' + akteId + '/payments');
+    renderAktePaymentsTable(payments);
+  } catch (err) {
+    container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--danger);">Fehler: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+function renderAktePaymentsTable(payments) {
+  const container = document.getElementById('akte-payments-table');
+  if (!container) return;
+  if (!payments || payments.length === 0) {
+    container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);">Noch keine Zahlungen zu den Rechnungen dieser Akte erfasst.</div>';
+    return;
+  }
+  let sumIn = 0, sumOut = 0;
+  payments.forEach(p => {
+    const amt = Number(p.amount) || 0;
+    if (p.direction === 'in') sumIn += amt; else sumOut += amt;
+  });
+  const saldo = Math.round((sumIn - sumOut) * 100) / 100;
+  container.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Datum</th>
+        <th>Rechnung</th>
+        <th>Richtung</th>
+        <th style="text-align:right;">Betrag</th>
+        <th>Konto</th>
+        <th>Zahlungsart</th>
+        <th>Buchungs-User</th>
+        <th>Notiz</th>
+      </tr></thead>
+      <tbody>
+        ${payments.map(p => {
+          const dir = p.direction === 'in'
+            ? '<span class="badge badge-green">Eingang</span>'
+            : '<span class="badge badge-orange">Ausgang</span>';
+          const konto = p.bank_account_label
+            ? escapeHtml(p.bank_account_label)
+            : '<span style="color:var(--text-muted);">Bar/Kasse</span>';
+          const amountDisplay = (p.direction === 'in' ? '+' : '-') + Number(p.amount).toFixed(2) + ' &euro;';
+          const amountColor = p.direction === 'in' ? 'var(--success, #16a34a)' : 'var(--danger, #dc2626)';
+          return `<tr class="clickable" ondblclick="navigate('invoice-detail', ${p.invoice_id})">
+            <td>${formatDate(p.payment_date)}</td>
+            <td><strong>${escapeHtml(p.invoice_number || '')}</strong></td>
+            <td>${dir}</td>
+            <td style="text-align:right;color:${amountColor};font-weight:600;">${amountDisplay}</td>
+            <td>${konto}</td>
+            <td>${escapeHtml(p.payment_method || '—')}</td>
+            <td>${escapeHtml(p.booked_by || '—')}</td>
+            <td>${escapeHtml(p.notes || '')}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="border-top:2px solid var(--border);background:var(--bg);font-weight:600;">
+          <td colspan="3" style="text-align:right;">Saldo (Eingang − Ausgang):</td>
+          <td style="text-align:right;font-size:15px;">${saldo.toFixed(2)} &euro;</td>
+          <td colspan="4" style="color:var(--text-muted);font-weight:400;font-size:12px;">
+            (Eingang: ${sumIn.toFixed(2)} &euro; · Ausgang: ${sumOut.toFixed(2)} &euro;)
+          </td>
+        </tr>
+      </tfoot>
+    </table>
+  `;
 }
 
 function renderAkteBillingTable(items, akteId) {
@@ -15367,6 +16184,8 @@ async function saveAkte(e, editId) {
       try {
         await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Korrespondenz', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
         await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Rechnungen', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
+        await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Vorläufige Dokumente', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
+        await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Endgültige Dokumente', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
         await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Sonstiges', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
       } catch (e) {}
       showToast('Akte angelegt');

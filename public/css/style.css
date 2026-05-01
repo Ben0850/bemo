@@ -344,7 +344,7 @@ body {
   background: rgba(255,255,255,0.04);
 }
 .nav-item-has-submenu.open .nav-submenu {
-  max-height: 200px;
+  max-height: 500px;
 }
 .nav-submenu .nav-link {
   padding: 8px 20px 8px 50px;
@@ -1572,9 +1572,9 @@ tr.clickable:hover {
   background: var(--card-bg);
   border-radius: 10px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.18);
-  width: 380px;
+  width: 520px;
   max-width: 92vw;
-  overflow: hidden;
+  overflow: visible;
   animation: betPopIn 0.15s ease-out;
 }
 
@@ -1670,7 +1670,7 @@ tr.clickable:hover {
   border: 1px solid var(--border);
   border-radius: 0 0 6px 6px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-  max-height: 200px;
+  max-height: 320px;
   overflow-y: auto;
   z-index: 10;
 }
@@ -1694,6 +1694,24 @@ tr.clickable:hover {
 
 .bet-search-item:hover {
   background: var(--primary-light);
+}
+
+.bet-search-item-selected,
+.bet-search-item-selected:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+.bet-search-item-selected span {
+  color: #fff !important;
+}
+
+.miet-pick-table tbody tr:hover {
+  background: var(--primary-light);
+}
+.miet-pick-table tbody tr:active {
+  background: var(--primary);
+  color: #fff;
 }
 
 .bet-selected-preview {

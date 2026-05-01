@@ -563,19 +563,15 @@ app.post('/api/login', (req, res) => {
   }
 
   const needsPassword = !staff.password || staff.password === '';
-  res.json({ id: staff.id, name: staff.name, role: staff.role, permission_level: staff.permission_level || 'Benutzer', default_station_id: staff.default_station_id || null, work_days: staff.work_days || '1,2,3,4,5', needs_password: needsPassword });
+  res.json({ id: staff.id, name: staff.name, permission_level: staff.permission_level || 'Benutzer', default_station_id: staff.default_station_id || null, work_days: staff.work_days || '1,2,3,4,5', needs_password: needsPassword });
 });
 
 // ===== STAFF =====
 
 app.get('/api/staff', (req, res) => {
-  const { role, show_all } = req.query;
+  const { show_all } = req.query;
   const activeFilter = show_all === '1' ? '' : ' AND active = 1';
-  if (role) {
-    res.json(queryAll(`SELECT * FROM staff WHERE role = ?${activeFilter} ORDER BY name`, [role]));
-  } else {
-    res.json(queryAll(`SELECT * FROM staff WHERE 1=1${activeFilter} ORDER BY active DESC, role, name`));
-  }
+  res.json(queryAll(`SELECT * FROM staff WHERE 1=1${activeFilter} ORDER BY active DESC, name`));
 });
 
 app.put('/api/staff/me/password', (req, res) => {
@@ -602,21 +598,21 @@ function validatePassword(pw) {
 }
 
 app.post('/api/staff', (req, res) => {
-  const { name, role, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username } = req.body;
-  if (!name || !role) return res.status(400).json({ error: 'Name und Rolle sind Pflichtfelder' });
+  const { name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username } = req.body;
+  if (!name) return res.status(400).json({ error: 'Name ist Pflichtfeld' });
   const pwError = validatePassword(password);
   if (pwError) return res.status(400).json({ error: pwError });
   const callerPermission = req.headers['x-user-permission'];
   const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
   const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : 'Benutzer';
   if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
-  const result = execute('INSERT INTO staff (name, role, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [name, role, station || '', password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours || 40, default_station_id || null, work_days || '1,2,3,4,5', username || '']);
+  const result = execute('INSERT INTO staff (name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [name, station || '', password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours || 40, default_station_id || null, work_days || '1,2,3,4,5', username || '']);
   res.json({ id: result.lastId, message: 'Mitarbeiter hinzugefügt' });
 });
 
 app.put('/api/staff/:id', (req, res) => {
-  const { name, role, station, active, password, permission_level, has_calendar, calendar_visibility, vacation_days, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username } = req.body;
+  const { name, station, active, password, permission_level, has_calendar, calendar_visibility, vacation_days, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username } = req.body;
   const pwError = validatePassword(password);
   if (pwError) return res.status(400).json({ error: pwError });
   const callerPermission = req.headers['x-user-permission'];
@@ -624,8 +620,8 @@ app.put('/api/staff/:id', (req, res) => {
   const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
   const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : (existing ? existing.permission_level : 'Benutzer');
   if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
-  execute('UPDATE staff SET name=?, role=?, station=?, active=?, password=?, permission_level=?, has_calendar=?, calendar_visibility=?, vacation_days=?, entry_date=?, exit_date=?, email=?, street=?, zip=?, city=?, phone_private=?, phone_business=?, emergency_name=?, emergency_phone=?, weekly_hours=?, default_station_id=?, work_days=?, username=? WHERE id=?',
-    [name, role, station || '', active !== undefined ? active : 1, password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days !== undefined ? vacation_days : 30, entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours !== undefined ? weekly_hours : 40, default_station_id !== undefined ? default_station_id : null, work_days || '1,2,3,4,5', username || '', Number(req.params.id)]);
+  execute('UPDATE staff SET name=?, station=?, active=?, password=?, permission_level=?, has_calendar=?, calendar_visibility=?, vacation_days=?, entry_date=?, exit_date=?, email=?, street=?, zip=?, city=?, phone_private=?, phone_business=?, emergency_name=?, emergency_phone=?, weekly_hours=?, default_station_id=?, work_days=?, username=? WHERE id=?',
+    [name, station || '', active !== undefined ? active : 1, password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days !== undefined ? vacation_days : 30, entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours !== undefined ? weekly_hours : 40, default_station_id !== undefined ? default_station_id : null, work_days || '1,2,3,4,5', username || '', Number(req.params.id)]);
   res.json({ message: 'Mitarbeiter aktualisiert' });
 });
 
@@ -1358,14 +1354,12 @@ app.get('/api/invoices', (req, res) => {
   res.json(result);
 });
 
-app.get('/api/invoices/:id', (req, res) => {
+app.get('/api/invoices/:id', async (req, res) => {
   const id = Number(req.params.id);
   const invoice = queryOne(`SELECT i.*, c.first_name, c.last_name, c.company_name, c.customer_type, c.street, c.zip, c.city, c.email, c.phone
     FROM invoices i JOIN customers c ON i.customer_id = c.id WHERE i.id = ?`, [id]);
   if (!invoice) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
   const items = queryAll('SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY position, id', [id]);
-  // Phase 5 (PAY-API-06 / PAY-STAT-01/02): payment_saldo + payment_status auch im Detail-Endpoint,
-  // konsistent mit GET /api/invoices. Nutzt eigene aggregate Query (kein zusaetzlicher Loop).
   const saldoRow = queryOne(
     `SELECT COALESCE(SUM(CASE WHEN direction='in'  THEN amount ELSE 0 END), 0)
           - COALESCE(SUM(CASE WHEN direction='out' THEN amount ELSE 0 END), 0) AS saldo
@@ -1374,7 +1368,12 @@ app.get('/api/invoices/:id', (req, res) => {
   );
   const payment_saldo = Math.round((Number(saldoRow?.saldo) || 0) * 100) / 100;
   const payment_status = derivePaymentStatus(payment_saldo, invoice.total_gross);
-  res.json({ ...invoice, items, payment_saldo, payment_status });
+  // Vermittler-Daten (extern aus Stammdaten-API), falls verknüpft
+  let vermittler_obj = null;
+  if (invoice.vermittler_id) {
+    vermittler_obj = await fetchStammdatenById(`/api/vermittler/${invoice.vermittler_id}`);
+  }
+  res.json({ ...invoice, items, payment_saldo, payment_status, vermittler_obj });
 });
 
 app.post('/api/invoices', (req, res) => {
@@ -1383,7 +1382,7 @@ app.post('/api/invoices', (req, res) => {
   if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
-  const { customer_id, invoice_date, due_date, service_date, payment_method, notes, bank_account_id } = req.body;
+  const { customer_id, invoice_date, due_date, service_date, payment_method, notes, bank_account_id, vermittler_id } = req.body;
   if (!customer_id || !invoice_date) {
     return res.status(400).json({ error: 'Kunde und Rechnungsdatum sind Pflichtfelder' });
   }
@@ -1397,8 +1396,8 @@ app.post('/api/invoices', (req, res) => {
   try {
     const snapshot = JSON.stringify(buildSnapshot(bank_account_id));
     const result = execute(
-      'INSERT INTO invoices (invoice_number, customer_id, invoice_date, due_date, service_date, payment_method, notes, company_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [invoice_number, customer_id, invoice_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot]
+      'INSERT INTO invoices (invoice_number, customer_id, invoice_date, due_date, service_date, payment_method, notes, company_snapshot, vermittler_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [invoice_number, customer_id, invoice_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot, vermittler_id || null]
     );
     res.json({ id: result.lastId, invoice_number, message: 'Rechnung erstellt' });
   } catch(e) {
@@ -1414,10 +1413,29 @@ app.put('/api/invoices/:id', (req, res) => {
   }
   // AUTH-04: invoice_date und invoice_number sind nach Erstellung unveränderbar.
   // Sie werden hier bewusst NICHT aus req.body gelesen und NICHT im UPDATE-Statement verwendet.
-  const { due_date, status, service_date, payment_method, notes } = req.body;
+  const { due_date, status, service_date, payment_method, notes, vermittler_id } = req.body;
+  const id = Number(req.params.id);
+  // Vermittler-only Update: nur vermittler_id setzen, andere Felder unangetastet lassen
+  // (Vermittler ist kein finanzieller Teil der Rechnung, jederzeit änderbar)
+  const onlyVermittler = vermittler_id !== undefined
+    && due_date === undefined && status === undefined
+    && service_date === undefined && payment_method === undefined && notes === undefined;
+  if (onlyVermittler) {
+    execute('UPDATE invoices SET vermittler_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [vermittler_id || null, id]);
+    res.json({ message: 'Vermittler aktualisiert' });
+    return;
+  }
+  if (vermittler_id !== undefined) {
+    execute(
+      'UPDATE invoices SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, vermittler_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+      [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', vermittler_id || null, id]
+    );
+    res.json({ message: 'Rechnung aktualisiert' });
+    return;
+  }
   execute(
     'UPDATE invoices SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-    [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', Number(req.params.id)]
+    [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', id]
   );
   res.json({ message: 'Rechnung aktualisiert' });
 });
@@ -2425,11 +2443,11 @@ app.get('/api/fleet-vehicles/:id', (req, res) => {
 app.post('/api/fleet-vehicles', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
-  const { manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, rental_type, assigned_customer_id, assigned_contact_person, notes } = req.body;
+  const { manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, rental_type, assigned_customer_id, assigned_contact_person, notes, vehicle_group, transmission, fuel_type } = req.body;
   if (!manufacturer || !model) return res.status(400).json({ error: 'Hersteller und Modell sind Pflichtfelder' });
   const result = execute(
-    'INSERT INTO fleet_vehicles (manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, rental_type, assigned_customer_id, assigned_contact_person, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [manufacturer, model, vehicle_type || '', vin || '', license_plate || '', first_registration || '', next_tuev_date || '', rental_type || 'kurz', assigned_customer_id || null, assigned_contact_person || '', notes || '']
+    'INSERT INTO fleet_vehicles (manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, rental_type, assigned_customer_id, assigned_contact_person, notes, vehicle_group, transmission, fuel_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [manufacturer, model, vehicle_type || '', vin || '', license_plate || '', first_registration || '', next_tuev_date || '', rental_type || 'kurz', assigned_customer_id || null, assigned_contact_person || '', notes || '', vehicle_group || '', transmission || '', fuel_type || '']
   );
   res.json({ id: result.lastId, message: 'Fahrzeug erstellt' });
 });
@@ -2437,11 +2455,11 @@ app.post('/api/fleet-vehicles', (req, res) => {
 app.put('/api/fleet-vehicles/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
-  const { manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, rental_type, assigned_customer_id, assigned_contact_person, notes } = req.body;
+  const { manufacturer, model, vehicle_type, vin, license_plate, first_registration, next_tuev_date, rental_type, assigned_customer_id, assigned_contact_person, notes, vehicle_group, transmission, fuel_type } = req.body;
   if (!manufacturer || !model) return res.status(400).json({ error: 'Hersteller und Modell sind Pflichtfelder' });
   execute(
-    'UPDATE fleet_vehicles SET manufacturer=?, model=?, vehicle_type=?, vin=?, license_plate=?, first_registration=?, next_tuev_date=?, rental_type=?, assigned_customer_id=?, assigned_contact_person=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-    [manufacturer, model, vehicle_type || '', vin || '', license_plate || '', first_registration || '', next_tuev_date || '', rental_type || 'kurz', assigned_customer_id || null, assigned_contact_person || '', notes || '', Number(req.params.id)]
+    'UPDATE fleet_vehicles SET manufacturer=?, model=?, vehicle_type=?, vin=?, license_plate=?, first_registration=?, next_tuev_date=?, rental_type=?, assigned_customer_id=?, assigned_contact_person=?, notes=?, vehicle_group=?, transmission=?, fuel_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    [manufacturer, model, vehicle_type || '', vin || '', license_plate || '', first_registration || '', next_tuev_date || '', rental_type || 'kurz', assigned_customer_id || null, assigned_contact_person || '', notes || '', vehicle_group || '', transmission || '', fuel_type || '', Number(req.params.id)]
   );
   res.json({ message: 'Fahrzeug aktualisiert' });
 });
@@ -2535,11 +2553,11 @@ app.get('/api/fleet-vehicles/:id/insurance', (req, res) => {
 app.post('/api/fleet-vehicles/:id/insurance', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
-  const { contract_date, insurance_name, insurance_type, annual_premium, payment_interval, payment_method } = req.body;
+  const { contract_date, insurance_name, insurance_type, annual_premium, payment_interval, payment_method, deductible, sf_class } = req.body;
   if (!contract_date) return res.status(400).json({ error: 'Datum ist Pflichtfeld' });
   const result = execute(
-    'INSERT INTO fleet_insurance (fleet_vehicle_id, contract_date, insurance_name, insurance_type, annual_premium, payment_interval, payment_method) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [Number(req.params.id), contract_date, insurance_name || '', insurance_type || '', Number(annual_premium) || 0, payment_interval || '', payment_method || '']
+    'INSERT INTO fleet_insurance (fleet_vehicle_id, contract_date, insurance_name, insurance_type, annual_premium, payment_interval, payment_method, deductible, sf_class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [Number(req.params.id), contract_date, insurance_name || '', insurance_type || '', Number(annual_premium) || 0, payment_interval || '', payment_method || '', Number(deductible) || 0, sf_class || '']
   );
   res.json({ id: result.lastId });
 });
@@ -2547,10 +2565,10 @@ app.post('/api/fleet-vehicles/:id/insurance', (req, res) => {
 app.put('/api/fleet-insurance/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (permission !== 'Admin' && permission !== 'Verwaltung') return res.status(403).json({ error: 'Keine Berechtigung' });
-  const { contract_date, insurance_name, insurance_type, annual_premium, payment_interval, payment_method } = req.body;
+  const { contract_date, insurance_name, insurance_type, annual_premium, payment_interval, payment_method, deductible, sf_class } = req.body;
   execute(
-    'UPDATE fleet_insurance SET contract_date=?, insurance_name=?, insurance_type=?, annual_premium=?, payment_interval=?, payment_method=? WHERE id=?',
-    [contract_date || '', insurance_name || '', insurance_type || '', Number(annual_premium) || 0, payment_interval || '', payment_method || '', Number(req.params.id)]
+    'UPDATE fleet_insurance SET contract_date=?, insurance_name=?, insurance_type=?, annual_premium=?, payment_interval=?, payment_method=?, deductible=?, sf_class=? WHERE id=?',
+    [contract_date || '', insurance_name || '', insurance_type || '', Number(annual_premium) || 0, payment_interval || '', payment_method || '', Number(deductible) || 0, sf_class || '', Number(req.params.id)]
   );
   res.json({ success: true });
 });
@@ -3540,7 +3558,7 @@ app.get('/api/akten/:id', async (req, res) => {
   }
   if (row.rental_id) {
     row.rental = queryOne(
-      `SELECT r.id, r.start_date, r.end_date, r.mietart, fv.license_plate, fv.manufacturer, fv.model
+      `SELECT r.id, r.start_date, r.end_date, r.mietart, r.status, fv.license_plate, fv.manufacturer, fv.model
        FROM rentals r
        JOIN fleet_vehicles fv ON r.vehicle_id = fv.id
        WHERE r.id = ?`,
@@ -3760,22 +3778,26 @@ app.get('/api/akten/:id/post', (req, res) => {
 
 app.post('/api/akten/:id/post', (req, res) => {
   const userId = Number(req.headers['x-user-id']);
-  const { post_date, sender, recipient, subject, s3_key, filename, attachment_count } = req.body;
+  const { post_date, participant, subject, s3_key, filename, attachment_count, direction } = req.body;
   if (!filename) return res.status(400).json({ error: 'Dateiname ist Pflichtfeld' });
+  const dir = (direction === 'ausgehend') ? 'ausgehend' : 'eingehend';
+  const part = participant || '';
   const result = execute(
-    'INSERT INTO akten_post (akte_id, post_date, sender, recipient, subject, s3_key, filename, uploaded_by, attachment_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [Number(req.params.id), post_date || new Date().toISOString().split('T')[0], sender || '', recipient || '', subject || '', s3_key || '', filename, userId, Number(attachment_count) || 0]
+    'INSERT INTO akten_post (akte_id, post_date, sender, recipient, subject, s3_key, filename, uploaded_by, attachment_count, direction, participant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [Number(req.params.id), post_date || new Date().toISOString().split('T')[0], '', '', subject || '', s3_key || '', filename, userId, Number(attachment_count) || 0, dir, part]
   );
   res.json({ id: result.lastId, message: 'Post eingetragen' });
 });
 
 app.put('/api/akten-post/:id', (req, res) => {
-  const { post_date, sender, recipient, subject, s3_key, filename, attachment_count } = req.body;
-  let sql = 'UPDATE akten_post SET post_date=?, sender=?, recipient=?, subject=?';
-  const params = [post_date || '', sender || '', recipient || '', subject || ''];
+  const { post_date, participant, subject, s3_key, filename, attachment_count, direction } = req.body;
+  let sql = 'UPDATE akten_post SET post_date=?, subject=?';
+  const params = [post_date || '', subject || ''];
+  if (participant !== undefined) { sql += ', participant=?'; params.push(participant || ''); }
   if (s3_key !== undefined) { sql += ', s3_key=?'; params.push(s3_key); }
   if (filename !== undefined) { sql += ', filename=?'; params.push(filename); }
   if (attachment_count !== undefined) { sql += ', attachment_count=?'; params.push(Number(attachment_count) || 0); }
+  if (direction !== undefined) { sql += ', direction=?'; params.push(direction === 'ausgehend' ? 'ausgehend' : 'eingehend'); }
   sql += ' WHERE id=?';
   params.push(Number(req.params.id));
   execute(sql, params);
@@ -3787,6 +3809,48 @@ app.delete('/api/akten-post/:id', (req, res) => {
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   execute('DELETE FROM akten_post WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'Post gelöscht' });
+});
+
+// ===== Akten-Kommunikation (Telefonate & Notizen) =====
+app.get('/api/akten/:id/kommunikation', (req, res) => {
+  res.json(queryAll(
+    `SELECT k.*, s.name AS author_name
+     FROM akten_kommunikation k
+     LEFT JOIN staff s ON k.created_by = s.id
+     WHERE k.akte_id = ?
+     ORDER BY k.entry_date DESC, k.entry_time DESC, k.id DESC`,
+    [Number(req.params.id)]
+  ));
+});
+
+app.post('/api/akten/:id/kommunikation', (req, res) => {
+  const userId = Number(req.headers['x-user-id']);
+  const { entry_type, direction, entry_date, entry_time, participant, subject, content } = req.body;
+  const type = (entry_type === 'Notiz') ? 'Notiz' : 'Telefon';
+  const dir = (type === 'Notiz') ? null : ((direction === 'ausgehend') ? 'ausgehend' : 'eingehend');
+  const result = execute(
+    'INSERT INTO akten_kommunikation (akte_id, entry_type, direction, entry_date, entry_time, participant, subject, content, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [Number(req.params.id), type, dir, entry_date || new Date().toISOString().split('T')[0], entry_time || '', participant || '', subject || '', content || '', userId]
+  );
+  res.json({ id: result.lastId, message: 'Eintrag gespeichert' });
+});
+
+app.put('/api/akten-kommunikation/:id', (req, res) => {
+  const { entry_type, direction, entry_date, entry_time, participant, subject, content } = req.body;
+  const type = (entry_type === 'Notiz') ? 'Notiz' : 'Telefon';
+  const dir = (type === 'Notiz') ? null : ((direction === 'ausgehend') ? 'ausgehend' : 'eingehend');
+  execute(
+    'UPDATE akten_kommunikation SET entry_type=?, direction=?, entry_date=?, entry_time=?, participant=?, subject=?, content=? WHERE id=?',
+    [type, dir, entry_date || '', entry_time || '', participant || '', subject || '', content || '', Number(req.params.id)]
+  );
+  res.json({ message: 'Eintrag aktualisiert' });
+});
+
+app.delete('/api/akten-kommunikation/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  execute('DELETE FROM akten_kommunikation WHERE id = ?', [Number(req.params.id)]);
+  res.json({ message: 'Eintrag gelöscht' });
 });
 
 app.get('/api/akten/:id/eintraege', (req, res) => {
@@ -3884,6 +3948,26 @@ app.get('/api/akten/:id/billing', (req, res) => {
   `, [akteId]).map(r => ({ ...r, payment_saldo: null, payment_status: null }));
   const combined = [...invoices, ...creditNotes].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   res.json(combined);
+});
+
+// Zahlungsströme zu allen Rechnungen einer Akte (Gutschriften haben keine Zahlungen)
+app.get('/api/akten/:id/payments', (req, res) => {
+  const akteId = Number(req.params.id);
+  if (!queryOne('SELECT id FROM akten WHERE id = ?', [akteId])) {
+    return res.status(404).json({ error: 'Akte nicht gefunden' });
+  }
+  const payments = queryAll(`
+    SELECT p.id, p.invoice_id, i.invoice_number, p.direction, p.amount,
+           p.payment_date, p.payment_method, p.reference, p.notes, p.booked_by,
+           b.label AS bank_account_label, b.iban AS bank_account_iban
+    FROM akten_invoices ai
+    JOIN invoices i ON ai.invoice_id = i.id
+    JOIN invoice_payments p ON p.invoice_id = i.id
+    LEFT JOIN bank_accounts b ON p.bank_account_id = b.id
+    WHERE ai.akte_id = ?
+    ORDER BY p.payment_date ASC, p.id ASC
+  `, [akteId]);
+  res.json(payments);
 });
 
 app.post('/api/akten/:id/billing', (req, res) => {

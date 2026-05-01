@@ -233,6 +233,9 @@ async function getDb() {
   try { db.run("ALTER TABLE fleet_vehicles ADD COLUMN assigned_to TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE fleet_vehicles ADD COLUMN assigned_customer_id INTEGER DEFAULT NULL"); } catch(e) {}
   try { db.run("ALTER TABLE fleet_vehicles ADD COLUMN assigned_contact_person TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE fleet_vehicles ADD COLUMN vehicle_group TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE fleet_vehicles ADD COLUMN transmission TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE fleet_vehicles ADD COLUMN fuel_type TEXT DEFAULT ''"); } catch(e) {}
 
   db.run(`
     CREATE TABLE IF NOT EXISTS fleet_mileage (
@@ -416,6 +419,7 @@ async function getDb() {
   try { db.run("ALTER TABLE invoices ADD COLUMN payment_method TEXT DEFAULT 'Überweisung'"); } catch(e) {}
   // GoBD: Firmendaten-Snapshot bei Erstellung einfrieren
   try { db.run("ALTER TABLE invoices ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
   // Bank accounts (Bankverbindungen)
@@ -810,6 +814,8 @@ async function getDb() {
       FOREIGN KEY (fleet_vehicle_id) REFERENCES fleet_vehicles(id) ON DELETE CASCADE
     )
   `);
+  try { db.run("ALTER TABLE fleet_insurance ADD COLUMN deductible REAL DEFAULT 0"); } catch(e) {}
+  try { db.run("ALTER TABLE fleet_insurance ADD COLUMN sf_class TEXT DEFAULT ''"); } catch(e) {}
 
   // Fleet vehicle tax
   db.run(`
@@ -911,6 +917,29 @@ async function getDb() {
   `);
 
   try { db.run("ALTER TABLE akten_post ADD COLUMN attachment_count INTEGER DEFAULT 0"); } catch(e) {}
+  try { db.run("ALTER TABLE akten_post ADD COLUMN direction TEXT DEFAULT 'eingehend'"); } catch(e) {}
+  try { db.run("ALTER TABLE akten_post ADD COLUMN participant TEXT DEFAULT ''"); } catch(e) {}
+  // Bestandsdaten: participant aus sender (eingehend) bzw. recipient (ausgehend) befüllen, falls leer
+  try { db.run("UPDATE akten_post SET participant = COALESCE(NULLIF(sender,''), NULLIF(recipient,''), '') WHERE participant IS NULL OR participant = ''"); } catch(e) {}
+
+  // Akten-Kommunikation (Telefonate & Notizen)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS akten_kommunikation (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      akte_id INTEGER NOT NULL,
+      entry_type TEXT NOT NULL DEFAULT 'Telefon',
+      direction TEXT DEFAULT 'eingehend',
+      entry_date TEXT NOT NULL,
+      entry_time TEXT DEFAULT '',
+      participant TEXT DEFAULT '',
+      subject TEXT DEFAULT '',
+      content TEXT DEFAULT '',
+      created_by INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (akte_id) REFERENCES akten(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES staff(id)
+    )
+  `);
 
   // Phase 1: Audit trail table (DB-05 — GoBD compliance)
   db.run(`
