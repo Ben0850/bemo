@@ -1051,8 +1051,7 @@ Antworte NUR mit dem JSON-Objekt, kein anderer Text.
             ]
           }
         ],
-        max_tokens: 2000,
-        temperature: 0,
+        max_completion_tokens: 2000,
       })
     });
 
