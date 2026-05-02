@@ -6,7 +6,7 @@ const fs = require('fs');
 const { execFile } = require('child_process');
 const os = require('os');
 const msal = require('@azure/msal-node');
-const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { getDb, queryAll, queryOne, execute } = require('./db');
 
@@ -598,7 +598,7 @@ function validatePassword(pw) {
 }
 
 app.post('/api/staff', (req, res) => {
-  const { name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username } = req.body;
+  const { name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning } = req.body;
   if (!name) return res.status(400).json({ error: 'Name ist Pflichtfeld' });
   const pwError = validatePassword(password);
   if (pwError) return res.status(400).json({ error: pwError });
@@ -606,22 +606,23 @@ app.post('/api/staff', (req, res) => {
   const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
   const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : 'Benutzer';
   if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
-  const result = execute('INSERT INTO staff (name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [name, station || '', password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours || 40, default_station_id || null, work_days || '1,2,3,4,5', username || '']);
+  const result = execute('INSERT INTO staff (name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [name, station || '', password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours || 40, default_station_id || null, work_days || '1,2,3,4,5', username || '', hidden_in_planning ? 1 : 0]);
   res.json({ id: result.lastId, message: 'Mitarbeiter hinzugefügt' });
 });
 
 app.put('/api/staff/:id', (req, res) => {
-  const { name, station, active, password, permission_level, has_calendar, calendar_visibility, vacation_days, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username } = req.body;
+  const { name, station, active, password, permission_level, has_calendar, calendar_visibility, vacation_days, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning } = req.body;
   const pwError = validatePassword(password);
   if (pwError) return res.status(400).json({ error: pwError });
   const callerPermission = req.headers['x-user-permission'];
-  const existing = queryOne('SELECT permission_level FROM staff WHERE id = ?', [Number(req.params.id)]);
+  const existing = queryOne('SELECT permission_level, hidden_in_planning FROM staff WHERE id = ?', [Number(req.params.id)]);
   const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
   const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : (existing ? existing.permission_level : 'Benutzer');
   if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
-  execute('UPDATE staff SET name=?, station=?, active=?, password=?, permission_level=?, has_calendar=?, calendar_visibility=?, vacation_days=?, entry_date=?, exit_date=?, email=?, street=?, zip=?, city=?, phone_private=?, phone_business=?, emergency_name=?, emergency_phone=?, weekly_hours=?, default_station_id=?, work_days=?, username=? WHERE id=?',
-    [name, station || '', active !== undefined ? active : 1, password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days !== undefined ? vacation_days : 30, entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours !== undefined ? weekly_hours : 40, default_station_id !== undefined ? default_station_id : null, work_days || '1,2,3,4,5', username || '', Number(req.params.id)]);
+  const finalHidden = (hidden_in_planning !== undefined) ? (hidden_in_planning ? 1 : 0) : (existing ? (existing.hidden_in_planning || 0) : 0);
+  execute('UPDATE staff SET name=?, station=?, active=?, password=?, permission_level=?, has_calendar=?, calendar_visibility=?, vacation_days=?, entry_date=?, exit_date=?, email=?, street=?, zip=?, city=?, phone_private=?, phone_business=?, emergency_name=?, emergency_phone=?, weekly_hours=?, default_station_id=?, work_days=?, username=?, hidden_in_planning=? WHERE id=?',
+    [name, station || '', active !== undefined ? active : 1, password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days !== undefined ? vacation_days : 30, entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours !== undefined ? weekly_hours : 40, default_station_id !== undefined ? default_station_id : null, work_days || '1,2,3,4,5', username || '', finalHidden, Number(req.params.id)]);
   res.json({ message: 'Mitarbeiter aktualisiert' });
 });
 
@@ -3460,6 +3461,55 @@ app.delete('/api/files/:key(*)', async (req, res) => {
   }
 });
 
+// Bulk-Delete: kompletter Ordner inkl. aller verschachtelten Unterordner.
+// 1× server-seitige Rekursion + S3 Batch-Delete (bis zu 1000 Objekte pro Call).
+// Drastisch schneller als viele einzelne DELETEs vom Browser aus.
+app.post('/api/files/delete-folder', async (req, res) => {
+  try {
+    const { folder } = req.body;
+    if (!folder || typeof folder !== 'string') {
+      return res.status(400).json({ error: 'folder (string) ist Pflichtfeld' });
+    }
+    const bucket = getS3Bucket();
+    const client = getS3Client();
+    const prefix = folder.endsWith('/') ? folder : folder + '/';
+
+    // 1) Alle Keys unter diesem Prefix sammeln (paged)
+    const allKeys = [];
+    let continuationToken = undefined;
+    do {
+      const listResp = await client.send(new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        ContinuationToken: continuationToken
+      }));
+      (listResp.Contents || []).forEach(obj => { if (obj.Key) allKeys.push(obj.Key); });
+      continuationToken = listResp.IsTruncated ? listResp.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    if (allKeys.length === 0) {
+      return res.json({ deleted: 0, message: 'Ordner war bereits leer' });
+    }
+
+    // 2) Batch-Delete in Chunks von 1000 (S3 API Limit)
+    let deleted = 0;
+    for (let i = 0; i < allKeys.length; i += 1000) {
+      const chunk = allKeys.slice(i, i + 1000);
+      const delResp = await client.send(new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: { Objects: chunk.map(Key => ({ Key })), Quiet: true }
+      }));
+      deleted += chunk.length - ((delResp.Errors && delResp.Errors.length) || 0);
+    }
+
+    logFileAction('Ordner gelöscht', prefix, folder.split('/').pop(), prefix, req, 0, deleted + ' Objekte');
+    res.json({ deleted, total: allKeys.length, message: 'Ordner gelöscht' });
+  } catch (err) {
+    console.error('S3 Bulk Delete Error:', err.message);
+    res.status(500).json({ error: 'Bulk-Löschen fehlgeschlagen: ' + err.message });
+  }
+});
+
 // Test S3 connection
 app.get('/api/files/test', async (req, res) => {
   try {
@@ -3609,9 +3659,25 @@ app.post('/api/akten', (req, res) => {
           unfalldatum, unfallort, polizei_vor_ort, mietart, wiedervorlage_datum } = req.body;
   const userId = Number(req.headers['x-user-id']) || null;
 
-  // Auto-generate Aktennummer: next number starting from 1000
-  const row = queryOne('SELECT MAX(CAST(aktennummer AS INTEGER)) as max_nr FROM akten');
-  const nextNr = Math.max((row && row.max_nr) || 0, 999) + 1;
+  // Auto-generate Aktennummer: nächste Nummer aus Sequenz-Tabelle.
+  // Wichtig: Gelöschte Aktennummern werden NIE wiedervergeben — die Sequenz
+  // basiert auf einem persistenten Zähler, nicht auf MAX(akten).
+  let nextNr;
+  try {
+    const seq = queryOne('SELECT last_used_nummer FROM akten_sequence WHERE id = 1');
+    if (!seq) {
+      // Defensive Fallback: Sequenz-Tabelle leer — initialisieren auf max(MAX(akten), 999)
+      const maxRow = queryOne('SELECT MAX(CAST(aktennummer AS INTEGER)) AS m FROM akten');
+      const startVal = Math.max((maxRow && maxRow.m) || 0, 999);
+      execute('INSERT INTO akten_sequence (id, last_used_nummer) VALUES (1, ?)', [startVal]);
+      nextNr = startVal + 1;
+    } else {
+      nextNr = seq.last_used_nummer + 1;
+    }
+    execute('UPDATE akten_sequence SET last_used_nummer = ? WHERE id = 1', [nextNr]);
+  } catch (e) {
+    return res.status(500).json({ error: 'Aktennummer konnte nicht vergeben werden: ' + e.message });
+  }
   const aktennummer = String(nextNr);
 
   const result = execute(

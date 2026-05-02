@@ -304,6 +304,7 @@ async function getDb() {
   try { db.run("ALTER TABLE staff ADD COLUMN email TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE staff ADD COLUMN street TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE staff ADD COLUMN zip TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE staff ADD COLUMN hidden_in_planning INTEGER DEFAULT 0"); } catch(e) {}
   try { db.run("ALTER TABLE staff ADD COLUMN city TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE staff ADD COLUMN phone_private TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE staff ADD COLUMN phone_business TEXT DEFAULT ''"); } catch(e) {}
@@ -703,6 +704,29 @@ async function getDb() {
 
   // Migration: add created_by to akten
   try { db.run("ALTER TABLE akten ADD COLUMN created_by INTEGER DEFAULT NULL"); } catch(e) {}
+
+  // Akten-Nummerierung: separate Sequenz-Tabelle, damit gelöschte Aktennummern NIEMALS wiedervergeben werden.
+  // Eine Zeile mit dem zuletzt vergebenen Wert. Beim INSERT wird der Wert atomic erhöht.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS akten_sequence (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      last_used_nummer INTEGER NOT NULL DEFAULT 999
+    )
+  `);
+  // Initialisierung: existierende Zeile sicherstellen, Wert = max(aktuelles MAX in akten, gespeicherter Wert, 999)
+  // So bleibt eine bestehende Sequenz erhalten, wird aber nie hinter den höchsten Bestandswert zurückgesetzt.
+  try {
+    const seqRow = queryOne('SELECT last_used_nummer FROM akten_sequence WHERE id = 1');
+    const maxRow = queryOne('SELECT MAX(CAST(aktennummer AS INTEGER)) AS m FROM akten');
+    const existingMax = (maxRow && maxRow.m) || 0;
+    if (!seqRow) {
+      const startVal = Math.max(existingMax, 999);
+      execute('INSERT INTO akten_sequence (id, last_used_nummer) VALUES (1, ?)', [startVal]);
+    } else if (existingMax > seqRow.last_used_nummer) {
+      // Sicherheitsnetz: falls jemand manuell eine höhere Nummer eingetragen hat, Sequenz nachziehen
+      execute('UPDATE akten_sequence SET last_used_nummer = ? WHERE id = 1', [existingMax]);
+    }
+  } catch (e) { /* erste Initialisierung läuft beim ersten Akten-Anlegen */ }
 
   // Migration: remove vorlage and notizen columns from akten
   try {

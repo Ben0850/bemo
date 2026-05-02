@@ -883,6 +883,10 @@ tr.clickable:hover {
   max-width: 950px;
 }
 
+.modal.modal-form-wide {
+  max-width: 900px;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;

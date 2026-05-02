@@ -123,6 +123,79 @@ function closeModal() {
   if (currentPage === 'time-tracking') renderTimeTracking();
 }
 
+// Hübsches modales Bestätigungsfenster in der Bildschirmmitte (zentral, blocking).
+// Verwendet einen separaten Overlay-Container, damit es auch über offenen Modals erscheint.
+// Liefert Promise<boolean>.
+function showConfirm(title, message, opts) {
+  const yesLabel = (opts && opts.yesLabel) || 'Ja';
+  const noLabel = (opts && opts.noLabel) || 'Abbrechen';
+  const danger = !!(opts && opts.danger);
+  // Erst nach kurzem Tick öffnen, damit ein vorhandener document.click-Listener
+  // (z.B. vom Context-Menü s3CloseCtx) den Modal-Klick nicht sofort wieder schließt.
+  return new Promise(resolve => {
+    setTimeout(() => {
+      try {
+        const existing = document.getElementById('app-confirm-overlay');
+        if (existing) existing.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'app-confirm-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:20000;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px 28px;max-width:440px;width:90%;box-shadow:0 16px 48px rgba(0,0,0,0.3);">'
+          + '<h3 style="margin:0 0 12px;font-size:17px;">' + escapeHtml(title) + '</h3>'
+          + '<div style="font-size:14px;color:var(--text);margin-bottom:20px;line-height:1.4;">' + escapeHtml(message) + '</div>'
+          + '<div style="display:flex;gap:10px;justify-content:flex-end;">'
+          +   '<button type="button" id="app-confirm-no" class="btn btn-secondary">' + escapeHtml(noLabel) + '</button>'
+          +   '<button type="button" id="app-confirm-yes" class="btn ' + (danger ? 'btn-danger' : 'btn-primary') + '">' + escapeHtml(yesLabel) + '</button>'
+          + '</div></div>';
+        document.body.appendChild(overlay);
+        const cleanup = (val) => { try { overlay.remove(); } catch(_){} resolve(val); };
+        const btnYes = overlay.querySelector('#app-confirm-yes');
+        const btnNo = overlay.querySelector('#app-confirm-no');
+        // stopPropagation: Klicks bubbeln nicht zu document — schützt vor "once"-Listener von Context-Menü
+        btnYes.addEventListener('click', (e) => { e.stopPropagation(); cleanup(true); });
+        btnNo.addEventListener('click', (e) => { e.stopPropagation(); cleanup(false); });
+        overlay.addEventListener('click', (e) => { e.stopPropagation(); if (e.target === overlay) cleanup(false); });
+        btnYes.focus();
+      } catch (err) {
+        // Fallback: nativer confirm wenn modaler Build fehlschlägt
+        console.error('showConfirm error:', err);
+        resolve(window.confirm(message));
+      }
+    }, 50);
+  });
+}
+
+// Nicht-schliessbares Loading-Overlay fuer langlaufende Operationen (z.B. rekursives Loeschen).
+// hideBusy() entfernt es. Mehrfaches showBusy() ersetzt die Nachricht.
+function showBusy(message) {
+  let overlay = document.getElementById('app-busy-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'app-busy-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:25000;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px 32px;min-width:240px;max-width:400px;box-shadow:0 16px 48px rgba(0,0,0,0.3);display:flex;align-items:center;gap:14px;">'
+      + '<div style="width:24px;height:24px;border:3px solid var(--border, #ddd);border-top-color:var(--primary, #2563eb);border-radius:50%;animation:appSpin 0.8s linear infinite;flex-shrink:0;"></div>'
+      + '<div id="app-busy-text" style="font-size:14px;color:var(--text);">' + escapeHtml(message || 'Bitte warten...') + '</div>'
+      + '</div>'
+      + '<style>@keyframes appSpin{to{transform:rotate(360deg)}}</style>';
+    document.body.appendChild(overlay);
+  } else {
+    const txt = document.getElementById('app-busy-text');
+    if (txt) txt.textContent = message || 'Bitte warten...';
+  }
+}
+
+function hideBusy() {
+  const overlay = document.getElementById('app-busy-overlay');
+  if (overlay) overlay.remove();
+}
+
+async function withBusy(message, fn) {
+  showBusy(message);
+  try { return await fn(); }
+  finally { hideBusy(); }
+}
+
 // ===== Navigation =====
 function startAutoRefresh() {
   stopAutoRefresh();
@@ -2135,8 +2208,8 @@ async function renderCalendar() {
       mobileCalHtml = `
         ${todayVac.length > 0 ? `<div class="cal-vacation-banner" style="margin-bottom:12px;">
           ${todayVac.map(v => {
-            const typeIcon = v.entry_type === 'Urlaub' ? '\u2708' : v.entry_type === 'Krankheit' ? '\u26A0' : '\u{1F4DA}';
-            const bgColor = v.entry_type === 'Urlaub' ? '#dc2626' : v.entry_type === 'Krankheit' ? '#b91c1c' : '#7c3aed';
+            const typeIcon = v.entry_type === 'Urlaub' ? '\u2708' : v.entry_type === 'Krankheit' ? '\u26A0' : v.entry_type === 'Sonstige Abwesenheit' ? '\u2295' : '\u{1F4DA}';
+            const bgColor = v.entry_type === 'Urlaub' ? '#dc2626' : v.entry_type === 'Krankheit' ? '#b91c1c' : v.entry_type === 'Sonstige Abwesenheit' ? '#6b7280' : '#7c3aed';
             return `<span class="cal-vac-tag" style="background:${bgColor};">${typeIcon} ${escapeHtml(v.staff_name)} – ${escapeHtml(v.entry_type)}</span>`;
           }).join('')}
         </div>` : ''}
@@ -2759,7 +2832,7 @@ function filterStaffTable() {
 }
 
 async function openStaffForm(id) {
-  let staff = { name: '', station: '', password: '', permission_level: 'Benutzer', active: 1, has_calendar: 1, calendar_visibility: 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days: 30, weekly_hours: 40, work_days: '1,2,3,4,5', entry_date: '', exit_date: '', email: '', street: '', zip: '', city: '', phone_private: '', phone_business: '', emergency_name: '', emergency_phone: '', default_station_id: null, username: '' };
+  let staff = { name: '', station: '', password: '', permission_level: 'Benutzer', active: 1, has_calendar: 1, calendar_visibility: 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days: 30, weekly_hours: 40, work_days: '1,2,3,4,5', entry_date: '', exit_date: '', email: '', street: '', zip: '', city: '', phone_private: '', phone_business: '', emergency_name: '', emergency_phone: '', default_station_id: null, username: '', hidden_in_planning: 0 };
   let perYearDays = {};
   let perYearBonus = {};
 
@@ -2913,6 +2986,10 @@ async function openStaffForm(id) {
           <input type="checkbox" name="has_calendar" id="staff-has-calendar" ${staff.has_calendar ? 'checked' : ''} onchange="document.getElementById('calendar-visibility-group').style.display = this.checked ? '' : 'none'">
           <label for="staff-has-calendar">Eigener Kalender</label>
         </div>
+        <div class="form-check" style="margin-top:8px;">
+          <input type="checkbox" name="hidden_in_planning" id="staff-hidden-in-planning" ${staff.hidden_in_planning ? 'checked' : ''}>
+          <label for="staff-hidden-in-planning">Im An-/Abwesenheitsplaner ausblenden</label>
+        </div>
         <div id="calendar-visibility-group" style="margin-top:8px;margin-left:24px;${staff.has_calendar ? '' : 'display:none;'}">
           <label style="font-size:13px;font-weight:600;margin-bottom:4px;display:block;">Sichtbar für:</label>
           ${['Admin','Verwaltung','Buchhaltung','Benutzer'].map(g => {
@@ -2970,6 +3047,7 @@ async function saveStaff(e, id) {
     permission_level: form.permission_level.value,
     active: form.active.checked ? 1 : 0,
     has_calendar: document.getElementById('staff-has-calendar').checked ? 1 : 0,
+    hidden_in_planning: document.getElementById('staff-hidden-in-planning')?.checked ? 1 : 0,
     calendar_visibility: ['Admin','Verwaltung','Buchhaltung','Benutzer'].filter(g => document.getElementById('cal-vis-' + g)?.checked).join(','),
     vacation_days: yearDays.length > 0 ? yearDays.find(yd => yd.year === currentYear)?.days || 30 : 30,
     entry_date: form.entry_date.value,
@@ -3034,7 +3112,7 @@ async function deleteStaff(id, name) {
 
 
 // ===== PAGE: An-/Abwesenheitsplaner =====
-const VACATION_ENTRY_TYPES = ['Urlaub', 'Halber Urlaubstag', 'Krankheit', 'Weiterbildung'];
+const VACATION_ENTRY_TYPES = ['Urlaub', 'Halber Urlaubstag', 'Krankheit', 'Weiterbildung', 'Sonstige Abwesenheit'];
 const VACATION_STAFF_COLORS = ['#2563eb','#dc2626','#059669','#d97706','#7c3aed','#db2777','#0891b2','#65a30d','#c026d3','#ea580c'];
 let vacCurrentYear = new Date().getFullYear();
 let vacSelectedStaff = 'alle';
@@ -3104,10 +3182,14 @@ function getVacSubNav(active) {
 async function renderVacation() {
   const main = document.getElementById('main-content');
   try {
-    const [entries, staffList] = await Promise.all([
+    const [entries, staffListAll] = await Promise.all([
       api(`/api/vacation?year=${vacCurrentYear}&status=Genehmigt`),
       api('/api/staff')
     ]);
+    // Im Planer ausgeblendete Mitarbeiter komplett rausfiltern (auch ihre Einträge)
+    const staffList = staffListAll.filter(s => !s.hidden_in_planning);
+    const visibleStaffIds = new Set(staffList.map(s => s.id));
+    const filteredEntries = entries.filter(e => visibleStaffIds.has(e.staff_id));
     const holidays = getNRWHolidays(vacCurrentYear);
     const months = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
 
@@ -3115,12 +3197,12 @@ async function renderVacation() {
     const staffColorMap = {};
     staffList.forEach((s, i) => { staffColorMap[s.id] = VACATION_STAFF_COLORS[i % VACATION_STAFF_COLORS.length]; });
 
-    // Filter entries based on selected staff
-    let visibleEntries = entries;
+    // Filter entries based on selected staff (basis: bereits gefilterte Einträge ohne hidden Mitarbeiter)
+    let visibleEntries = filteredEntries;
     if (vacSelectedStaff === 'alle') {
-      visibleEntries = entries.filter(e => e.entry_type === 'Urlaub');
+      visibleEntries = filteredEntries.filter(e => e.entry_type === 'Urlaub' || e.entry_type === 'Sonstige Abwesenheit');
     } else {
-      visibleEntries = entries.filter(e => e.staff_id === Number(vacSelectedStaff));
+      visibleEntries = filteredEntries.filter(e => e.staff_id === Number(vacSelectedStaff));
     }
 
     // Build day map: dateStr -> [{staff_id, entry_type, entry_id}]
@@ -3201,6 +3283,7 @@ async function renderVacation() {
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#2563eb;display:inline-block;"></span> Urlaub</span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#dc2626;display:inline-block;"></span> Krankheit</span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#7c3aed;display:inline-block;"></span> Weiterbildung</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#6b7280;display:inline-block;"></span> Sonstige Abwesenheit</span>
       </div>`;
     }
 
@@ -3252,6 +3335,7 @@ async function renderVacation() {
             if (entry.entry_type === 'Urlaub') bgColor = '#2563eb';
             else if (entry.entry_type === 'Krankheit') bgColor = '#dc2626';
             else if (entry.entry_type === 'Weiterbildung') bgColor = '#7c3aed';
+            else if (entry.entry_type === 'Sonstige Abwesenheit') bgColor = '#6b7280';
             if (entry.entry_type === 'Krankheit') {
               const ps = entry.payment_status || 0;
               if (ps === 1) cellStyle = 'background:linear-gradient(135deg, #facc15 33%, #dc2626 33%);color:#fff;';
@@ -3293,7 +3377,7 @@ async function renderVacation() {
     main.innerHTML = `
       <div class="page-header">
         <h2>An-/Abwesenheitsplaner</h2>
-        ${vacSelectedStaff !== 'alle' && isAdmin() ? '<button class="btn btn-primary" onclick="openVacationForm()">Abwesenheit eintragen</button>' : ''}
+        ${vacSelectedStaff !== 'alle' && (isAdmin() || isVerwaltung()) ? '<button class="btn btn-primary" onclick="openVacationForm()">Abwesenheit eintragen</button>' : ''}
       </div>
       ${getVacSubNav('calendar')}
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
@@ -3328,7 +3412,7 @@ async function renderVacation() {
       <div style="overflow-x:auto;">
         ${tableHtml}
       </div>
-      ${vacSelectedStaff !== 'alle' && isAdmin() ? renderVacationList(visibleEntries) : ''}
+      ${vacSelectedStaff !== 'alle' && (isAdmin() || isVerwaltung()) ? renderVacationList(visibleEntries) : ''}
     `;
   } catch (err) {
     main.innerHTML = `<p class="error">Fehler: ${escapeHtml(err.message)}</p>`;
@@ -3917,6 +4001,8 @@ async function deleteVacRequest(id) {
 
 let _s3CurrentPath = '';
 let _s3SelectedFiles = new Set();
+let _s3SelectedFolders = new Set();
+let _s3LastClickedFolder = null;
 
 function s3FileIcon(ext) {
   const i = {
@@ -4079,6 +4165,8 @@ function s3SortIcon(field) {
 async function s3LoadFolder(folder) {
   _s3CurrentPath = folder;
   _s3SelectedFiles.clear();
+  _s3SelectedFolders.clear();
+  _s3LastClickedFolder = null;
   const listEl = document.getElementById('s3-file-list');
   const breadcrumbEl = document.getElementById('s3-breadcrumb');
   if (!listEl) return;
@@ -4163,7 +4251,8 @@ async function s3LoadFolder(folder) {
     // Folders
     sortedFolders.forEach(f => {
       const fullPath = folder ? folder + '/' + f : f;
-      html += '<div class="s3-row s3-folder-row" onclick="s3LoadFolder(\'' + escapeHtml(fullPath) + '\')" oncontextmenu="event.preventDefault();s3FolderContextMenu(event,\'' + escapeHtml(fullPath) + '\')">';
+      const fp = escapeHtml(fullPath);
+      html += '<div class="s3-row s3-folder-row" data-path="' + fp + '" onclick="s3FolderClick(event,\'' + fp + '\')" oncontextmenu="event.preventDefault();s3FolderContextMenu(event,\'' + fp + '\')">';
       html += '<span class="s3-icon"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M2 6V4a2 2 0 012-2h4l2 2h6a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" fill="#f39c12" opacity="0.3" stroke="#f39c12" stroke-width="1.5"/></svg></span>';
       html += '<span class="s3-name" style="font-weight:600;">' + escapeHtml(f) + '</span>';
       html += '<span class="s3-size">\u2014</span>';
@@ -4303,14 +4392,47 @@ function s3FileClick(e, key, filename) {
   s3UpdateSelection();
 }
 
+function s3FolderClick(e, folderPath) {
+  // Ctrl/Cmd-Klick: Ordner zur Auswahl togglen (statt zu öffnen)
+  if (e.ctrlKey || e.metaKey) {
+    if (_s3SelectedFolders.has(folderPath)) _s3SelectedFolders.delete(folderPath);
+    else _s3SelectedFolders.add(folderPath);
+    _s3LastClickedFolder = folderPath;
+    s3UpdateSelection();
+    return;
+  }
+  // Shift-Klick: Bereich von Ordnern auswählen
+  if (e.shiftKey && _s3LastClickedFolder) {
+    const rows = Array.from(document.querySelectorAll('.s3-folder-row[data-path]'));
+    const paths = rows.map(r => r.dataset.path);
+    const startIdx = paths.indexOf(_s3LastClickedFolder);
+    const endIdx = paths.indexOf(folderPath);
+    if (startIdx !== -1 && endIdx !== -1) {
+      const from = Math.min(startIdx, endIdx);
+      const to = Math.max(startIdx, endIdx);
+      for (let i = from; i <= to; i++) _s3SelectedFolders.add(paths[i]);
+    }
+    _s3LastClickedFolder = folderPath;
+    s3UpdateSelection();
+    return;
+  }
+  // Normaler Klick: Ordner öffnen (und Auswahl aufheben)
+  _s3SelectedFiles.clear();
+  _s3SelectedFolders.clear();
+  s3LoadFolder(folderPath);
+}
+
 function s3SelectAll() {
-  const rows = document.querySelectorAll('.s3-file-row[data-key]');
-  rows.forEach(r => _s3SelectedFiles.add(r.dataset.key));
+  const fileRows = document.querySelectorAll('.s3-file-row[data-key]');
+  fileRows.forEach(r => _s3SelectedFiles.add(r.dataset.key));
+  const folderRows = document.querySelectorAll('.s3-folder-row[data-path]');
+  folderRows.forEach(r => _s3SelectedFolders.add(r.dataset.path));
   s3UpdateSelection();
 }
 
 function s3DeselectAll() {
   _s3SelectedFiles.clear();
+  _s3SelectedFolders.clear();
   s3UpdateSelection();
 }
 
@@ -4318,12 +4440,19 @@ function s3UpdateSelection() {
   document.querySelectorAll('.s3-file-row[data-key]').forEach(row => {
     row.classList.toggle('s3-selected', _s3SelectedFiles.has(row.dataset.key));
   });
+  document.querySelectorAll('.s3-folder-row[data-path]').forEach(row => {
+    row.classList.toggle('s3-selected', _s3SelectedFolders.has(row.dataset.path));
+  });
   // Update action bar
   const bar = document.getElementById('s3-selection-bar');
   if (!bar) return;
-  if (_s3SelectedFiles.size > 0) {
-    bar.innerHTML = '<span style="font-weight:600;">' + _s3SelectedFiles.size + ' ausgewählt</span>'
-      + ' <button class="btn btn-sm btn-secondary" onclick="s3DownloadSelected()">Download</button>'
+  const totalCount = _s3SelectedFiles.size + _s3SelectedFolders.size;
+  if (totalCount > 0) {
+    const parts = [];
+    if (_s3SelectedFiles.size > 0) parts.push(_s3SelectedFiles.size + ' Datei' + (_s3SelectedFiles.size === 1 ? '' : 'en'));
+    if (_s3SelectedFolders.size > 0) parts.push(_s3SelectedFolders.size + ' Ordner');
+    bar.innerHTML = '<span style="font-weight:600;">' + parts.join(' + ') + ' ausgewählt</span>'
+      + (_s3SelectedFiles.size > 0 ? ' <button class="btn btn-sm btn-secondary" onclick="s3DownloadSelected()">Download</button>' : '')
       + ' <button class="btn btn-sm btn-danger" onclick="s3DeleteSelected()">Löschen</button>'
       + ' <button class="btn btn-sm" style="color:var(--text-muted);" onclick="s3DeselectAll()">Auswahl aufheben</button>';
   } else {
@@ -4339,22 +4468,52 @@ async function s3DownloadSelected() {
 }
 
 async function s3DeleteSelected() {
-  if (!confirm('M\u00f6chten Sie die ausgew\u00e4hlten ' + _s3SelectedFiles.size + ' Dateien wirklich l\u00f6schen?')) return;
-  for (const key of _s3SelectedFiles) {
-    try { await api('/api/files/' + key, { method: 'DELETE' }); } catch(e) {}
+  const _fc = _s3SelectedFiles.size;
+  const _dc = _s3SelectedFolders.size;
+  if (_fc + _dc === 0) return;
+  const _parts = [];
+  if (_fc > 0) _parts.push(_fc + ' Datei' + (_fc === 1 ? '' : 'en'));
+  if (_dc > 0) _parts.push(_dc + ' Ordner (inkl. aller Inhalte)');
+  const _ok = await showConfirm('Auswahl löschen?', 'Soll die Auswahl (' + _parts.join(' + ') + ') wirklich gelöscht werden?', { danger: true, yesLabel: 'Ja, löschen' });
+  if (!_ok) return;
+  try {
+    await withBusy('Auswahl wird gelöscht...', async () => {
+      for (const key of _s3SelectedFiles) {
+        try { await api('/api/files/' + encodeURIComponent(key).replace(/%2F/g, '/'), { method: 'DELETE' }); } catch(e) {}
+      }
+      for (const folderPath of _s3SelectedFolders) {
+        try { await _s3DeleteFolderRecursive(folderPath); } catch(e) {}
+      }
+    });
+    _s3SelectedFiles.clear();
+    _s3SelectedFolders.clear();
+    showToast('Auswahl gelöscht');
+    await s3LoadFolder(_s3CurrentPath);
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
   }
-  _s3SelectedFiles.clear();
-  showToast('Dateien gelöscht');
-  await s3LoadFolder(_s3CurrentPath);
 }
 
 function s3FolderContextMenu(e, folderPath) {
+  // Rechtsklick selektiert den Ordner, au\u00dfer er geh\u00f6rt bereits zur Multi-Auswahl
+  if (!_s3SelectedFolders.has(folderPath)) {
+    _s3SelectedFiles.clear();
+    _s3SelectedFolders.clear();
+    _s3SelectedFolders.add(folderPath);
+    s3UpdateSelection();
+  }
   const old = document.getElementById('s3-ctx-menu');
   if (old) old.remove();
   const menu = document.createElement('div');
   menu.id = 's3-ctx-menu';
   menu.className = 's3-context-menu';
-  menu.innerHTML = '<div class="s3-ctx-item" onclick="s3CreateFolder();s3CloseCtx();"><span style="width:20px;text-align:center;">+</span> Neuer Ordner</div><div class="s3-ctx-divider"></div><div class="s3-ctx-item s3-ctx-danger" onclick="s3DeleteFolder(\'' + escapeHtml(folderPath) + '\');s3CloseCtx();"><span style="width:20px;text-align:center;">&#10006;</span> Ordner l\u00f6schen</div>';
+  const totalSel = _s3SelectedFiles.size + _s3SelectedFolders.size;
+  const multi = totalSel > 1;
+  const deleteLabel = multi ? totalSel + ' Eintr\u00e4ge l\u00f6schen' : 'Ordner l\u00f6schen';
+  const deleteAction = multi ? 's3DeleteSelected()' : ('s3DeleteFolder(\'' + escapeHtml(folderPath) + '\')');
+  menu.innerHTML = '<div class="s3-ctx-item" onclick="s3CreateFolder();s3CloseCtx();"><span style="width:20px;text-align:center;">+</span> Neuer Ordner</div>'
+    + '<div class="s3-ctx-divider"></div>'
+    + '<div class="s3-ctx-item s3-ctx-danger" onclick="' + deleteAction + ';s3CloseCtx();"><span style="width:20px;text-align:center;">&#10006;</span> ' + deleteLabel + '</div>';
   menu.style.left = e.pageX + 'px';
   menu.style.top = e.pageY + 'px';
   document.body.appendChild(menu);
@@ -4623,7 +4782,9 @@ function s3Download(key, filename) {
 }
 
 async function s3DeleteFile(key) {
-  if (!confirm('M\u00f6chten Sie diese Datei wirklich l\u00f6schen?')) return;
+  const _filename = key.split('/').pop();
+  const _ok = await showConfirm('Datei l\u00f6schen?', 'Soll die Datei \u201e' + _filename + '" wirklich gel\u00f6scht werden?', { danger: true, yesLabel: 'Ja, l\u00f6schen' });
+  if (!_ok) return;
   try {
     await api('/api/files/' + key, { method: 'DELETE' });
     showToast('Datei gelöscht');
@@ -4633,17 +4794,24 @@ async function s3DeleteFile(key) {
   }
 }
 
+// Rekursive L\u00f6schung OHNE weitere Nachfragen
+// Zentrale Bulk-Lösch-Funktion: 1 HTTP-Call, server-seitige Rekursion + S3-Batch-Delete.
+// Drastisch schneller als clientseitige Rekursion (1 Call statt N).
+async function _bulkDeleteFolder(folderPath) {
+  return await api('/api/files/delete-folder', { method: 'POST', body: { folder: folderPath } });
+}
+
+// Backward-Compat: bisheriger Helper rekursiv → jetzt 1 Bulk-Call
+async function _s3DeleteFolderRecursive(folderPath) {
+  return _bulkDeleteFolder(folderPath);
+}
+
 async function s3DeleteFolder(folderPath) {
-  if (!confirm('M\u00f6chten Sie diesen Ordner und alle Inhalte wirklich l\u00f6schen?')) return;
+  const folderName = folderPath.split('/').pop();
+  const ok = await showConfirm('Ordner l\u00f6schen?', 'Soll der Ordner \u201e' + folderName + '" inklusive aller Inhalte wirklich gel\u00f6scht werden?', { danger: true, yesLabel: 'Ja, l\u00f6schen' });
+  if (!ok) return;
   try {
-    // List all files in folder recursively and delete them
-    const result = await api('/api/files/list?folder=' + encodeURIComponent(folderPath));
-    for (const f of result.files) {
-      await api('/api/files/' + f.key, { method: 'DELETE' });
-    }
-    for (const sub of result.folders) {
-      await s3DeleteFolder(folderPath + '/' + sub);
-    }
+    await withBusy('Ordner wird gelöscht...', () => _s3DeleteFolderRecursive(folderPath));
     showToast('Ordner gelöscht');
     await s3LoadFolder(_s3CurrentPath);
   } catch (err) {
@@ -6376,7 +6544,7 @@ async function openNewInvoiceModal() {
       <button class="btn btn-primary" onclick="createInvoice()">Rechnung erstellen</button>
       <button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
     </div>
-  `);
+  `, 'modal-form-wide');
 }
 
 async function searchInvoiceCustomer() {
@@ -7347,9 +7515,14 @@ function applyCreditFilters() {
 
 // --- New Credit Note Modal ---
 let newCreditCustomerId = null;
+let newCreditVermittlerId = null;
+let _newCreditVermittlerCache = null;
 
 async function openNewCreditNoteModal() {
   newCreditCustomerId = null;
+  newCreditVermittlerId = null;
+  // Vermittler-Liste aus Stammdaten-API vorladen
+  try { _newCreditVermittlerCache = await api('/api/vermittler'); } catch(e) { _newCreditVermittlerCache = []; }
   const today = new Date().toISOString().split('T')[0];
   let banks = [];
   try { banks = await api('/api/bank-accounts'); } catch(e) {}
@@ -7367,12 +7540,12 @@ async function openNewCreditNoteModal() {
   }
   openModal('Neue Gutschrift', `
     <div class="form-group" id="cn-customer-search-wrapper">
-      <label>Kunde suchen</label>
+      <label>Kunde oder Vermittler suchen</label>
       <div style="display:flex;gap:8px;">
-        <input type="text" id="cn-customer-search" placeholder="Name oder Firma eingeben..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();searchCreditCustomer();}" autocomplete="off">
+        <input type="text" id="cn-customer-search" placeholder="Name, Firma oder Vermittler..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();searchCreditCustomer();}" autocomplete="off">
         <button type="button" class="btn btn-primary" onclick="searchCreditCustomer()">Suchen</button>
       </div>
-      <div id="cn-customer-results" style="margin-top:8px;max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none;"></div>
+      <div id="cn-customer-results" style="margin-top:8px;max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none;"></div>
     </div>
     <div id="cn-customer-selected" style="display:none;margin-bottom:16px;"></div>
     <div class="form-group">
@@ -7395,7 +7568,7 @@ async function openNewCreditNoteModal() {
       <button class="btn btn-primary" onclick="createCreditNote()">Gutschrift erstellen</button>
       <button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
     </div>
-  `);
+  `, 'modal-form-wide');
 }
 
 async function searchCreditCustomer() {
@@ -7403,45 +7576,82 @@ async function searchCreditCustomer() {
   const resultsEl = document.getElementById('cn-customer-results');
   if (!resultsEl) return;
   if (!term) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; return; }
+
+  // Beide Quellen parallel abfragen: lokale Kunden via API + gecachte Vermittler client-seitig filtern
   let customers = [];
+  let vermittler = [];
   try {
     customers = await api(`/api/customers?search=${encodeURIComponent(term)}`);
   } catch (err) {
     resultsEl.style.display = 'block';
-    resultsEl.innerHTML = '<div style="padding:12px;color:var(--danger);text-align:center;">Fehler beim Laden: ' + escapeHtml(err.message || '') + '</div>';
+    resultsEl.innerHTML = '<div style="padding:12px;color:var(--danger);text-align:center;">Fehler beim Laden der Kunden: ' + escapeHtml(err.message || '') + '</div>';
     return;
   }
+  const lcTerm = term.toLowerCase();
+  vermittler = (_newCreditVermittlerCache || []).filter(v => {
+    const haystack = ((v.name || '') + ' ' + (v.ansprechpartner || '') + ' ' + (v.ort || '') + ' ' + (v.plz || '') + ' ' + (v.strasse || '')).toLowerCase();
+    return haystack.includes(lcTerm);
+  });
+
   resultsEl.style.display = 'block';
-  if (customers.length === 0) {
-    resultsEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);text-align:center;">Keine Kunden gefunden</div>';
+  if (customers.length === 0 && vermittler.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);text-align:center;">Keine Treffer (Kunden + Vermittler)</div>';
     return;
   }
+
+  const rowsCust = customers.slice(0, 50).map(c => {
+    const name = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? (c.company_name || '') : `${c.last_name || ''}, ${c.first_name || ''}`;
+    const ort = [c.zip, c.city].filter(Boolean).join(' ') || '-';
+    const location = [c.zip, c.city].filter(Boolean).join(' ');
+    const display = location ? `${name} - ${location}` : name;
+    const safe = escapeHtml(display).replace(/'/g, "\\'");
+    return `<tr style="cursor:pointer;" onclick="selectCreditCustomer(${c.id}, '${safe}')">
+      <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#dbeafe;color:#1e40af;">Kunde</span></td>
+      <td><strong>${escapeHtml(name || '-')}</strong></td>
+      <td>${escapeHtml(ort)}</td>
+      <td>${escapeHtml(c.phone || '-')}</td>
+    </tr>`;
+  }).join('');
+
+  const rowsVerm = vermittler.slice(0, 50).map(v => {
+    const ort = [v.plz, v.ort].filter(Boolean).join(' ') || '-';
+    const location = [v.plz, v.ort].filter(Boolean).join(' ');
+    const display = location ? `${v.name || ''} - ${location}` : (v.name || '');
+    const safe = escapeHtml(display).replace(/'/g, "\\'");
+    return `<tr style="cursor:pointer;" onclick="selectCreditVermittler(${v.id}, '${safe}')">
+      <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#fef3c7;color:#92400e;">Vermittler</span></td>
+      <td><strong>${escapeHtml(v.name || '-')}</strong></td>
+      <td>${escapeHtml(ort)}</td>
+      <td>${escapeHtml(v.telefon || '-')}</td>
+    </tr>`;
+  }).join('');
+
   resultsEl.innerHTML = '<table class="data-table miet-pick-table" style="margin:0;font-size:13px;user-select:none;"><thead><tr>'
-    + '<th>Name</th><th>Ort</th><th>Telefon</th>'
+    + '<th style="width:90px;">Typ</th><th>Name</th><th>Ort</th><th>Telefon</th>'
     + '</tr></thead><tbody>'
-    + customers.slice(0, 50).map(c => {
-        const name = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? (c.company_name || '') : `${c.last_name || ''}, ${c.first_name || ''}`;
-        const ort = [c.zip, c.city].filter(Boolean).join(' ') || '-';
-        const location = [c.zip, c.city].filter(Boolean).join(' ');
-        const display = location ? `${name} - ${location}` : name;
-        const safe = escapeHtml(display).replace(/'/g, "\\'");
-        return `<tr style="cursor:pointer;" onclick="selectCreditCustomer(${c.id}, '${safe}')">
-          <td><strong>${escapeHtml(name || '-')}</strong></td>
-          <td>${escapeHtml(ort)}</td>
-          <td>${escapeHtml(c.phone || '-')}</td>
-        </tr>`;
-      }).join('')
+    + rowsCust + rowsVerm
     + '</tbody></table>';
 }
 
 function selectCreditCustomer(id, displayName) {
   newCreditCustomerId = id;
+  newCreditVermittlerId = null;
+  _renderCreditSelected(displayName, 'Kunde');
+}
+
+function selectCreditVermittler(id, displayName) {
+  newCreditVermittlerId = id;
+  newCreditCustomerId = null;
+  _renderCreditSelected(displayName, 'Vermittler');
+}
+
+function _renderCreditSelected(displayName, typeLabel) {
   const wrap = document.getElementById('cn-customer-search-wrapper');
   if (wrap) wrap.style.display = 'none';
   document.getElementById('cn-customer-selected').style.display = '';
   document.getElementById('cn-customer-selected').innerHTML = `
     <div class="search-selected">
-      <span>${displayName}</span>
+      <span><strong>${escapeHtml(typeLabel)}:</strong> ${displayName}</span>
       <button class="btn btn-sm btn-secondary" onclick="clearCreditCustomer()">Ändern</button>
     </div>
   `;
@@ -7449,6 +7659,7 @@ function selectCreditCustomer(id, displayName) {
 
 function clearCreditCustomer() {
   newCreditCustomerId = null;
+  newCreditVermittlerId = null;
   document.getElementById('cn-customer-selected').style.display = 'none';
   document.getElementById('cn-customer-selected').innerHTML = '';
   const wrap = document.getElementById('cn-customer-search-wrapper');
@@ -7460,7 +7671,7 @@ function clearCreditCustomer() {
 }
 
 async function createCreditNote() {
-  if (!newCreditCustomerId) { showToast('Bitte einen Kunden auswählen', 'error'); return; }
+  if (!newCreditCustomerId && !newCreditVermittlerId) { showToast('Bitte einen Kunden oder Vermittler auswählen', 'error'); return; }
   const date = document.getElementById('cn-new-date').value;
   if (!date) { showToast('Gutschriftsdatum ist Pflichtfeld', 'error'); return; }
   const paymentMethod = document.getElementById('cn-new-payment-method').value;
@@ -7468,8 +7679,11 @@ async function createCreditNote() {
   const bankEl = document.getElementById('cn-new-bank-account');
   const bank_account_id = bankEl ? Number(bankEl.value) || null : null;
   if (bankEl && !bank_account_id) { showToast('Bitte eine Bankverbindung auswählen', 'error'); return; }
+  const body = { credit_date: date, payment_method: paymentMethod, notes, bank_account_id };
+  if (newCreditCustomerId) body.customer_id = newCreditCustomerId;
+  if (newCreditVermittlerId) body.vermittler_id = newCreditVermittlerId;
   try {
-    const result = await api('/api/credit-notes', { method: 'POST', body: { customer_id: newCreditCustomerId, credit_date: date, payment_method: paymentMethod, notes, bank_account_id } });
+    const result = await api('/api/credit-notes', { method: 'POST', body });
     closeModal();
     showToast(`Gutschrift ${result.credit_number} erstellt`);
     navigate('credit-detail', result.id);
@@ -9227,7 +9441,9 @@ function fvFileCtxB64(e, el) {
 }
 
 async function fvDeleteFile(key) {
-  if (!confirm('Datei wirklich l\u00f6schen?')) return;
+  const _fname = key.split('/').pop();
+  const _ok = await showConfirm('Datei l\u00f6schen?', 'Soll die Datei \u201e' + _fname + '" wirklich gel\u00f6scht werden?', { danger: true, yesLabel: 'Ja, l\u00f6schen' });
+  if (!_ok) return;
   try {
     await api('/api/files/' + encodeURIComponent(key).replace(/%2F/g, '/'), { method: 'DELETE' });
     showToast('Datei gel\u00f6scht');
@@ -9235,12 +9451,16 @@ async function fvDeleteFile(key) {
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
 }
 
+async function _fvDeleteFolderRecursive(folderPath) {
+  return _bulkDeleteFolder(folderPath);
+}
+
 async function fvDeleteFolder(folderPath) {
-  if (!confirm('Ordner und alle Inhalte wirklich l\u00f6schen?')) return;
+  const _name = folderPath.split('/').pop();
+  const _ok = await showConfirm('Ordner l\u00f6schen?', 'Soll der Ordner \u201e' + _name + '" inklusive aller Inhalte wirklich gel\u00f6scht werden?', { danger: true, yesLabel: 'Ja, l\u00f6schen' });
+  if (!_ok) return;
   try {
-    const result = await api('/api/files/list?folder=' + encodeURIComponent(folderPath));
-    for (const f of result.files) await api('/api/files/' + f.key, { method: 'DELETE' });
-    for (const sub of result.folders) await fvDeleteFolder(folderPath + '/' + sub);
+    await withBusy('Ordner wird gel\u00f6scht...', () => _fvDeleteFolderRecursive(folderPath));
     showToast('Ordner gel\u00f6scht');
     fvLoadFolder(_fvCurrentPath);
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
@@ -13447,8 +13667,10 @@ function akCreateFolder() {
 }
 
 async function akDeleteFile(b64Key) {
-  if (!confirm('Datei wirklich l\u00f6schen?')) return;
   const key = decodeURIComponent(escape(atob(b64Key)));
+  const filename = key.split('/').pop();
+  const ok = await showConfirm('Datei l\u00f6schen?', 'Soll die Datei \u201e' + filename + '" wirklich gel\u00f6scht werden?', { danger: true, yesLabel: 'Ja, l\u00f6schen' });
+  if (!ok) return;
   try {
     await api('/api/files/' + encodeURIComponent(key).replace(/%2F/g, '/'), { method: 'DELETE' });
     showToast('Datei gel\u00f6scht');
@@ -13456,12 +13678,17 @@ async function akDeleteFile(b64Key) {
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
 }
 
+// Rekursive L\u00f6schung OHNE weitere Nachfragen (nur einmal au\u00dfen best\u00e4tigen)
+async function _akDeleteFolderRecursive(folderPath) {
+  return _bulkDeleteFolder(folderPath);
+}
+
 async function akDeleteFolder(folderPath) {
-  if (!confirm('Ordner und alle Inhalte wirklich l\u00f6schen?')) return;
+  const folderName = folderPath.split('/').pop();
+  const ok = await showConfirm('Ordner l\u00f6schen?', 'Soll der Ordner \u201e' + folderName + '" inklusive aller Inhalte wirklich gel\u00f6scht werden?', { danger: true, yesLabel: 'Ja, l\u00f6schen' });
+  if (!ok) return;
   try {
-    const result = await api('/api/files/list?folder=' + encodeURIComponent(folderPath));
-    for (const f of result.files) await api('/api/files/' + f.key, { method: 'DELETE' });
-    for (const sub of result.folders) await akDeleteFolder(folderPath + '/' + sub);
+    await withBusy('Ordner wird gel\u00f6scht...', () => _akDeleteFolderRecursive(folderPath));
     showToast('Ordner gel\u00f6scht');
     akLoadFolder(_akCurrentPath);
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
@@ -13626,8 +13853,10 @@ function rvCreateFolder() {
 }
 
 async function rvDeleteFile(b64Key) {
-  if (!confirm('Datei wirklich l\u00f6schen?')) return;
   const key = decodeURIComponent(escape(atob(b64Key)));
+  const _fname = key.split('/').pop();
+  const _ok = await showConfirm('Datei l\u00f6schen?', 'Soll die Datei \u201e' + _fname + '" wirklich gel\u00f6scht werden?', { danger: true, yesLabel: 'Ja, l\u00f6schen' });
+  if (!_ok) return;
   try {
     await api('/api/files/' + encodeURIComponent(key).replace(/%2F/g, '/'), { method: 'DELETE' });
     showToast('Datei gel\u00f6scht');
@@ -13635,12 +13864,16 @@ async function rvDeleteFile(b64Key) {
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
 }
 
+async function _rvDeleteFolderRecursive(folderPath) {
+  return _bulkDeleteFolder(folderPath);
+}
+
 async function rvDeleteFolder(folderPath) {
-  if (!confirm('Ordner und alle Inhalte wirklich l\u00f6schen?')) return;
+  const _name = folderPath.split('/').pop();
+  const _ok = await showConfirm('Ordner l\u00f6schen?', 'Soll der Ordner \u201e' + _name + '" inklusive aller Inhalte wirklich gel\u00f6scht werden?', { danger: true, yesLabel: 'Ja, l\u00f6schen' });
+  if (!_ok) return;
   try {
-    const result = await api('/api/files/list?folder=' + encodeURIComponent(folderPath));
-    for (const f of result.files) await api('/api/files/' + f.key, { method: 'DELETE' });
-    for (const sub of result.folders) await rvDeleteFolder(folderPath + '/' + sub);
+    await withBusy('Ordner wird gel\u00f6scht...', () => _rvDeleteFolderRecursive(folderPath));
     showToast('Ordner gel\u00f6scht');
     rvLoadFolder(_rvCurrentPath);
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
@@ -13881,7 +14114,8 @@ function renderAktenTable() {
             const anwalt = a.bet_anwalt || a.anwalt || '';
             const versicherung = a.bet_versicherung || (a.versicherung_id ? (_aktenInsuranceMap[a.versicherung_id] || '') : '');
             const vermittler = a.bet_vermittler || (a.vermittler_id ? (_aktenVermittlerMap[a.vermittler_id] || '') : (a.vermittler || ''));
-            return `<tr style="cursor:pointer;" onclick="navigate('akte-detail', ${a.id})">
+            const _aNr = escapeHtml(a.aktennummer || '').replace(/'/g, "\\'");
+            return `<tr style="cursor:pointer;" onclick="navigate('akte-detail', ${a.id})" oncontextmenu="event.preventDefault();akteRowContextMenu(event, ${a.id}, '${_aNr}')">
             <td><strong>${escapeHtml(a.aktennummer || '')}</strong></td>
             <td>${formatDate(a.datum || a.created_at)}</td>
             <td>${escapeHtml(kunde)}</td>
@@ -15136,7 +15370,7 @@ async function deleteKommunikation(id, akteId) {
   }
 }
 
-function openKommunikationForm(akteId, editId) {
+async function openKommunikationForm(akteId, editId) {
   const existing = document.getElementById('komm-form-overlay');
   if (existing) existing.remove();
   const listEl = document.getElementById('komm-list');
@@ -15149,6 +15383,19 @@ function openKommunikationForm(akteId, editId) {
   const defaultParticipant = k ? (k.participant || '') : '';
   const defaultSubject = k ? (k.subject || '') : '';
   const defaultContent = k ? (k.content || '') : '';
+
+  // Optionen wie beim Post-Modal aufbauen: Beteiligte aus Akte + "Sonstiger Beteiligter",
+  // Betreff aus festen Voreinträgen + "Sonstiges"
+  const beteiligteOptions = await buildPostBeteiligteOptions(akteId);
+  const subjectOptions = buildPostSubjectOptions();
+
+  // Edit-Vorbelegung vorbereiten: prüfen ob defaultParticipant in der Optionsliste ist
+  // (bauen Set aus value-Attributen) → wenn nein, fällt's auf __custom__ zurück
+  const beteiligteValues = Array.from(beteiligteOptions.matchAll(/value="([^"]*)"/g)).map(m => m[1].replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+  const subjectValues = Array.from(subjectOptions.matchAll(/value="([^"]*)"/g)).map(m => m[1].replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+  const participantInList = defaultParticipant && beteiligteValues.includes(defaultParticipant);
+  const subjectInList = defaultSubject && subjectValues.includes(defaultSubject);
+
   const overlay = document.createElement('div');
   overlay.id = 'komm-form-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
@@ -15167,8 +15414,20 @@ function openKommunikationForm(akteId, editId) {
           <div class="form-group"><label>Datum <span style="color:var(--danger);">*</span></label><input type="date" id="komm-date" value="${defaultDate}" required></div>
           <div class="form-group"><label>Uhrzeit</label><input type="time" id="komm-time" value="${defaultTime}"></div>
         </div>
-        <div class="form-group"><label>Beteiligter <span style="color:var(--danger);">*</span></label><input type="text" id="komm-participant" placeholder="Name / Firma" value="${escapeHtml(defaultParticipant)}" required></div>
-        <div class="form-group"><label>Betreff</label><input type="text" id="komm-subject" placeholder="Kurzes Stichwort (optional)" value="${escapeHtml(defaultSubject)}"></div>
+        <div class="form-group">
+          <label>Beteiligter <span style="color:var(--danger);">*</span></label>
+          <select id="komm-participant-select" required>${beteiligteOptions}</select>
+        </div>
+        <div class="form-group" id="komm-participant-custom-wrapper" style="display:none;">
+          <input type="text" id="komm-participant-custom" placeholder="Beteiligten manuell eintragen" value="${escapeHtml(participantInList ? '' : defaultParticipant)}">
+        </div>
+        <div class="form-group">
+          <label>Betreff</label>
+          <select id="komm-subject-select">${subjectOptions}</select>
+        </div>
+        <div class="form-group" id="komm-subject-custom-wrapper" style="display:none;">
+          <input type="text" id="komm-subject-custom" placeholder="Betreff manuell eintragen" value="${escapeHtml(subjectInList ? '' : defaultSubject)}">
+        </div>
         <div class="form-group"><label>Gesprächsnotiz / Zusammenfassung</label><textarea id="komm-content" rows="6" placeholder="Inhalt des Gesprächs" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border:1px solid var(--border);border-radius:6px;resize:vertical;">${escapeHtml(defaultContent)}</textarea></div>
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">${isEdit ? 'Speichern' : 'Hinzufügen'}</button>
@@ -15177,14 +15436,30 @@ function openKommunikationForm(akteId, editId) {
       </form>
     </div>`;
   document.body.appendChild(overlay);
-  document.getElementById('komm-participant').focus();
+
+  // Edit-Vorbelegung: Select auf bestehenden Wert setzen, sonst auf __custom__
+  const partSelect = document.getElementById('komm-participant-select');
+  if (defaultParticipant) {
+    partSelect.value = participantInList ? defaultParticipant : '__custom__';
+  }
+  const subjSelect = document.getElementById('komm-subject-select');
+  if (defaultSubject) {
+    subjSelect.value = subjectInList ? defaultSubject : '__custom__';
+  }
+  // Toggle-Logik wie bei Post
+  bindPostCustomToggle('komm-participant-select', 'komm-participant-custom-wrapper');
+  bindPostCustomToggle('komm-subject-select', 'komm-subject-custom-wrapper');
+
+  partSelect.focus();
+
   document.getElementById('komm-form').onsubmit = async (e) => {
     e.preventDefault();
     const direction = (document.querySelector('input[name="komm-direction"]:checked')?.value) || 'eingehend';
     const entry_date = document.getElementById('komm-date').value;
     const entry_time = document.getElementById('komm-time').value;
-    const participant = document.getElementById('komm-participant').value.trim();
-    const subject = document.getElementById('komm-subject').value.trim();
+    const participant = readPostFieldValue('komm-participant-select', 'komm-participant-custom');
+    if (!participant) { showToast('Bitte Beteiligten auswählen oder eintragen', 'error'); return; }
+    const subject = readPostFieldValue('komm-subject-select', 'komm-subject-custom');
     const content = document.getElementById('komm-content').value;
     const body = { entry_type: 'Telefon', direction, entry_date, entry_time, participant, subject, content };
     try {
@@ -15977,21 +16252,36 @@ function openAkteDetail(id) {
   `);
 }
 
+let _createNewAkteBusy = false;
 async function createNewAkte() {
+  // Doppelklick-Schutz: solange eine Anlage läuft, weitere Klicks ignorieren
+  if (_createNewAkteBusy) return;
+  _createNewAkteBusy = true;
+  showBusy('Akte wird angelegt...');
+  let failedFolders = [];
   try {
     const result = await api('/api/akten', { method: 'POST', body: { status: 'Neu Angelegt' } });
     const akteNr = result.aktennummer || result.id;
-    // S3-Ordner anlegen
-    try {
-      await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Korrespondenz', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
-      await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Rechnungen', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
-      await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Sonstiges', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
-    } catch (e) {}
+    const standardFolders = ['Korrespondenz', 'Rechnungen', 'Vorläufige Dokumente', 'Endgültige Dokumente', 'Sonstiges'];
+    for (const f of standardFolders) {
+      try {
+        await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/' + f, filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
+      } catch (err) {
+        console.error('Ordner anlegen fehlgeschlagen:', f, err.message);
+        failedFolders.push(f);
+      }
+    }
     showToast('Akte ' + akteNr + ' angelegt');
+    if (failedFolders.length > 0) {
+      showToast('Einige Ordner konnten nicht angelegt werden: ' + failedFolders.join(', '), 'error');
+    }
     currentAkteId = result.id;
     renderAkteDetail(result.id);
   } catch (err) {
     showToast('Fehler: ' + (err.message || err), 'error');
+  } finally {
+    hideBusy();
+    _createNewAkteBusy = false;
   }
 }
 
@@ -16151,6 +16441,13 @@ function clearAkteCustomer() {
 
 async function saveAkte(e, editId) {
   e.preventDefault();
+  // Doppelklick-Schutz: Submit-Button sofort disablen
+  const submitBtn = e.target && e.target.querySelector ? e.target.querySelector('button[type="submit"]') : null;
+  if (submitBtn) {
+    if (submitBtn.dataset.busy === '1') return; // schon gestartet
+    submitBtn.dataset.busy = '1';
+    submitBtn.disabled = true;
+  }
   const data = {
     aktennummer: document.getElementById('akte-nummer') ? document.getElementById('akte-nummer').value : '',
     datum: document.getElementById('akte-datum').value,
@@ -16173,6 +16470,8 @@ async function saveAkte(e, editId) {
     mietart: document.getElementById('akte-mietart').value,
     wiedervorlage_datum: document.getElementById('akte-wiedervorlage-datum').value
   };
+  const _busyMsg = editId ? 'Akte wird gespeichert...' : 'Akte wird angelegt...';
+  showBusy(_busyMsg);
   try {
     if (editId) {
       await api('/api/akten/' + editId, { method: 'PUT', body: data });
@@ -16181,13 +16480,19 @@ async function saveAkte(e, editId) {
       const result = await api('/api/akten', { method: 'POST', body: data });
       // S3-Ordner f\u00fcr diese Akte anlegen
       const akteNr = result.aktennummer || result.id;
-      try {
-        await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Korrespondenz', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
-        await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Rechnungen', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
-        await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Vorläufige Dokumente', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
-        await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Endgültige Dokumente', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
-        await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/Sonstiges', filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
-      } catch (e) {}
+      const standardFolders = ['Korrespondenz', 'Rechnungen', 'Vorläufige Dokumente', 'Endgültige Dokumente', 'Sonstiges'];
+      const failedFolders = [];
+      for (const f of standardFolders) {
+        try {
+          await api('/api/files/upload', { method: 'POST', body: { folder: 'Akten/' + akteNr + '/' + f, filename: '.folder', data: btoa(' '), content_type: 'text/plain' } });
+        } catch (e) {
+          console.error('Ordner anlegen fehlgeschlagen:', f, e.message);
+          failedFolders.push(f);
+        }
+      }
+      if (failedFolders.length > 0) {
+        showToast('Einige Ordner konnten nicht angelegt werden: ' + failedFolders.join(', '), 'error');
+      }
       showToast('Akte angelegt');
     }
     closeModal();
@@ -16200,19 +16505,50 @@ async function saveAkte(e, editId) {
     }
   } catch (err) {
     showToast(err.message, 'error');
+    // Bei Fehler Submit-Button wieder freigeben, damit User es erneut versuchen kann
+    if (submitBtn) { submitBtn.dataset.busy = ''; submitBtn.disabled = false; }
+  } finally {
+    hideBusy();
   }
 }
 
 async function deleteAkte(id, name) {
-  if (!confirm('Akte "' + name + '" wirklich l\u00f6schen?')) return;
+  // Wichtig: Akte-L\u00f6schung l\u00e4sst den S3-Ordner zur Akte UNANGETASTET \u2014 Dokumente bleiben erhalten.
+  // Aktennummer wird ebenfalls nicht freigegeben (Backend nutzt persistente Sequenz).
+  const ok = await showConfirm(
+    'Akte l\u00f6schen?',
+    'Soll die Akte \u201e' + name + '" inklusive aller Inhalte (Beteiligte, Post, Telefonate, Rechnungs-Verkn\u00fcpfungen, Eintr\u00e4ge) wirklich gel\u00f6scht werden?\n\nHinweis: Der S3-Ordner mit Dokumenten bleibt erhalten.',
+    { danger: true, yesLabel: 'Ja, l\u00f6schen' }
+  );
+  if (!ok) return;
   try {
-    await api('/api/akten/' + id, { method: 'DELETE' });
+    await withBusy('Akte wird gel\u00f6scht...', () => api('/api/akten/' + id, { method: 'DELETE' }));
     currentAkteId = null;
     showToast('Akte gel\u00f6scht');
     navigate('akten');
   } catch (err) {
     showToast(err.message, 'error');
   }
+}
+
+// Rechtsklick-Kontextmen\u00fc auf einer Aktenzeile in der Aktenliste
+function akteRowContextMenu(e, id, aktennummer) {
+  if (!isAdmin() && !isVerwaltung() && !isBuchhaltung()) return;
+  // Vorhandenes Men\u00fc schliessen
+  const old = document.getElementById('s3-ctx-menu');
+  if (old) old.remove();
+  const menu = document.createElement('div');
+  menu.id = 's3-ctx-menu';
+  menu.className = 's3-context-menu';
+  const safeNr = String(aktennummer).replace(/'/g, "\\'");
+  menu.innerHTML = '<div class="s3-ctx-item s3-ctx-danger" onclick="s3CloseCtx();deleteAkte(' + id + ', \'' + safeNr + '\')"><span style="width:20px;text-align:center;">&#10006;</span> Akte l\u00f6schen</div>';
+  menu.style.left = e.pageX + 'px';
+  menu.style.top = e.pageY + 'px';
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (e.pageX - rect.width) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (e.pageY - rect.height) + 'px';
+  setTimeout(() => document.addEventListener('click', s3CloseCtx, { once: true }), 0);
 }
 
 // ===== PAGE: Versicherungen (Insurance) =====
