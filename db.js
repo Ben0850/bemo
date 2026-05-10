@@ -310,6 +310,7 @@ async function getDb() {
   try { db.run("ALTER TABLE staff ADD COLUMN phone_business TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE staff ADD COLUMN emergency_name TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE staff ADD COLUMN emergency_phone TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE staff ADD COLUMN signature TEXT DEFAULT ''"); } catch(e) {}
 
   // Migrations for existing databases
   try { db.run('ALTER TABLE customers ADD COLUMN reminder_blocked INTEGER DEFAULT 0'); } catch(e) {}
@@ -964,6 +965,56 @@ async function getDb() {
       FOREIGN KEY (created_by) REFERENCES staff(id)
     )
   `);
+
+  // E-Mail-Vorlagen (lokal in Bemo-DB) — vorgefertigte Vorlagentexte für den E-Mail-Composer
+  db.run(`
+    CREATE TABLE IF NOT EXISTS email_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      betreff TEXT NOT NULL DEFAULT '',
+      kategorie TEXT NOT NULL DEFAULT '',
+      body TEXT NOT NULL DEFAULT '',
+      verfasser TEXT NOT NULL DEFAULT '',
+      created_by INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (created_by) REFERENCES staff(id)
+    )
+  `);
+
+  // E-Mail-Adressbuch — globale Liste reiner E-Mail-Adressen (kein Name, keine Kontaktdaten).
+  // Wird beim Versand jeder E-Mail automatisch um neue Empfänger ergänzt (INSERT OR IGNORE).
+  db.run(`
+    CREATE TABLE IF NOT EXISTS address_book (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // E-Mail-Vorlagen-Kategorien — verwaltbare Liste; verknüpft per Name (TEXT) mit email_templates.kategorie.
+  // Umbenennen propagiert per UPDATE auf alle Vorlagen; Löschen ist nur erlaubt wenn nicht verwendet.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS email_template_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  // Einmaliges Seeding: 4 Default-Kategorien + bereits in Vorlagen verwendete Kategorien
+  try {
+    const seeded = queryOne("SELECT value FROM settings WHERE key = 'email_template_categories_seeded'");
+    if (!seeded) {
+      const defaults = ['Mail an Versicherung', 'Mail an Anwalt', 'Mail an Kunden', 'sonstiges'];
+      for (const n of defaults) {
+        try { execute('INSERT INTO email_template_categories (name) VALUES (?)', [n]); } catch(_) {}
+      }
+      const existing = queryAll(`SELECT DISTINCT TRIM(kategorie) AS name FROM email_templates WHERE kategorie IS NOT NULL AND TRIM(kategorie) != ''`);
+      for (const row of existing) {
+        try { execute('INSERT INTO email_template_categories (name) VALUES (?)', [row.name]); } catch(_) {}
+      }
+      execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('email_template_categories_seeded', '1')");
+    }
+  } catch(_) { /* Settings-Tabelle existiert evtl. noch nicht beim allerersten Init — wird beim nächsten Start geseeded */ }
 
   // Phase 1: Audit trail table (DB-05 — GoBD compliance)
   db.run(`

@@ -58,7 +58,9 @@ app.use((req, res, next) => {
         && !req.path.startsWith('/api/calendar/')
         && !req.path.startsWith('/api/time/')
         && !req.path.startsWith('/api/files/')
-        && !req.path.startsWith('/api/payments/')) {
+        && !req.path.startsWith('/api/payments/')
+        && !req.path.startsWith('/api/email-templates/')
+        && !req.path.startsWith('/api/email-template-categories/')) {
       return res.status(403).json({ error: 'Nur Admins dürfen Einträge löschen' });
     }
   }
@@ -598,7 +600,7 @@ function validatePassword(pw) {
 }
 
 app.post('/api/staff', (req, res) => {
-  const { name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning } = req.body;
+  const { name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature } = req.body;
   if (!name) return res.status(400).json({ error: 'Name ist Pflichtfeld' });
   const pwError = validatePassword(password);
   if (pwError) return res.status(400).json({ error: pwError });
@@ -606,23 +608,25 @@ app.post('/api/staff', (req, res) => {
   const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
   const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : 'Benutzer';
   if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
-  const result = execute('INSERT INTO staff (name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [name, station || '', password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours || 40, default_station_id || null, work_days || '1,2,3,4,5', username || '', hidden_in_planning ? 1 : 0]);
+  const result = execute('INSERT INTO staff (name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [name, station || '', password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours || 40, default_station_id || null, work_days || '1,2,3,4,5', username || '', hidden_in_planning ? 1 : 0, signature || '']);
   res.json({ id: result.lastId, message: 'Mitarbeiter hinzugefügt' });
 });
 
 app.put('/api/staff/:id', (req, res) => {
-  const { name, station, active, password, permission_level, has_calendar, calendar_visibility, vacation_days, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning } = req.body;
+  const { name, station, active, password, permission_level, has_calendar, calendar_visibility, vacation_days, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature } = req.body;
   const pwError = validatePassword(password);
   if (pwError) return res.status(400).json({ error: pwError });
   const callerPermission = req.headers['x-user-permission'];
-  const existing = queryOne('SELECT permission_level, hidden_in_planning FROM staff WHERE id = ?', [Number(req.params.id)]);
+  const existing = queryOne('SELECT permission_level, hidden_in_planning, signature FROM staff WHERE id = ?', [Number(req.params.id)]);
   const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
   const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : (existing ? existing.permission_level : 'Benutzer');
   if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
   const finalHidden = (hidden_in_planning !== undefined) ? (hidden_in_planning ? 1 : 0) : (existing ? (existing.hidden_in_planning || 0) : 0);
-  execute('UPDATE staff SET name=?, station=?, active=?, password=?, permission_level=?, has_calendar=?, calendar_visibility=?, vacation_days=?, entry_date=?, exit_date=?, email=?, street=?, zip=?, city=?, phone_private=?, phone_business=?, emergency_name=?, emergency_phone=?, weekly_hours=?, default_station_id=?, work_days=?, username=?, hidden_in_planning=? WHERE id=?',
-    [name, station || '', active !== undefined ? active : 1, password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days !== undefined ? vacation_days : 30, entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours !== undefined ? weekly_hours : 40, default_station_id !== undefined ? default_station_id : null, work_days || '1,2,3,4,5', username || '', finalHidden, Number(req.params.id)]);
+  // Signatur: explizit übergebener Wert (auch leer) gewinnt; sonst bestehender Wert behalten
+  const finalSignature = (signature !== undefined) ? String(signature) : (existing ? (existing.signature || '') : '');
+  execute('UPDATE staff SET name=?, station=?, active=?, password=?, permission_level=?, has_calendar=?, calendar_visibility=?, vacation_days=?, entry_date=?, exit_date=?, email=?, street=?, zip=?, city=?, phone_private=?, phone_business=?, emergency_name=?, emergency_phone=?, weekly_hours=?, default_station_id=?, work_days=?, username=?, hidden_in_planning=?, signature=? WHERE id=?',
+    [name, station || '', active !== undefined ? active : 1, password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days !== undefined ? vacation_days : 30, entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours !== undefined ? weekly_hours : 40, default_station_id !== undefined ? default_station_id : null, work_days || '1,2,3,4,5', username || '', finalHidden, finalSignature, Number(req.params.id)]);
   res.json({ message: 'Mitarbeiter aktualisiert' });
 });
 
@@ -820,10 +824,164 @@ app.delete('/api/bank-accounts/:id', (req, res) => {
   res.json({ message: 'Bankverbindung gelöscht' });
 });
 
+// ===== E-Mail-Vorlagen =====
+// Lokale Stammdaten in Bemo-DB — alle eingeloggten User dürfen lesen, anlegen, ändern, löschen.
+
+app.get('/api/email-templates', (req, res) => {
+  // Verfasser-Fallback: wenn Spalte leer ist aber created_by zeigt auf einen Mitarbeiter, dessen Name verwenden
+  const rows = queryAll(`
+    SELECT t.id, t.betreff, t.kategorie, t.body,
+           CASE
+             WHEN t.verfasser IS NOT NULL AND TRIM(t.verfasser) != '' THEN t.verfasser
+             ELSE COALESCE(s.name, s.username, '')
+           END AS verfasser,
+           t.created_by, t.created_at, t.updated_at
+    FROM email_templates t
+    LEFT JOIN staff s ON s.id = t.created_by
+    ORDER BY t.kategorie COLLATE NOCASE, t.betreff COLLATE NOCASE
+  `);
+  res.json(rows);
+});
+
+app.get('/api/email-templates/:id', (req, res) => {
+  const row = queryOne(`
+    SELECT t.id, t.betreff, t.kategorie, t.body,
+           CASE
+             WHEN t.verfasser IS NOT NULL AND TRIM(t.verfasser) != '' THEN t.verfasser
+             ELSE COALESCE(s.name, s.username, '')
+           END AS verfasser,
+           t.created_by, t.created_at, t.updated_at
+    FROM email_templates t
+    LEFT JOIN staff s ON s.id = t.created_by
+    WHERE t.id = ?
+  `, [Number(req.params.id)]);
+  if (!row) return res.status(404).json({ error: 'Vorlage nicht gefunden' });
+  res.json(row);
+});
+
+app.post('/api/email-templates', (req, res) => {
+  const { betreff, kategorie, body } = req.body || {};
+  if (!betreff || !String(betreff).trim()) return res.status(400).json({ error: 'Betreff ist Pflicht' });
+  const userId = req.headers['x-user-id'] ? Number(req.headers['x-user-id']) : null;
+  // Verfasser-Name in dieser Reihenfolge: x-user-name Header → staff.name aus DB → staff.username
+  let userName = (req.headers['x-user-name'] || '').toString().trim();
+  if (!userName && userId) {
+    const staff = queryOne('SELECT name, username FROM staff WHERE id = ?', [userId]);
+    if (staff) userName = (staff.name || staff.username || '').trim();
+  }
+  const result = execute(
+    `INSERT INTO email_templates (betreff, kategorie, body, verfasser, created_by)
+     VALUES (?, ?, ?, ?, ?)`,
+    [String(betreff).trim(), String(kategorie || '').trim(), String(body || ''), userName, userId]
+  );
+  res.json({ id: result.lastId, message: 'Vorlage angelegt' });
+});
+
+app.put('/api/email-templates/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = queryOne('SELECT id FROM email_templates WHERE id = ?', [id]);
+  if (!existing) return res.status(404).json({ error: 'Vorlage nicht gefunden' });
+  const { betreff, kategorie, body } = req.body || {};
+  if (!betreff || !String(betreff).trim()) return res.status(400).json({ error: 'Betreff ist Pflicht' });
+  execute(
+    `UPDATE email_templates
+     SET betreff = ?, kategorie = ?, body = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [String(betreff).trim(), String(kategorie || '').trim(), String(body || ''), id]
+  );
+  res.json({ message: 'Vorlage aktualisiert' });
+});
+
+app.delete('/api/email-templates/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = queryOne('SELECT id FROM email_templates WHERE id = ?', [id]);
+  if (!existing) return res.status(404).json({ error: 'Vorlage nicht gefunden' });
+  execute('DELETE FROM email_templates WHERE id = ?', [id]);
+  res.json({ message: 'Vorlage gelöscht' });
+});
+
+// ===== E-Mail-Vorlagen-Kategorien =====
+
+app.get('/api/email-template-categories', (req, res) => {
+  const rows = queryAll('SELECT id, name FROM email_template_categories ORDER BY name COLLATE NOCASE');
+  res.json(rows);
+});
+
+app.post('/api/email-template-categories', (req, res) => {
+  const name = (req.body && req.body.name ? String(req.body.name) : '').trim();
+  if (!name) return res.status(400).json({ error: 'Name ist Pflicht' });
+  const dup = queryOne('SELECT id FROM email_template_categories WHERE LOWER(name) = LOWER(?)', [name]);
+  if (dup) return res.status(409).json({ error: 'Diese Kategorie existiert bereits' });
+  const result = execute('INSERT INTO email_template_categories (name) VALUES (?)', [name]);
+  res.json({ id: result.lastId, name, message: 'Kategorie angelegt' });
+});
+
+app.put('/api/email-template-categories/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const newName = (req.body && req.body.name ? String(req.body.name) : '').trim();
+  if (!newName) return res.status(400).json({ error: 'Name ist Pflicht' });
+  const existing = queryOne('SELECT name FROM email_template_categories WHERE id = ?', [id]);
+  if (!existing) return res.status(404).json({ error: 'Kategorie nicht gefunden' });
+  if (newName === existing.name) return res.json({ message: 'Keine Änderung' });
+  const dup = queryOne('SELECT id FROM email_template_categories WHERE LOWER(name) = LOWER(?) AND id != ?', [newName, id]);
+  if (dup) return res.status(409).json({ error: 'Diese Kategorie existiert bereits' });
+  // Erst Kategorie umbenennen, dann Vorlagen mit altem Namen aktualisieren.
+  execute('UPDATE email_template_categories SET name = ? WHERE id = ?', [newName, id]);
+  execute('UPDATE email_templates SET kategorie = ?, updated_at = CURRENT_TIMESTAMP WHERE kategorie = ?', [newName, existing.name]);
+  res.json({ message: 'Kategorie umbenannt' });
+});
+
+app.delete('/api/email-template-categories/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = queryOne('SELECT name FROM email_template_categories WHERE id = ?', [id]);
+  if (!existing) return res.status(404).json({ error: 'Kategorie nicht gefunden' });
+  const inUse = queryOne('SELECT COUNT(*) AS c FROM email_templates WHERE kategorie = ?', [existing.name]);
+  if (inUse && inUse.c > 0) {
+    return res.status(409).json({
+      error: `Kategorie "${existing.name}" wird in ${inUse.c} Vorlage${inUse.c > 1 ? 'n' : ''} verwendet und kann nicht gelöscht werden.`,
+      inUseCount: inUse.c
+    });
+  }
+  execute('DELETE FROM email_template_categories WHERE id = ?', [id]);
+  res.json({ message: 'Kategorie gelöscht' });
+});
+
+// ===== Adressbuch =====
+// Globale Liste reiner E-Mail-Adressen, automatisch beim Versand befüllt.
+
+const EMAIL_RE = /^[^@\s,]+@[^@\s,]+\.[^@\s,]+$/;
+
+function addToAddressBook(rawEmail) {
+  if (!rawEmail) return false;
+  const email = String(rawEmail).trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) return false;
+  try {
+    execute('INSERT OR IGNORE INTO address_book (email) VALUES (?)', [email]);
+    return true;
+  } catch (_) { return false; }
+}
+
+app.get('/api/address-book', (req, res) => {
+  const q = (req.query.q || '').toString().trim().toLowerCase();
+  const sql = q
+    ? 'SELECT id, email FROM address_book WHERE email LIKE ? ORDER BY email LIMIT 50'
+    : 'SELECT id, email FROM address_book ORDER BY email LIMIT 50';
+  const params = q ? ['%' + q + '%'] : [];
+  res.json(queryAll(sql, params));
+});
+
+app.post('/api/address-book', (req, res) => {
+  const email = (req.body && req.body.email ? String(req.body.email) : '').trim();
+  if (!email) return res.status(400).json({ error: 'E-Mail ist Pflicht' });
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Ungültige E-Mail-Adresse' });
+  addToAddressBook(email);
+  res.json({ message: 'Adresse aufgenommen' });
+});
+
 // ===== GENERIC SETTINGS =====
 
 const SENSITIVE_KEYS = ['o365_client_secret', 'openai_api_key', 's3_secret_key'];
-const ADMIN_ONLY_KEYS = ['o365_tenant_id', 'o365_client_id', 'o365_client_secret', 'o365_send_mailbox', 'o365_mailboxes', 's3_endpoint', 's3_bucket', 's3_access_key', 's3_secret_key', 's3_region'];
+const ADMIN_ONLY_KEYS = ['o365_tenant_id', 'o365_client_id', 'o365_client_secret', 'o365_send_mailbox', 'o365_mailboxes', 'o365_user_send_mailboxes', 's3_endpoint', 's3_bucket', 's3_access_key', 's3_secret_key', 's3_region'];
 
 app.get('/api/settings/:key', (req, res) => {
   const key = req.params.key;
@@ -901,18 +1059,28 @@ app.get('/api/o365/test', async (req, res) => {
     // Collect all mailboxes to test
     const sendMailbox = getSettingDecrypted('o365_send_mailbox');
     const mailboxesStr = getSettingDecrypted('o365_mailboxes');
+    const userSendStr = getSettingDecrypted('o365_user_send_mailboxes');
     const inboxMailboxes = mailboxesStr ? mailboxesStr.split('\n').map(m => m.trim()).filter(Boolean) : [];
-    const allMailboxes = [];
-    if (sendMailbox) allMailboxes.push(sendMailbox);
-    inboxMailboxes.forEach(m => { if (!allMailboxes.includes(m)) allMailboxes.push(m); });
+    const userSendMailboxes = userSendStr ? userSendStr.split('\n').map(m => m.trim()).filter(Boolean) : [];
+    const roleMap = new Map(); // mailbox -> Set<role>
+    const addRole = (m, role) => {
+      if (!m) return;
+      if (!roleMap.has(m)) roleMap.set(m, new Set());
+      roleMap.get(m).add(role);
+    };
+    addRole(sendMailbox, 'app-send');
+    inboxMailboxes.forEach(m => addRole(m, 'inbox'));
+    userSendMailboxes.forEach(m => addRole(m, 'user-send'));
+    const allMailboxes = [...roleMap.keys()];
 
     // Test each mailbox
     const mailboxStatus = await Promise.all(allMailboxes.map(async (mailbox) => {
+      const roles = [...roleMap.get(mailbox)];
       try {
         await graphRequest(token, `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(mailbox)}/mailFolders/inbox?$select=displayName`);
-        return { mailbox, ok: true };
+        return { mailbox, roles, ok: true };
       } catch (err) {
-        return { mailbox, ok: false, error: err.message };
+        return { mailbox, roles, ok: false, error: err.message };
       }
     }));
 
@@ -963,27 +1131,87 @@ app.patch('/api/o365/mails/:mailbox/:messageId/read', async (req, res) => {
   }
 });
 
+app.get('/api/o365/composer-from-addresses', (req, res) => {
+  try {
+    const userSendStr = queryOne("SELECT value FROM settings WHERE key = 'o365_user_send_mailboxes'")?.value || '';
+    const userSendList = userSendStr.split('\n').map(m => m.trim()).filter(Boolean);
+    const userId = req.headers['x-user-id'];
+    let staffEmail = '';
+    let signature = '';
+    if (userId) {
+      const staff = queryOne('SELECT email, signature FROM staff WHERE id = ?', [userId]);
+      staffEmail = (staff && staff.email || '').trim();
+      signature = (staff && staff.signature || '').toString();
+    }
+    // Default = erste Adresse aus den konfigurierten Sende-Postfächern
+    const ordered = [...userSendList];
+    if (staffEmail && !ordered.some(m => m.toLowerCase() === staffEmail.toLowerCase())) {
+      ordered.push(staffEmail);
+    }
+    res.json({ addresses: ordered, default: ordered[0] || '', staffEmail, signature });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/o365/send', async (req, res) => {
   try {
     const token = await getGraphToken();
-    const sendMailbox = queryOne("SELECT value FROM settings WHERE key = 'o365_send_mailbox'")?.value;
-    if (!sendMailbox) return res.status(400).json({ error: 'Kein Ausgangs-Postfach konfiguriert' });
-    const { to, cc, subject, body, replyTo } = req.body;
+    const { from, to, cc, bcc, subject, body, replyTo, attachments } = req.body;
     if (!to || !subject || !body) return res.status(400).json({ error: 'Empfänger, Betreff und Nachricht sind Pflichtfelder' });
+
+    // Whitelist erlaubter Absender bestimmen:
+    // 1) App-Ausgangspostfach, 2) User-Sende-Postfächer, 3) Mitarbeiter-Email des eingeloggten Users
+    const appSend = (queryOne("SELECT value FROM settings WHERE key = 'o365_send_mailbox'")?.value || '').trim();
+    const userSendStr = (queryOne("SELECT value FROM settings WHERE key = 'o365_user_send_mailboxes'")?.value || '');
+    const userSendList = userSendStr.split('\n').map(m => m.trim()).filter(Boolean);
+    const userId = req.headers['x-user-id'];
+    let staffEmail = '';
+    if (userId) {
+      const staff = queryOne('SELECT email FROM staff WHERE id = ?', [userId]);
+      staffEmail = ((staff && staff.email) || '').trim();
+    }
+    const allowed = new Set([appSend, ...userSendList, staffEmail].filter(Boolean).map(s => s.toLowerCase()));
+    const requestedFrom = (from || '').trim();
+    let fromAddr = '';
+    if (requestedFrom && allowed.has(requestedFrom.toLowerCase())) {
+      fromAddr = requestedFrom;
+    } else if (userSendList.length > 0) {
+      fromAddr = userSendList[0];
+    } else if (appSend) {
+      fromAddr = appSend;
+    }
+    if (!fromAddr) return res.status(400).json({ error: 'Kein gültiges Absender-Postfach gefunden' });
+
+    // Signatur ist bereits clientseitig im Composer-Body enthalten (Outlook-Verhalten).
+    // Outlook-kompatibles HTML-Wrapping (Calibri 11pt, schwarz) — Graph erzeugt ansonsten Standard-MIME wie Outlook.
+    const wrappedBody = `<html><head><meta charset="utf-8"></head><body style="font-family:Calibri, Arial, sans-serif;font-size:11pt;color:#000000;">${body}</body></html>`;
 
     const message = {
       subject,
-      body: { contentType: 'HTML', content: body },
-      toRecipients: to.split(',').map(e => ({ emailAddress: { address: e.trim() } }))
+      body: { contentType: 'HTML', content: wrappedBody },
+      toRecipients: to.split(',').map(e => ({ emailAddress: { address: e.trim() } })).filter(r => r.emailAddress.address)
     };
-    if (cc) message.ccRecipients = cc.split(',').map(e => ({ emailAddress: { address: e.trim() } }));
+    if (cc) message.ccRecipients = cc.split(',').map(e => ({ emailAddress: { address: e.trim() } })).filter(r => r.emailAddress.address);
+    if (bcc) message.bccRecipients = bcc.split(',').map(e => ({ emailAddress: { address: e.trim() } })).filter(r => r.emailAddress.address);
     if (replyTo) message.replyTo = [{ emailAddress: { address: replyTo.trim() } }];
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      message.attachments = attachments.map(a => ({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: a.name,
+        contentType: a.contentType || 'application/octet-stream',
+        contentBytes: a.contentBytes
+      }));
+    }
 
     await graphRequest(token,
-      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sendMailbox)}/sendMail`,
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromAddr)}/sendMail`,
       { method: 'POST', body: JSON.stringify({ message, saveToSentItems: true }) }
     );
-    res.json({ success: true });
+    // Adressbuch: alle Empfänger (To+Cc+Bcc) idempotent aufnehmen
+    const collect = (str) => (str || '').split(',').map(s => s.trim()).filter(Boolean);
+    [...collect(to), ...collect(cc), ...collect(bcc)].forEach(addToAddressBook);
+    res.json({ success: true, from: fromAddr });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3327,12 +3555,33 @@ app.get('/api/files/proxy-download', async (req, res) => {
     const filename = key.split('/').pop();
     const command = new GetObjectCommand({ Bucket: getS3Bucket(), Key: key });
     const response = await getS3Client().send(command);
-    res.setHeader('Content-Disposition', 'attachment; filename="' + filename.replace(/"/g, '') + '"');
+    // RFC 5987 — Dateinamen mit Umlauten/Sonderzeichen sind in raw HTTP-Headern nicht erlaubt.
+    // ASCII-Fallback für alte Clients + UTF-8-encoded filename* für moderne Browser.
+    const asciiFilename = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+    const utf8Filename = encodeURIComponent(filename);
+    res.setHeader('Content-Disposition', `attachment; filename="${asciiFilename}"; filename*=UTF-8''${utf8Filename}`);
     res.setHeader('Content-Type', response.ContentType || 'application/octet-stream');
-    response.Body.pipe(res);
+    // Robuste Stream-Behandlung — AWS SDK v3 liefert je nach Runtime Node-Readable, Web-ReadableStream
+    // oder Buffer-API. Wir versuchen pipe() (Node Readable), fallen sonst auf async iteration zurück.
+    const body = response.Body;
+    if (body && typeof body.pipe === 'function') {
+      body.pipe(res);
+    } else if (body && typeof body.transformToByteArray === 'function') {
+      const bytes = await body.transformToByteArray();
+      res.end(Buffer.from(bytes));
+    } else if (body && Symbol.asyncIterator in Object(body)) {
+      for await (const chunk of body) res.write(chunk);
+      res.end();
+    } else {
+      throw new Error('Unbekanntes Body-Format vom S3-Client: ' + (body && body.constructor && body.constructor.name));
+    }
   } catch (err) {
-    console.error('S3 Proxy Download Error:', err.message);
-    res.status(500).json({ error: 'Download fehlgeschlagen: ' + err.message });
+    console.error('S3 Proxy Download Error:', err && err.stack ? err.stack : err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Download fehlgeschlagen: ' + (err && err.message ? err.message : String(err)) });
+    } else {
+      res.end();
+    }
   }
 });
 
@@ -3778,11 +4027,42 @@ app.put('/api/akten/:id', (req, res) => {
 });
 
 // ===== Akten-Beteiligte (participants) =====
-app.get('/api/akten/:id/beteiligte', (req, res) => {
-  res.json(queryAll(
+app.get('/api/akten/:id/beteiligte', async (req, res) => {
+  const rows = queryAll(
     'SELECT * FROM akten_beteiligte WHERE akte_id = ? ORDER BY sort_order ASC, id ASC',
     [Number(req.params.id)]
-  ));
+  );
+  // E-Mail und Telefon aus den verlinkten Stammdaten-Entitäten nachziehen, wenn lokal leer.
+  // Kunden liegen in der Bemo-DB; Anwälte/Versicherungen/Vermittler in der Stammdaten-API.
+  const enriched = await Promise.all(rows.map(async (b) => {
+    const hasEmail = b.email && String(b.email).trim();
+    const hasPhone = b.telefon && String(b.telefon).trim();
+    if ((hasEmail && hasPhone) || !b.entity_id) return b;
+    const type = (b.type || '').toLowerCase();
+    try {
+      if (type === 'kunde') {
+        const c = queryOne('SELECT email, phone FROM customers WHERE id = ?', [b.entity_id]);
+        if (c) {
+          if (!hasEmail) b.email = c.email || '';
+          if (!hasPhone) b.telefon = c.phone || '';
+        }
+      } else {
+        let path = null;
+        if (type === 'versicherung') path = '/api/insurances/' + b.entity_id;
+        else if (type === 'anwalt') path = '/api/lawyers/' + b.entity_id;
+        else if (type === 'vermittler') path = '/api/vermittler/' + b.entity_id;
+        if (path) {
+          const data = await fetchStammdatenById(path);
+          if (data && typeof data === 'object' && !data.error) {
+            if (!hasEmail) b.email = data.email || data.email2 || '';
+            if (!hasPhone) b.telefon = data.telefon1 || data.mobil || data.telefon2 || '';
+          }
+        }
+      }
+    } catch (_) { /* enrichment ist Best-Effort, niemals fatal */ }
+    return b;
+  }));
+  res.json(enriched);
 });
 
 app.put('/api/akten/:id/beteiligte/sort', (req, res) => {

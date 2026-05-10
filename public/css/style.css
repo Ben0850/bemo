@@ -887,6 +887,13 @@ tr.clickable:hover {
   max-width: 900px;
 }
 
+.modal.modal-email-composer {
+  max-width: 980px;
+  width: 96%;
+}
+.modal.modal-email-composer .modal-body { padding: 0; }
+.modal.modal-email-composer .modal-header { background:#f3f2f1; }
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -3362,3 +3369,154 @@ tr.clickable:hover {
   .dash-section { margin-top: 16px; }
   .dash-section h3 { font-size: 16px; }
 }
+
+/* ===== E-Mail Composer (Outlook-Style) ===== */
+.email-composer { background:#fff; color:#000; }
+.email-composer-toolbar {
+  display:flex; align-items:center; gap:8px;
+  padding:10px 14px; background:#f3f2f1; border-bottom:1px solid #e1dfdd;
+}
+.email-composer-toolbar .ec-send {
+  background:#0078d4; color:#fff; border:0; padding:7px 18px; border-radius:2px;
+  font-size:13px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+}
+.email-composer-toolbar .ec-send:hover { background:#106ebe; }
+.email-composer-toolbar .ec-send:disabled { background:#a0a0a0; cursor:wait; }
+.email-composer-toolbar .ec-cancel {
+  background:transparent; color:#323130; border:1px solid #8a8886; padding:6px 14px; border-radius:2px;
+  font-size:13px; cursor:pointer;
+}
+.email-composer-toolbar .ec-cancel:hover { background:#edebe9; }
+.email-composer-toolbar .ec-attach {
+  background:transparent; color:#323130; border:0; padding:6px 10px; border-radius:2px;
+  font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:4px;
+}
+.email-composer-toolbar .ec-attach:hover { background:#edebe9; }
+
+.email-composer-fields { padding:0; border-bottom:1px solid #e1dfdd; }
+.email-composer-row {
+  display:flex; align-items:center; border-bottom:1px solid #f3f2f1;
+  padding:6px 14px; gap:8px;
+}
+.email-composer-row:last-child { border-bottom:0; }
+.email-composer-row label {
+  width:64px; flex-shrink:0; font-size:13px; color:#605e5c; font-weight:600;
+}
+.email-composer-row input,
+.email-composer-row select {
+  flex:1; border:0; outline:none; background:transparent;
+  font-size:13.5px; color:#201f1e; padding:4px 0; font-family:inherit;
+}
+.email-composer-row select { cursor:pointer; }
+.email-composer-row .ec-cc-toggle {
+  background:transparent; border:0; color:#0078d4; font-size:12px; cursor:pointer; padding:2px 6px;
+}
+.email-composer-row .ec-cc-toggle:hover { text-decoration:underline; }
+
+.email-composer-formatbar {
+  display:flex; align-items:center; gap:2px; padding:6px 12px;
+  background:#faf9f8; border-bottom:1px solid #e1dfdd; flex-wrap:wrap;
+}
+.email-composer-formatbar button {
+  background:transparent; border:0; padding:5px 9px; cursor:pointer;
+  font-size:13px; color:#323130; border-radius:2px; min-width:28px;
+}
+.email-composer-formatbar button:hover { background:#edebe9; }
+.email-composer-formatbar button.active { background:#c7e0f4; }
+.email-composer-formatbar .ec-divider { width:1px; height:18px; background:#e1dfdd; margin:0 4px; }
+.email-composer-formatbar select {
+  border:1px solid #d2d0ce; background:#fff; padding:3px 4px; font-size:12px; border-radius:2px;
+}
+
+.email-composer-editor {
+  min-height:280px; max-height:50vh; overflow-y:auto; outline:none;
+  padding:14px 18px; font-family:Calibri, Arial, sans-serif; font-size:11pt;
+  color:#000; background:#fff; line-height:1.4;
+}
+.email-composer-editor:empty::before { content: attr(data-placeholder); color:#a19f9d; }
+/* Aufzählungen klar eingerückt darstellen — execCommand erzeugt nackte ul/ol ohne Inline-Style */
+.email-composer-editor ul,
+.email-composer-editor ol {
+  margin: 6px 0;
+  padding-left: 36px;
+}
+.email-composer-editor li { margin: 2px 0; }
+.email-composer-editor ul ul,
+.email-composer-editor ol ol,
+.email-composer-editor ul ol,
+.email-composer-editor ol ul { margin: 2px 0; }
+
+.email-composer-attachments {
+  padding:6px 14px; border-top:1px solid #e1dfdd; display:flex; flex-wrap:wrap; gap:6px; background:#faf9f8;
+}
+.email-composer-attachments:empty { display:none; }
+.ec-att-chip {
+  display:inline-flex; align-items:center; gap:6px; padding:4px 8px;
+  background:#fff; border:1px solid #d2d0ce; border-radius:14px; font-size:12px; color:#323130;
+}
+.ec-att-chip .ec-att-remove {
+  background:transparent; border:0; cursor:pointer; color:#605e5c; font-size:14px; padding:0 2px; line-height:1;
+}
+.ec-att-chip .ec-att-remove:hover { color:#a4262c; }
+
+/* Anhang-Auswahl-Popover */
+.ec-attach-menu {
+  position:absolute; z-index:1200; background:#fff; border:1px solid #d2d0ce;
+  box-shadow:0 4px 14px rgba(0,0,0,0.15); border-radius:2px; min-width:240px; padding:4px 0;
+}
+.ec-attach-menu button {
+  width:100%; text-align:left; background:transparent; border:0; padding:9px 14px;
+  font-size:13px; color:#201f1e; cursor:pointer; display:flex; align-items:center; gap:10px;
+}
+.ec-attach-menu button:hover { background:#f3f2f1; }
+.ec-attach-menu button .ec-menu-ico { font-size:16px; width:18px; text-align:center; }
+
+/* S3-Anhang-Sub-Modal */
+.s3-attach-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:1100;
+  display:flex; justify-content:center; align-items:center; padding:20px;
+}
+.s3-attach-modal {
+  background:#fff; border-radius:6px; box-shadow:var(--shadow-md);
+  width:96%; max-width:820px; max-height:88vh; display:flex; flex-direction:column;
+}
+.s3-attach-modal .s3a-header {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:14px 18px; background:#f3f2f1; border-bottom:1px solid #e1dfdd; border-radius:6px 6px 0 0;
+}
+.s3-attach-modal .s3a-header h3 { margin:0; font-size:16px; font-weight:600; color:#201f1e; }
+.s3-attach-modal .s3a-header .s3a-x {
+  background:none; border:0; font-size:22px; cursor:pointer; color:#605e5c; padding:0 4px;
+}
+.s3-attach-modal .s3a-header .s3a-x:hover { color:#201f1e; }
+.s3-attach-modal .s3a-breadcrumb {
+  padding:8px 16px; border-bottom:1px solid #f0f0f0; background:#faf9f8; font-size:13px;
+}
+.s3-attach-modal .s3a-list {
+  flex:1; overflow-y:auto; min-height:280px; max-height:50vh;
+}
+.s3-attach-modal .s3a-row {
+  display:flex; align-items:center; gap:10px; padding:7px 16px; border-bottom:1px solid #f3f2f1;
+  cursor:pointer; user-select:none;
+}
+.s3-attach-modal .s3a-row:hover { background:#f3f2f1; }
+.s3-attach-modal .s3a-row.s3a-folder .s3a-name { font-weight:600; }
+.s3-attach-modal .s3a-row input[type=checkbox] { margin:0; }
+.s3-attach-modal .s3a-row .s3a-ico { width:22px; text-align:center; }
+.s3-attach-modal .s3a-row .s3a-name { flex:1; font-size:13.5px; color:#201f1e; }
+.s3-attach-modal .s3a-row .s3a-size { width:80px; font-size:12px; color:#605e5c; text-align:right; }
+.s3-attach-modal .s3a-row .s3a-date { width:140px; font-size:12px; color:#605e5c; text-align:right; }
+.s3-attach-modal .s3a-empty { padding:30px; text-align:center; color:#605e5c; font-size:13px; }
+.s3-attach-modal .s3a-footer {
+  display:flex; align-items:center; gap:8px; padding:12px 16px; border-top:1px solid #e1dfdd; background:#faf9f8; border-radius:0 0 6px 6px;
+}
+.s3-attach-modal .s3a-footer .s3a-count { flex:1; font-size:13px; color:#605e5c; }
+.s3-attach-modal .s3a-footer .s3a-add {
+  background:#0078d4; color:#fff; border:0; padding:7px 18px; border-radius:2px; font-size:13px; font-weight:600; cursor:pointer;
+}
+.s3-attach-modal .s3a-footer .s3a-add:hover { background:#106ebe; }
+.s3-attach-modal .s3a-footer .s3a-add:disabled { background:#a0a0a0; cursor:not-allowed; }
+.s3-attach-modal .s3a-footer .s3a-cancel {
+  background:transparent; color:#323130; border:1px solid #8a8886; padding:6px 14px; border-radius:2px; font-size:13px; cursor:pointer;
+}
+.s3-attach-modal .s3a-footer .s3a-cancel:hover { background:#edebe9; }

@@ -286,6 +286,7 @@ function navigate(page, data) {
     case 'lawyers': renderLawyers(); break;
     case 'vermittler': renderVermittler(); break;
     case 'dekra-drs': renderDekraDrs(); break;
+    case 'email-vorlagen': renderEmailVorlagen(); break;
     case 'akten': renderAkten(); break;
     case 'akte-detail': renderAkteDetail(data); break;
     case 'calendar': renderCalendar(); break;
@@ -2832,7 +2833,7 @@ function filterStaffTable() {
 }
 
 async function openStaffForm(id) {
-  let staff = { name: '', station: '', password: '', permission_level: 'Benutzer', active: 1, has_calendar: 1, calendar_visibility: 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days: 30, weekly_hours: 40, work_days: '1,2,3,4,5', entry_date: '', exit_date: '', email: '', street: '', zip: '', city: '', phone_private: '', phone_business: '', emergency_name: '', emergency_phone: '', default_station_id: null, username: '', hidden_in_planning: 0 };
+  let staff = { name: '', station: '', password: '', permission_level: 'Benutzer', active: 1, has_calendar: 1, calendar_visibility: 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days: 30, weekly_hours: 40, work_days: '1,2,3,4,5', entry_date: '', exit_date: '', email: '', street: '', zip: '', city: '', phone_private: '', phone_business: '', emergency_name: '', emergency_phone: '', default_station_id: null, username: '', hidden_in_planning: 0, signature: '' };
   let perYearDays = {};
   let perYearBonus = {};
 
@@ -3001,6 +3002,41 @@ async function openStaffForm(id) {
           }).join('')}
         </div>
       </div>
+      <div class="form-group">
+        <label>Persönliche Signatur</label>
+        <div style="font-size:12px;color:var(--text-muted);margin:-4px 0 6px;">Wird automatisch unter jede E-Mail dieses Mitarbeiters gesetzt.</div>
+        <div class="email-composer" style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+          <div class="email-composer-formatbar" style="flex-wrap:nowrap;overflow-x:auto;">
+            <select onchange="staffSigExec('fontName', this.value)" title="Schriftart">
+              <option value="Calibri">Calibri</option>
+              <option value="Arial">Arial</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Verdana">Verdana</option>
+              <option value="Courier New">Courier New</option>
+            </select>
+            <select onchange="staffSigSetSize(this.value)" title="Schriftgröße">
+              <option value="1">8pt</option>
+              <option value="2">10pt</option>
+              <option value="3" selected>11pt</option>
+              <option value="4">14pt</option>
+              <option value="5">18pt</option>
+              <option value="6">24pt</option>
+              <option value="7">36pt</option>
+            </select>
+            <span class="ec-divider"></span>
+            <button type="button" onmousedown="event.preventDefault();" onclick="staffSigExec('bold')" title="Fett (Strg+B)"><b>F</b></button>
+            <button type="button" onmousedown="event.preventDefault();" onclick="staffSigExec('italic')" title="Kursiv (Strg+I)"><i>K</i></button>
+            <button type="button" onmousedown="event.preventDefault();" onclick="staffSigExec('underline')" title="Unterstreichen (Strg+U)"><u>U</u></button>
+            <span class="ec-divider"></span>
+            <button type="button" onmousedown="event.preventDefault();" onclick="staffSigExec('insertUnorderedList')" title="Aufzählung">&#8226; Liste</button>
+            <button type="button" onmousedown="event.preventDefault();" onclick="staffSigExec('insertOrderedList')" title="Nummerierte Liste">1. Liste</button>
+            <span class="ec-divider"></span>
+            <button type="button" onmousedown="event.preventDefault();" onclick="staffSigInsertLink()" title="Link einfügen">&#128279;</button>
+            <button type="button" onmousedown="event.preventDefault();" onclick="staffSigExec('removeFormat')" title="Formatierung entfernen">&#10005;</button>
+          </div>
+          <div id="staff-sig-editor" class="email-composer-editor" contenteditable="true" data-placeholder="Beispiel: Mit freundlichen Grüßen — Max Mustermann, Tel 0541/..." style="min-height:140px;"></div>
+        </div>
+      </div>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">${id ? 'Speichern' : 'Anlegen'}</button>
         <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
@@ -3008,6 +3044,25 @@ async function openStaffForm(id) {
     </form>
   `;
   openModal(title, html);
+  // Signatur-HTML nach Modal-Render einfügen, damit Markup erhalten bleibt
+  const sigEd = document.getElementById('staff-sig-editor');
+  if (sigEd) sigEd.innerHTML = staff.signature || '';
+}
+
+function staffSigExec(cmd, val) {
+  const ed = document.getElementById('staff-sig-editor');
+  if (ed) ed.focus();
+  try { document.execCommand(cmd, false, val); } catch (e) {}
+}
+function staffSigSetSize(sizeIdx) {
+  const ed = document.getElementById('staff-sig-editor');
+  if (ed) ed.focus();
+  try { document.execCommand('fontSize', false, sizeIdx); } catch (e) {}
+}
+function staffSigInsertLink() {
+  const url = prompt('Link-URL:');
+  if (!url) return;
+  staffSigExec('createLink', url);
 }
 
 async function saveStaff(e, id) {
@@ -3064,6 +3119,7 @@ async function saveStaff(e, id) {
     work_days: [1,2,3,4,5,6,7].filter(n => document.getElementById('work-day-' + n)?.checked).join(',') || '1,2,3,4,5',
     default_station_id: form.default_station_id.value ? Number(form.default_station_id.value) : null,
     username: form.username.value.trim(),
+    signature: document.getElementById('staff-sig-editor')?.innerHTML || '',
   };
 
   try {
@@ -3116,6 +3172,77 @@ const VACATION_ENTRY_TYPES = ['Urlaub', 'Halber Urlaubstag', 'Krankheit', 'Weite
 const VACATION_STAFF_COLORS = ['#2563eb','#dc2626','#059669','#d97706','#7c3aed','#db2777','#0891b2','#65a30d','#c026d3','#ea580c'];
 let vacCurrentYear = new Date().getFullYear();
 let vacSelectedStaff = 'alle';
+// Mitarbeiter-Filter: null = alle sichtbar, Set<staffId> = nur diese
+let vacFilteredStaffIds = null;
+let vacReqFilteredStaffIds = null;
+
+// Hilfsfunktion: Mitarbeiter-Liste in Spalten zu 5 zerlegen, mit Farbpunkt + Checkbox
+function _vacStaffColumns(list, staffColorMap, isChecked, onchangeFn) {
+  const cols = [];
+  for (let i = 0; i < list.length; i += 5) cols.push(list.slice(i, i + 5));
+  return cols.map(col => `<div style="display:flex;flex-direction:column;gap:2px;">
+    ${col.map(s => `<label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" data-staff-id="${s.id}" ${isChecked(s.id) ? 'checked' : ''} onchange="${onchangeFn}(${s.id}, this.checked)">
+      <span style="width:10px;height:10px;border-radius:2px;background:${staffColorMap[s.id] || '#999'};display:inline-block;"></span>
+      ${escapeHtml(s.name)}
+    </label>`).join('')}
+  </div>`).join('');
+}
+
+// Toggle-Funktionen für An-/Abwesenheitsplaner-Filter
+function vacToggleStaffFilter(staffId, checked) {
+  if (!vacFilteredStaffIds) {
+    // Erste Aktion: aus den UI-Checkboxen initialisieren (alle waren checked)
+    vacFilteredStaffIds = new Set();
+    document.querySelectorAll('#vac-staff-filter input[data-staff-id]').forEach(cb => {
+      vacFilteredStaffIds.add(Number(cb.dataset.staffId));
+    });
+  }
+  if (checked) vacFilteredStaffIds.add(staffId);
+  else vacFilteredStaffIds.delete(staffId);
+  renderVacation();
+}
+
+function vacToggleAllStaff(checked) {
+  vacFilteredStaffIds = checked ? null : new Set();
+  renderVacation();
+}
+
+// Toggle-Funktionen für Urlaubsanträge-Filter
+function vacReqToggleStaffFilter(staffId, checked) {
+  if (!vacReqFilteredStaffIds) {
+    vacReqFilteredStaffIds = new Set();
+    document.querySelectorAll('#vacreq-staff-filter input[data-staff-id]').forEach(cb => {
+      vacReqFilteredStaffIds.add(Number(cb.dataset.staffId));
+    });
+  }
+  if (checked) vacReqFilteredStaffIds.add(staffId);
+  else vacReqFilteredStaffIds.delete(staffId);
+  renderVacationRequests(getVacReqFilters());
+}
+
+function vacReqToggleAllStaff(checked) {
+  vacReqFilteredStaffIds = checked ? null : new Set();
+  renderVacationRequests(getVacReqFilters());
+}
+
+// Generischer Filter-Block (Container-ID + Toggle-Funktionsnamen + State)
+function buildVacStaffFilterBlock(containerId, staffList, staffColorMap, filteredSet, toggleFn, toggleAllFn) {
+  if (!staffList || staffList.length === 0) return '';
+  const isChecked = (id) => !filteredSet || filteredSet.has(id);
+  const allChecked = !filteredSet;
+  return `<div id="${containerId}" style="margin-bottom:14px;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+      <span style="font-weight:600;font-size:13px;">Mitarbeiter filtern:</span>
+      <label style="font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px;">
+        <input type="checkbox" ${allChecked ? 'checked' : ''} onchange="${toggleAllFn}(this.checked)"> Alle
+      </label>
+    </div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;">
+      ${_vacStaffColumns(staffList, staffColorMap, isChecked, toggleFn)}
+    </div>
+  </div>`;
+}
 
 function getNRWHolidays(year) {
   // Easter calculation (Anonymous Gregorian algorithm)
@@ -3203,6 +3330,10 @@ async function renderVacation() {
       visibleEntries = filteredEntries.filter(e => e.entry_type === 'Urlaub' || e.entry_type === 'Sonstige Abwesenheit');
     } else {
       visibleEntries = filteredEntries.filter(e => e.staff_id === Number(vacSelectedStaff));
+    }
+    // Mitarbeiter-Filter (Checkbox-Liste oben) anwenden — nur in "alle"-Ansicht relevant
+    if (vacSelectedStaff === 'alle' && vacFilteredStaffIds) {
+      visibleEntries = visibleEntries.filter(e => vacFilteredStaffIds.has(e.staff_id));
     }
 
     // Build day map: dateStr -> [{staff_id, entry_type, entry_id}]
@@ -3398,6 +3529,13 @@ async function renderVacation() {
         </div>
       </div>
       ${statsHtml}
+      ${vacSelectedStaff === 'alle' ? buildVacStaffFilterBlock('vac-staff-filter', staffList.filter(s => {
+        const yearStart = `${vacCurrentYear}-01-01`;
+        const yearEnd = `${vacCurrentYear}-12-31`;
+        if (s.entry_date && s.entry_date > yearEnd) return false;
+        if (s.exit_date && s.exit_date < yearStart) return false;
+        return true;
+      }), staffColorMap, vacFilteredStaffIds, 'vacToggleStaffFilter', 'vacToggleAllStaff') : ''}
       <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px;align-items:center;">
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#a8896a;display:inline-block;"></span> Wochenende</span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#facc15;display:inline-block;"></span> Feiertag</span>
@@ -3784,7 +3922,7 @@ async function renderVacationRequests(filters) {
     filters = { staff_id: '', date_from: `${currentYear}-01-01`, date_to: `${currentYear}-12-31`, status: '' };
   }
   try {
-    const [entries, staffList] = await Promise.all([
+    const [entries, staffListAll] = await Promise.all([
       api('/api/vacation'),
       api('/api/staff')
     ]);
@@ -3809,11 +3947,100 @@ async function renderVacationRequests(filters) {
       requests = requests.filter(e => e.status === filters.status);
     }
 
-    // Sort: Beantragt first, then by date
-    const statusOrder = { 'Beantragt': 0, 'Genehmigt': 1, 'Abgelehnt': 2 };
-    requests.sort((a, b) => (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0) || a.start_date.localeCompare(b.start_date));
+    // Im Planer ausgeblendete Mitarbeiter rausfiltern (für Kalender + Filter-Block)
+    const staffList = staffListAll.filter(s => !s.hidden_in_planning);
+    const visibleStaffIds = new Set(staffList.map(s => s.id));
+    if (admin) requests = requests.filter(e => visibleStaffIds.has(e.staff_id));
 
-    const holidays = getNRWHolidays(new Date().getFullYear());
+    // Mitarbeiter-Filter (Checkbox-Liste oben) anwenden
+    if (admin && vacReqFilteredStaffIds) {
+      requests = requests.filter(e => vacReqFilteredStaffIds.has(e.staff_id));
+    }
+
+    // Sort: Beantragt first (actionable), dann nach Startdatum absteigend (neueste oben)
+    const statusOrder = { 'Beantragt': 0, 'Genehmigt': 1, 'Abgelehnt': 2 };
+    requests.sort((a, b) => (statusOrder[a.status] || 0) - (statusOrder[b.status] || 0) || b.start_date.localeCompare(a.start_date));
+
+    // Staff color map (für Filter-Block UI + Kalender-Übersicht)
+    const staffColorMap = {};
+    staffList.forEach((s, i) => { staffColorMap[s.id] = VACATION_STAFF_COLORS[i % VACATION_STAFF_COLORS.length]; });
+
+    // Kalender-Jahr aus date_from ableiten (Fallback: aktuelles Jahr)
+    const calYear = filters.date_from ? Number(filters.date_from.slice(0, 4)) : new Date().getFullYear();
+    const holidays = getNRWHolidays(calYear);
+    const months = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+
+    // Day map für Kalender — Abgelehnt ausgeblendet, Beantragt/Genehmigt visualisiert
+    const calRequests = requests.filter(e => e.status !== 'Abgelehnt');
+    const dayMap = {};
+    calRequests.forEach(e => {
+      const days = getVacationDaysInRange(e.start_date, e.end_date, holidays);
+      days.forEach(d => {
+        if (!d.startsWith(String(calYear))) return;
+        if (e.entry_type !== 'Weiterbildung') {
+          const dt = new Date(d + 'T12:00:00');
+          const dow = dt.getDay();
+          if (dow === 0 || dow === 6 || holidays.has(d)) return;
+        }
+        if (!dayMap[d]) dayMap[d] = [];
+        dayMap[d].push({ staff_id: e.staff_id, status: e.status, staff_name: e.staff_name, entry_type: e.entry_type });
+      });
+    });
+
+    // Kalender-Tabelle bauen
+    let calHtml = '<table class="vac-calendar"><tbody>';
+    for (let m = 0; m < 12; m++) {
+      const daysInMonth = new Date(calYear, m + 1, 0).getDate();
+      calHtml += `<tr><td class="vac-month-cell">${months[m]}</td>`;
+      for (let d = 1; d <= 31; d++) {
+        if (d > daysInMonth) { calHtml += '<td class="vac-day-cell vac-empty"></td>'; continue; }
+        const dateStr = `${calYear}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const dt = new Date(dateStr + 'T12:00:00');
+        const dow = dt.getDay();
+        const isWeekend = dow === 0 || dow === 6;
+        const isHoliday = holidays.has(dateStr);
+        const dayEntries = dayMap[dateStr] || [];
+        let cellClass = 'vac-day-cell';
+        let cellStyle = '';
+        let cellTitle = '';
+        if (isHoliday) { cellClass += ' vac-holiday'; cellTitle = holidays.get(dateStr); }
+        else if (isWeekend) { cellClass += ' vac-weekend'; }
+        if (dayEntries.length > 0) {
+          // Bei Mix mehrerer Mitarbeiter: Gradient nach Reihenfolge; einzelner Eintrag: solid/hatched je nach Status
+          if (dayEntries.length === 1) {
+            const ent = dayEntries[0];
+            const c = staffColorMap[ent.staff_id] || '#999';
+            if (ent.status === 'Beantragt') {
+              cellStyle = `background:repeating-linear-gradient(45deg, ${c} 0 5px, ${c}66 5px 10px);color:#fff;`;
+            } else {
+              cellStyle = `background:${c};color:#fff;`;
+            }
+            cellTitle = `${ent.staff_name} — ${ent.entry_type} (${ent.status})`;
+          } else {
+            const colors = dayEntries.map(e => staffColorMap[e.staff_id] || '#999');
+            const pct = 100 / colors.length;
+            const stops = colors.map((c, i) => `${c} ${i * pct}%, ${c} ${(i + 1) * pct}%`).join(', ');
+            cellStyle = `background:linear-gradient(135deg, ${stops});color:#fff;`;
+            cellTitle = dayEntries.map(e => `${e.staff_name} (${e.status})`).join(', ');
+          }
+        }
+        calHtml += `<td class="${cellClass}" style="${cellStyle}" title="${escapeHtml(cellTitle)}">${d}</td>`;
+      }
+      calHtml += '</tr>';
+    }
+    calHtml += '</tbody></table>';
+
+    // Legende für Kalender
+    const staffWithEntries = [...new Set(calRequests.map(e => e.staff_id))];
+    const calLegendHtml = staffWithEntries.length ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+      <span style="font-weight:600;">Mitarbeiter:</span>
+      ${staffWithEntries.map(sid => {
+        const s = staffList.find(st => st.id === sid);
+        return s ? `<span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:${staffColorMap[sid]};display:inline-block;"></span> ${escapeHtml(s.name)}</span>` : '';
+      }).join('')}
+      <span style="margin-left:18px;display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:repeating-linear-gradient(45deg, #2563eb 0 5px, #2563eb66 5px 10px);display:inline-block;"></span> Beantragt</span>
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#2563eb;display:inline-block;"></span> Genehmigt</span>
+    </div>` : '';
 
     let tableHtml = '';
     if (requests.length > 0) {
@@ -3884,6 +4111,14 @@ async function renderVacationRequests(filters) {
               ${VAC_REQUEST_STATUS.map(s => `<option value="${s}" ${filters.status === s ? 'selected' : ''}>${s}</option>`).join('')}
             </select>
           </div>
+        </div>
+        ${admin ? buildVacStaffFilterBlock('vacreq-staff-filter', staffList, staffColorMap, vacReqFilteredStaffIds, 'vacReqToggleStaffFilter', 'vacReqToggleAllStaff') : ''}
+      </div>
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header"><h3>Kalender-Übersicht ${calYear}</h3></div>
+        <div style="padding:12px 16px;">
+          ${calLegendHtml}
+          <div style="overflow-x:auto;">${calHtml}</div>
         </div>
       </div>
       <div class="card">
@@ -4978,7 +5213,7 @@ async function renderSettingsProgram() {
   if (isAdmin()) {
     let o365 = {};
     try {
-      const keys = ['o365_tenant_id', 'o365_client_id', 'o365_client_secret', 'o365_send_mailbox', 'o365_mailboxes'];
+      const keys = ['o365_tenant_id', 'o365_client_id', 'o365_client_secret', 'o365_send_mailbox', 'o365_mailboxes', 'o365_user_send_mailboxes'];
       const results = await Promise.all(keys.map(k => api('/api/settings/' + k)));
       results.forEach(r => { o365[r.key] = r.value || ''; });
     } catch (e) {}
@@ -5020,16 +5255,27 @@ async function renderSettingsProgram() {
 
       <div class="form-row">
         <div class="form-group" style="flex:1;">
-          <label>Ausgangs-Postfach (Versand)</label>
+          <label>Ausgangs-Postfach (App-Meldungen)</label>
           <input type="email" id="settings-o365-send-mailbox" placeholder="" value="${escapeHtml(o365.o365_send_mailbox || '')}">
-          <span style="font-size:11px;color:var(--text-muted);">E-Mails werden von dieser Adresse gesendet</span>
+          <span style="font-size:11px;color:var(--text-muted);">Von dieser Adresse werden automatische Programm-Meldungen versendet (z. B. Urlaubsantrag-Benachrichtigungen).</span>
         </div>
+      </div>
+
+      <div style="border-top:1px solid var(--border);margin:16px 0;padding-top:16px;">
+        <p style="font-weight:600;margin-bottom:4px;">E-Mail-Client</p>
+        <span style="font-size:11px;color:var(--text-muted);">Postfächer, die im Programm-internen E-Mail-Client zum Lesen und Versenden zur Verfügung stehen.</span>
       </div>
 
       <div class="form-group">
         <label>Eingangs-Postfächer (Empfang)</label>
         <textarea id="settings-o365-mailboxes" rows="3" placeholder="">${escapeHtml(o365.o365_mailboxes || '')}</textarea>
         <span style="font-size:11px;color:var(--text-muted);">Ein Postfach pro Zeile. Diese Postfächer werden im E-Mail-Eingang angezeigt.</span>
+      </div>
+
+      <div class="form-group">
+        <label>Sende-Postfächer (Versand aus E-Mail-Client)</label>
+        <textarea id="settings-o365-user-send-mailboxes" rows="3" placeholder="">${escapeHtml(o365.o365_user_send_mailboxes || '')}</textarea>
+        <span style="font-size:11px;color:var(--text-muted);">Ein Postfach pro Zeile. Aus diesen Adressen kannst du im E-Mail-Client Mails verschicken (kann sich mit den Eingangs-Postfächern überschneiden).</span>
       </div>
 
       <div style="display:flex;gap:10px;align-items:center;margin-top:12px;">
@@ -5419,12 +5665,14 @@ async function saveO365Settings() {
     const secret = document.getElementById('settings-o365-client-secret').value.trim();
     const sendMailbox = document.getElementById('settings-o365-send-mailbox').value.trim();
     const mailboxes = document.getElementById('settings-o365-mailboxes').value.trim();
+    const userSendMailboxes = document.getElementById('settings-o365-user-send-mailboxes').value.trim();
 
     const saves = [
       api('/api/settings/o365_tenant_id', { method: 'PUT', body: { value: tenant } }),
       api('/api/settings/o365_client_id', { method: 'PUT', body: { value: clientId } }),
       api('/api/settings/o365_send_mailbox', { method: 'PUT', body: { value: sendMailbox } }),
-      api('/api/settings/o365_mailboxes', { method: 'PUT', body: { value: mailboxes } })
+      api('/api/settings/o365_mailboxes', { method: 'PUT', body: { value: mailboxes } }),
+      api('/api/settings/o365_user_send_mailboxes', { method: 'PUT', body: { value: userSendMailboxes } })
     ];
     // Only update secret if a new one was entered
     if (secret) {
@@ -5497,9 +5745,12 @@ function showO365Result(res) {
   if (res.success) {
     detailHtml = 'Authentifizierung erfolgreich. Microsoft Graph API erreichbar.';
     if (res.mailboxStatus) {
-      detailHtml += '<br>' + res.mailboxStatus.map(m =>
-        escapeHtml(m.mailbox) + ': ' + (m.ok ? '<span style="color:var(--success);">&#10004; OK</span>' : '<span style="color:var(--danger);">&#10008; ' + escapeHtml(m.error) + '</span>')
-      ).join('<br>');
+      const roleLabels = { 'app-send': 'App-Versand', 'inbox': 'Eingang', 'user-send': 'Client-Versand' };
+      detailHtml += '<br>' + res.mailboxStatus.map(m => {
+        const badges = (m.roles || []).map(r => `<span style="display:inline-block;padding:1px 6px;margin-left:4px;border-radius:8px;background:var(--bg);border:1px solid var(--border);font-size:10px;">${escapeHtml(roleLabels[r] || r)}</span>`).join('');
+        const status = m.ok ? '<span style="color:var(--success);">&#10004; OK</span>' : '<span style="color:var(--danger);">&#10008; ' + escapeHtml(m.error) + '</span>';
+        return escapeHtml(m.mailbox) + badges + ': ' + status;
+      }).join('<br>');
     }
   } else {
     detailHtml = escapeHtml(res.error || 'Unbekannter Fehler');
@@ -14787,12 +15038,13 @@ async function renderAkteDetail(id) {
       <div class="akte-tab-panel" data-tab="post" style="display:none;">
         <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
           <button class="btn btn-sm btn-primary" onclick="openPostUploadForm(${a.id}, '${escapeHtml(a.aktennummer || a.id)}')">+ Post hinzufügen</button>
-          <div id="post-dropzone" style="flex:1;border:2px dashed var(--border);border-radius:8px;padding:10px;text-align:center;color:var(--text-muted);font-size:13px;cursor:pointer;transition:border-color 0.2s;"
+          <div id="post-dropzone" style="flex:0.75;border:2px dashed var(--border);border-radius:8px;padding:10px;text-align:center;color:var(--text-muted);font-size:13px;cursor:pointer;transition:border-color 0.2s;"
             ondragover="event.preventDefault();this.style.borderColor='var(--primary)';this.style.background='var(--primary-light)';"
             ondragleave="this.style.borderColor='var(--border)';this.style.background='';"
             ondrop="event.preventDefault();this.style.borderColor='var(--border)';this.style.background='';handlePostDrop(event, ${a.id}, '${escapeHtml(a.aktennummer || a.id)}');">
             Datei hierher ziehen zum Hinzufügen
           </div>
+          <button class="btn btn-sm btn-primary" style="flex:0.25;white-space:nowrap;align-self:stretch;display:flex;align-items:center;justify-content:center;" onclick="openEmailComposer(${a.id}, '${escapeHtml(a.aktennummer || a.id)}')">&#9993; E-Mail schreiben</button>
         </div>
         <div id="post-split-container" style="display:grid;grid-template-columns:1fr 6px 1fr;gap:0;height:380px;min-height:240px;">
           <div class="card" style="padding:0;border-radius:var(--radius) 0 0 var(--radius);overflow:hidden;display:flex;flex-direction:column;min-width:0;">
@@ -16830,6 +17082,1201 @@ async function renderFileLog() {
   } catch (err) {
     document.getElementById('file-log-content').innerHTML = '<div class="empty-state"><p>Fehler: ' + escapeHtml(err.message) + '</p></div>';
   }
+}
+
+// ===== E-Mail Composer (Outlook-Style, Versand über Microsoft Graph) =====
+// State für offene Anhänge (Base64 von ausgewählten Dateien)
+let _emailComposerAttachments = [];
+let _emailComposerCtx = { akteId: null, aktennummer: '', rootPath: '' };
+let _emailComposerParticipantsCache = null;
+let _emailComposerLastFocused = 'ec-to';
+let _emailComposerSignature = '';
+const _EMAIL_ATTACH_LIMIT_MB = 25; // Outlook-üblich
+
+async function openEmailComposer(akteId, aktennummer) {
+  _emailComposerAttachments = [];
+  _emailComposerCtx = { akteId, aktennummer, rootPath: 'Akten/' + (aktennummer || akteId) };
+  _emailComposerParticipantsCache = null;
+  _emailComposerLastFocused = 'ec-to';
+  _emailComposerSignature = '';
+  // Adressliste vom Server holen (Sende-Postfächer + Staff-Email + Default)
+  let addrData = { addresses: [], default: '', staffEmail: '' };
+  try { addrData = await api('/api/o365/composer-from-addresses'); } catch (e) {}
+  if (!addrData.addresses || addrData.addresses.length === 0) {
+    showToast('Keine Absender-Adresse konfiguriert. Bitte unter Einstellungen → Programmdaten → Sende-Postfächer hinterlegen.', 'error');
+    return;
+  }
+  const fromOptions = addrData.addresses.map(a => {
+    const isStaff = addrData.staffEmail && a.toLowerCase() === addrData.staffEmail.toLowerCase();
+    const sel = a === addrData.default ? 'selected' : '';
+    return `<option value="${escapeHtml(a)}" ${sel}>${escapeHtml(a)}${isStaff ? ' (mein Postfach)' : ''}</option>`;
+  }).join('');
+
+  const subjectDefault = aktennummer ? `Akte ${aktennummer}` : '';
+
+  const html = `
+    <div class="email-composer">
+      <div class="email-composer-toolbar">
+        <button type="button" class="ec-send" onclick="sendComposerEmail()" id="ec-send-btn">
+          &#9993; Senden
+        </button>
+        <button type="button" class="ec-attach" id="ec-attach-btn" onclick="emailComposerAttachMenu(event)">
+          &#128206; Anhang &#9662;
+        </button>
+        <input type="file" id="ec-file-input" multiple style="display:none;" onchange="emailComposerAddFiles(this.files);this.value='';">
+        <button type="button" class="ec-attach" id="ec-tpl-btn" onclick="emailComposerOpenTemplatePicker()">
+          &#128209; Vorlagen öffnen
+        </button>
+        <div style="flex:1;"></div>
+        <button type="button" class="ec-cancel" onclick="closeEmailComposer()">Abbrechen</button>
+      </div>
+
+      <div class="email-composer-fields">
+        <div class="email-composer-row">
+          <label>Von</label>
+          <select id="ec-from">${fromOptions}</select>
+        </div>
+        <div class="email-composer-row">
+          <label>An</label>
+          <input type="text" id="ec-to" placeholder="empfaenger@example.com, weiterer@example.com" onfocus="emailComposerOnFieldFocus('ec-to')">
+          <button type="button" class="ec-cc-toggle" onclick="emailComposerOpenAddressBook(event)" id="ec-addrbook-btn">Adressbuch</button>
+          <button type="button" class="ec-cc-toggle" onclick="emailComposerOpenParticipants(event)" id="ec-participants-btn"${akteId ? '' : ' disabled style="opacity:0.5;cursor:not-allowed;" title="Keine Akte verknüpft"'}>Beteiligter</button>
+        </div>
+        <div class="email-composer-row" id="ec-row-cc">
+          <label>Cc</label>
+          <input type="text" id="ec-cc" onfocus="emailComposerOnFieldFocus('ec-cc')">
+        </div>
+        <div class="email-composer-row" id="ec-row-bcc">
+          <label>Bcc</label>
+          <input type="text" id="ec-bcc" onfocus="emailComposerOnFieldFocus('ec-bcc')">
+        </div>
+        <div class="email-composer-row">
+          <label>Betreff</label>
+          <input type="text" id="ec-subject" value="${escapeHtml(subjectDefault)}">
+        </div>
+      </div>
+
+      <div class="email-composer-formatbar">
+        <select onchange="emailComposerExec('fontName', this.value)" title="Schriftart">
+          <option value="Calibri" selected>Calibri</option>
+          <option value="Arial">Arial</option>
+          <option value="Times New Roman">Times New Roman</option>
+          <option value="Verdana">Verdana</option>
+          <option value="Tahoma">Tahoma</option>
+          <option value="Courier New">Courier New</option>
+        </select>
+        <select onchange="emailComposerSetSize(this.value)" title="Schriftgröße">
+          <option value="2">9pt</option>
+          <option value="3" selected>11pt</option>
+          <option value="4">13pt</option>
+          <option value="5">16pt</option>
+          <option value="6">20pt</option>
+          <option value="7">24pt</option>
+        </select>
+        <span class="ec-divider"></span>
+        <button type="button" onmousedown="event.preventDefault();" onclick="emailComposerExec('bold')" title="Fett (Strg+B)"><b>F</b></button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="emailComposerExec('italic')" title="Kursiv (Strg+I)"><i>K</i></button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="emailComposerExec('underline')" title="Unterstreichen (Strg+U)"><u>U</u></button>
+        <span class="ec-divider"></span>
+        <button type="button" onmousedown="event.preventDefault();" onclick="emailComposerExec('insertUnorderedList')" title="Aufzählung">&#8226; Liste</button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="emailComposerExec('insertOrderedList')" title="Nummerierte Liste">1. Liste</button>
+        <span class="ec-divider"></span>
+        <button type="button" onmousedown="event.preventDefault();" onclick="emailComposerExec('justifyLeft')" title="Linksbündig">&#8676;</button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="emailComposerExec('justifyCenter')" title="Zentriert">&#8644;</button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="emailComposerExec('justifyRight')" title="Rechtsbündig">&#8677;</button>
+        <span class="ec-divider"></span>
+        <button type="button" onmousedown="event.preventDefault();" onclick="emailComposerInsertLink()" title="Link einfügen">&#128279;</button>
+        <button type="button" onmousedown="event.preventDefault();" onclick="emailComposerExec('removeFormat')" title="Formatierung entfernen">&#10005;</button>
+      </div>
+
+      <div id="ec-editor" class="email-composer-editor" contenteditable="true" data-placeholder="Nachricht eingeben..."
+        ondrop="emailComposerOnEditorDrop(event);" ondragover="event.preventDefault();"></div>
+
+      <div id="ec-attachments" class="email-composer-attachments"></div>
+    </div>
+  `;
+  openModal('Neue Nachricht', html, 'modal-email-composer');
+
+  // Editor initialisieren: Outlook-Default Font/Size, Signatur unten vorbefüllen, Cursor oben
+  const ed = document.getElementById('ec-editor');
+  if (ed) {
+    ed.focus();
+    try {
+      document.execCommand('defaultParagraphSeparator', false, 'p');
+      document.execCommand('styleWithCSS', false, true);
+      document.execCommand('fontName', false, 'Calibri');
+      // size 3 ≈ 11pt im Outlook-Default-Look
+      document.execCommand('fontSize', false, '3');
+    } catch (e) {}
+
+    // Persönliche Signatur des eingeloggten Mitarbeiters automatisch einfügen (Outlook-Verhalten).
+    const sig = (addrData && addrData.signature) ? String(addrData.signature).trim() : '';
+    _emailComposerSignature = sig; // gecacht, damit Vorlagen-Übernahme die Signatur wieder anhängen kann
+    if (sig) {
+      ed.innerHTML = '<p><br></p><p><br></p>' + sig;
+      // Cursor an den Anfang setzen, damit der User direkt oberhalb der Signatur losschreiben kann
+      try {
+        const range = document.createRange();
+        const sel = window.getSelection();
+        range.setStart(ed, 0);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch (e) {}
+    }
+  }
+}
+
+function closeEmailComposer() {
+  // Bestätigung falls Inhalte vorhanden
+  const ed = document.getElementById('ec-editor');
+  const hasContent = (document.getElementById('ec-to')?.value || '').trim()
+    || (document.getElementById('ec-subject')?.value || '').trim() !== (document.getElementById('ec-subject')?.defaultValue || '')
+    || (ed && ed.textContent.trim().length > 0)
+    || _emailComposerAttachments.length > 0;
+  if (hasContent) {
+    showConfirm('Entwurf verwerfen?', 'Der eingegebene Inhalt geht verloren.', { yesLabel: 'Verwerfen', noLabel: 'Weiter bearbeiten', danger: true })
+      .then(ok => { if (ok) { _emailComposerAttachments = []; closeModal(); } });
+  } else {
+    _emailComposerAttachments = [];
+    closeModal();
+  }
+}
+
+// Merkt sich, in welches Empfänger-Feld (An/Cc/Bcc) der Cursor zuletzt war —
+// Klick auf einen Beteiligten fügt die E-Mail dort ein.
+function emailComposerOnFieldFocus(fieldId) {
+  _emailComposerLastFocused = fieldId;
+}
+
+async function emailComposerOpenParticipants(evt) {
+  evt.stopPropagation();
+  closeEmailComposerParticipantsMenu();
+  if (!_emailComposerCtx.akteId) {
+    showToast('Diese E-Mail ist mit keiner Akte verknüpft', 'error');
+    return;
+  }
+  if (!_emailComposerParticipantsCache) {
+    try {
+      _emailComposerParticipantsCache = await api('/api/akten/' + _emailComposerCtx.akteId + '/beteiligte');
+    } catch (err) {
+      showToast('Beteiligte konnten nicht geladen werden: ' + err.message, 'error');
+      return;
+    }
+  }
+  const list = _emailComposerParticipantsCache || [];
+  if (!list.length) {
+    showToast('Diese Akte hat keine Beteiligten', 'info');
+    return;
+  }
+  const btn = evt.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  const targetLabel = ({ 'ec-to': 'An', 'ec-cc': 'Cc', 'ec-bcc': 'Bcc' })[_emailComposerLastFocused] || 'An';
+
+  const menu = document.createElement('div');
+  menu.className = 'ec-attach-menu';
+  menu.id = 'ec-participants-menu';
+  menu.style.position = 'fixed';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.left = Math.max(8, rect.right - 360) + 'px';
+  menu.style.minWidth = '340px';
+  menu.style.maxWidth = '420px';
+  menu.style.maxHeight = '380px';
+  menu.style.overflowY = 'auto';
+
+  const header = `<div style="padding:8px 14px;font-size:12px;color:#605e5c;border-bottom:1px solid #e1dfdd;">
+    Eintragen in: <strong>${escapeHtml(targetLabel)}</strong>
+    <span style="color:#a19f9d;">(zuvor in das gewünschte Feld klicken zum Wechseln)</span>
+  </div>`;
+
+  const items = list.map(b => {
+    const email = (b.email || '').trim();
+    const typeRaw = (b.type || '').toString();
+    const typeLabel = typeRaw ? (typeRaw.charAt(0).toUpperCase() + typeRaw.slice(1)) : '';
+    const sub = email
+      ? `<span style="font-size:12px;color:#605e5c;">${escapeHtml(email)}</span>`
+      : `<span style="font-size:12px;color:#a4262c;">keine E-Mail-Adresse hinterlegt</span>`;
+    const hasEmail = !!email;
+    const onclick = hasEmail
+      ? `onclick="emailComposerInsertParticipantEmail('${email.replace(/'/g, '\\\'')}')"`
+      : 'disabled style="opacity:0.55;cursor:not-allowed;"';
+    return `<button type="button" ${onclick}>
+      <div style="display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;">
+        <span><strong>${escapeHtml(b.name || '(ohne Name)')}</strong>
+          ${typeLabel ? `<span style="color:#605e5c;font-size:11px;font-weight:normal;">&nbsp;· ${escapeHtml(typeLabel)}${b.art ? ' / ' + escapeHtml(b.art) : ''}</span>` : ''}
+        </span>
+        ${sub}
+      </div>
+    </button>`;
+  }).join('');
+
+  menu.innerHTML = header + items;
+  document.body.appendChild(menu);
+  setTimeout(() => document.addEventListener('click', closeEmailComposerParticipantsMenu, { once: true }), 0);
+}
+
+function closeEmailComposerParticipantsMenu() {
+  const m = document.getElementById('ec-participants-menu');
+  if (m) m.remove();
+}
+
+function emailComposerInsertParticipantEmail(email) {
+  closeEmailComposerParticipantsMenu();
+  const fieldId = _emailComposerLastFocused || 'ec-to';
+  const field = document.getElementById(fieldId);
+  if (!field) return;
+  const current = (field.value || '').trim();
+  if (current) {
+    const tokens = current.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    if (tokens.includes(email.toLowerCase())) {
+      showToast('Diese E-Mail ist bereits eingetragen', 'info');
+      field.focus();
+      return;
+    }
+    field.value = current.replace(/,\s*$/, '') + ', ' + email;
+  } else {
+    field.value = email;
+  }
+  field.focus();
+  // setSelectionRange ans Ende, damit Cursor nicht im "An"-Feld vor dem Text landet
+  try { field.setSelectionRange(field.value.length, field.value.length); } catch(e) {}
+  showToast('Hinzugefügt: ' + email, 'success');
+}
+
+// ===== Adressbuch (im Composer) =====
+let _addrBookSearchTimer = null;
+
+function emailComposerOpenAddressBook(evt) {
+  evt.stopPropagation();
+  closeEmailComposerParticipantsMenu();
+  closeAddressBookMenu();
+  const btn = evt.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  const targetLabel = ({ 'ec-to': 'An', 'ec-cc': 'Cc', 'ec-bcc': 'Bcc' })[_emailComposerLastFocused] || 'An';
+
+  const menu = document.createElement('div');
+  menu.className = 'ec-attach-menu';
+  menu.id = 'ec-addrbook-menu';
+  menu.style.position = 'fixed';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.left = Math.max(8, rect.right - 360) + 'px';
+  menu.style.minWidth = '340px';
+  menu.style.maxWidth = '420px';
+  menu.style.maxHeight = '420px';
+  menu.style.display = 'flex';
+  menu.style.flexDirection = 'column';
+  menu.style.padding = '0';
+
+  menu.innerHTML = `
+    <div style="padding:8px 14px;border-bottom:1px solid #e1dfdd;background:#f3f2f1;">
+      <div style="font-size:12px;color:#605e5c;margin-bottom:6px;">Eintragen in: <strong>${escapeHtml(targetLabel)}</strong></div>
+      <input type="text" id="addrbook-search" placeholder="Suche…"
+        style="width:100%;padding:6px 10px;border:1px solid #d2d0ce;border-radius:2px;font-size:13px;outline:none;box-sizing:border-box;"
+        oninput="emailComposerAddressBookSearch(this.value)">
+    </div>
+    <div id="addrbook-results" style="overflow-y:auto;flex:1;min-height:60px;">
+      <div style="padding:18px 14px;text-align:center;color:#605e5c;font-size:13px;">Lade…</div>
+    </div>
+  `;
+  document.body.appendChild(menu);
+  const searchInput = document.getElementById('addrbook-search');
+  if (searchInput) searchInput.focus();
+
+  // Outside-click: nur schließen wenn Click außerhalb des Menüs
+  const onClick = (e) => {
+    if (!menu.contains(e.target)) {
+      closeAddressBookMenu();
+    } else {
+      document.addEventListener('click', onClick, { once: true });
+    }
+  };
+  setTimeout(() => document.addEventListener('click', onClick, { once: true }), 0);
+
+  // Initial-Liste laden
+  emailComposerAddressBookSearch('');
+}
+
+function closeAddressBookMenu() {
+  const m = document.getElementById('ec-addrbook-menu');
+  if (m) m.remove();
+  if (_addrBookSearchTimer) { clearTimeout(_addrBookSearchTimer); _addrBookSearchTimer = null; }
+}
+
+function emailComposerAddressBookSearch(q) {
+  if (_addrBookSearchTimer) clearTimeout(_addrBookSearchTimer);
+  _addrBookSearchTimer = setTimeout(async () => {
+    try {
+      const list = await api('/api/address-book?q=' + encodeURIComponent(q || ''));
+      const results = document.getElementById('addrbook-results');
+      if (!results) return;
+      if (!list.length) {
+        const msg = q
+          ? `Keine Treffer für „${escapeHtml(q)}"`
+          : 'Adressbuch ist leer — wird automatisch beim E-Mail-Versand befüllt';
+        results.innerHTML = `<div style="padding:18px 14px;text-align:center;color:#605e5c;font-size:13px;">${msg}</div>`;
+        return;
+      }
+      results.innerHTML = list.map(a => {
+        const safeEmail = String(a.email).replace(/'/g, '&#39;');
+        const onclickEmail = String(a.email).replace(/'/g, "\\'");
+        return `<div onclick="emailComposerInsertAddressBookEntry('${onclickEmail}')"
+          style="padding:8px 14px;cursor:pointer;font-size:13px;color:#201f1e;border-bottom:1px solid #f3f2f1;"
+          onmouseover="this.style.background='#f3f2f1'" onmouseout="this.style.background='transparent'">
+          ${escapeHtml(a.email)}
+        </div>`;
+      }).join('');
+    } catch (err) {
+      const results = document.getElementById('addrbook-results');
+      if (results) results.innerHTML = '<div style="padding:18px 14px;color:#a4262c;font-size:13px;">Fehler: ' + escapeHtml(err.message) + '</div>';
+    }
+  }, 180);
+}
+
+function emailComposerInsertAddressBookEntry(email) {
+  emailComposerInsertParticipantEmail(email);
+  closeAddressBookMenu();
+}
+
+// ===== Vorlagen-Picker (im Composer) =====
+let _evtPickerData = [];
+let _evtPickerSort = { field: 'kategorie', dir: 'asc' };
+
+async function emailComposerOpenTemplatePicker() {
+  closeEmailComposerTemplatePicker();
+  const overlay = document.createElement('div');
+  overlay.id = 'evt-picker-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1100;display:flex;justify-content:center;align-items:center;padding:20px;';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:6px;box-shadow:var(--shadow-md);width:96%;max-width:940px;height:82vh;max-height:92vh;display:flex;flex-direction:column;" onclick="event.stopPropagation();">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;background:#f3f2f1;border-bottom:1px solid #e1dfdd;border-radius:6px 6px 0 0;">
+        <h3 style="margin:0;font-size:16px;font-weight:600;color:#201f1e;">E-Mail-Vorlage einfügen</h3>
+        <button type="button" onclick="closeEmailComposerTemplatePicker()" style="background:none;border:0;font-size:22px;cursor:pointer;color:#605e5c;padding:0 4px;">&times;</button>
+      </div>
+      <div style="padding:10px 16px;border-bottom:1px solid #f0f0f0;background:#faf9f8;display:flex;gap:10px;align-items:center;">
+        <input type="text" id="evt-picker-search" placeholder="Suche (Betreff, Kategorie, Verfasser)…" oninput="renderEvtPickerTable()" style="flex:1;padding:6px 10px;border:1px solid #d2d0ce;border-radius:2px;font-size:13px;outline:none;">
+        <select id="evt-picker-cat-filter" onchange="renderEvtPickerTable()" style="padding:6px 8px;border:1px solid #d2d0ce;border-radius:2px;font-size:13px;">
+          <option value="">Alle Kategorien</option>
+        </select>
+      </div>
+      <div style="flex:1;display:flex;min-height:0;">
+        <div id="evt-picker-list" style="flex:1;overflow-y:auto;min-height:240px;border-right:1px solid #e1dfdd;padding-left:14px;background:#faf9f8;">
+          <div style="padding:30px;text-align:center;color:#605e5c;font-size:13px;">Lade Vorlagen…</div>
+        </div>
+        <div id="evt-picker-preview" style="flex:1;overflow-y:auto;padding:14px 18px;background:#faf9f8;min-width:0;">
+          <div style="padding:30px 8px;text-align:center;color:#605e5c;font-size:13px;">Mit dem Mauszeiger über eine Zeile fahren für die Vorschau · Klick fügt die Vorlage ein</div>
+        </div>
+      </div>
+    </div>
+  `;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeEmailComposerTemplatePicker(); });
+  document.body.appendChild(overlay);
+
+  try {
+    _evtPickerData = await api('/api/email-templates');
+    // Kategorie-Filter befüllen
+    const sel = document.getElementById('evt-picker-cat-filter');
+    if (sel) {
+      const cats = [...new Set(_evtPickerData.map(t => (t.kategorie || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+      sel.innerHTML = '<option value="">Alle Kategorien</option>' + cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+    }
+    renderEvtPickerTable();
+    setTimeout(() => { const s = document.getElementById('evt-picker-search'); if (s) s.focus(); }, 50);
+  } catch (err) {
+    const list = document.getElementById('evt-picker-list');
+    if (list) list.innerHTML = '<div style="padding:30px;text-align:center;color:#a4262c;font-size:13px;">Fehler: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+function closeEmailComposerTemplatePicker() {
+  const o = document.getElementById('evt-picker-overlay');
+  if (o) o.remove();
+}
+
+function evtPickerSort(field) {
+  if (_evtPickerSort.field === field) {
+    _evtPickerSort.dir = _evtPickerSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _evtPickerSort.field = field;
+    _evtPickerSort.dir = 'asc';
+  }
+  renderEvtPickerTable();
+}
+
+function evtPickerSortIcon(field) {
+  if (_evtPickerSort.field !== field) return '<span style="opacity:0.3;">&#9650;</span>';
+  return _evtPickerSort.dir === 'asc' ? '<span>&#9650;</span>' : '<span>&#9660;</span>';
+}
+
+function renderEvtPickerTable() {
+  const container = document.getElementById('evt-picker-list');
+  if (!container) return;
+  let data = [..._evtPickerData];
+  const term = (document.getElementById('evt-picker-search')?.value || '').toLowerCase().trim();
+  const cat = (document.getElementById('evt-picker-cat-filter')?.value || '').trim();
+
+  if (term) data = data.filter(t => [t.betreff, t.kategorie, t.verfasser].join(' ').toLowerCase().includes(term));
+  if (cat) data = data.filter(t => (t.kategorie || '').trim() === cat);
+
+  data.sort((a, b) => {
+    const f = _evtPickerSort.field;
+    const va = (a[f] || '').toString().toLowerCase();
+    const vb = (b[f] || '').toString().toLowerCase();
+    return _evtPickerSort.dir === 'asc' ? va.localeCompare(vb, 'de') : vb.localeCompare(va, 'de');
+  });
+
+  if (data.length === 0) {
+    container.innerHTML = '<div style="padding:30px;text-align:center;color:#605e5c;font-size:13px;">Keine Vorlagen gefunden.</div>';
+    return;
+  }
+
+  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap;';
+  const tdStyle = 'padding:4px 6px;';
+  container.innerHTML = `
+    <div style="padding:6px 6px;color:var(--text-muted);font-size:12px;border-bottom:1px solid #f0f0f0;">${data.length} Vorlage${data.length !== 1 ? 'n' : ''} · Klick zum Einfügen</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="background:#faf9f8;">
+        <th style="${thStyle}padding:5px 6px;text-align:left;border-bottom:1px solid #e1dfdd;" onclick="evtPickerSort('betreff')">Betreff ${evtPickerSortIcon('betreff')}</th>
+        <th style="${thStyle}padding:5px 6px;text-align:left;border-bottom:1px solid #e1dfdd;" onclick="evtPickerSort('verfasser')">Verfasser ${evtPickerSortIcon('verfasser')}</th>
+        <th style="${thStyle}padding:5px 6px;text-align:left;border-bottom:1px solid #e1dfdd;" onclick="evtPickerSort('updated_at')">Aktualisiert ${evtPickerSortIcon('updated_at')}</th>
+      </tr></thead>
+      <tbody>
+        ${data.map(t => `<tr onclick="emailComposerApplyTemplate(${t.id})" onmouseenter="evtPickerShowPreview(${t.id});this.style.background='#f3f2f1'" onmouseleave="this.style.background='#fff'" style="cursor:pointer;border-bottom:1px solid #f3f2f1;background:#fff;">
+          <td style="${tdStyle}"><strong>${escapeHtml(t.betreff || '')}</strong></td>
+          <td style="${tdStyle}color:var(--text-muted);">${escapeHtml(t.verfasser || '')}</td>
+          <td style="${tdStyle}color:var(--text-muted);white-space:nowrap;">${escapeHtml(formatDateTime(t.updated_at || t.created_at || ''))}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  `;
+  // Erste Zeile direkt als Vorschau anzeigen, damit das rechte Panel nicht leer wirkt
+  if (data.length > 0) evtPickerShowPreview(data[0].id);
+}
+
+function evtPickerShowPreview(id) {
+  const preview = document.getElementById('evt-picker-preview');
+  if (!preview) return;
+  const tpl = _evtPickerData.find(t => t.id === id);
+  if (!tpl) return;
+  // Body in einem isolierten Container rendern (Composer-Schriftart, kein Editor-CSS-Konflikt)
+  preview.innerHTML = `
+    <div style="font-size:11px;color:#605e5c;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Vorschau</div>
+    <div style="font-size:14px;font-weight:600;color:#201f1e;margin-bottom:4px;word-break:break-word;">${escapeHtml(tpl.betreff || '')}</div>
+    <div style="font-size:11px;color:#605e5c;margin-bottom:10px;">${escapeHtml(tpl.kategorie || '')}${tpl.verfasser ? ' · ' + escapeHtml(tpl.verfasser) : ''}</div>
+    <div style="background:#fff;border:1px solid #e1dfdd;border-radius:4px;padding:12px 14px;font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000;line-height:1.4;min-height:120px;">${tpl.body || '<span style="color:#a19f9d;">(leerer Vorlagentext)</span>'}</div>
+  `;
+}
+
+function emailComposerApplyTemplate(id) {
+  const tpl = _evtPickerData.find(t => t.id === id);
+  if (!tpl) { showToast('Vorlage nicht gefunden', 'error'); return; }
+  const subj = document.getElementById('ec-subject');
+  const ed = document.getElementById('ec-editor');
+  if (subj) subj.value = tpl.betreff || '';
+  if (ed) {
+    let html = tpl.body || '';
+    // Signatur (falls vorhanden) wieder anhängen, damit sie nicht verloren geht
+    if (_emailComposerSignature) html += '<p><br></p><p><br></p>' + _emailComposerSignature;
+    ed.innerHTML = html;
+  }
+  closeEmailComposerTemplatePicker();
+  showToast('Vorlage übernommen: ' + (tpl.betreff || ''), 'success');
+}
+
+function emailComposerExec(cmd, val) {
+  document.getElementById('ec-editor').focus();
+  try { document.execCommand(cmd, false, val); } catch (e) {}
+}
+
+function emailComposerSetSize(sizeIdx) {
+  // execCommand fontSize akzeptiert 1-7; wir wenden direkt an
+  document.getElementById('ec-editor').focus();
+  try { document.execCommand('fontSize', false, sizeIdx); } catch (e) {}
+}
+
+function emailComposerInsertLink() {
+  const url = prompt('Link-URL eingeben:', 'https://');
+  if (!url) return;
+  document.getElementById('ec-editor').focus();
+  try { document.execCommand('createLink', false, url); } catch (e) {}
+}
+
+function emailComposerOnEditorDrop(e) {
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    e.preventDefault();
+    emailComposerAddFiles(e.dataTransfer.files);
+  }
+}
+
+async function emailComposerAddFiles(fileList) {
+  const files = Array.from(fileList || []);
+  for (const f of files) {
+    const totalMb = _emailComposerAttachments.reduce((s, a) => s + a.size, 0) / 1024 / 1024;
+    if (totalMb + (f.size / 1024 / 1024) > _EMAIL_ATTACH_LIMIT_MB) {
+      showToast(`Anhang-Limit (${_EMAIL_ATTACH_LIMIT_MB} MB) überschritten`, 'error');
+      break;
+    }
+    try {
+      const base64 = await _fileToBase64(f);
+      _emailComposerAttachments.push({ name: f.name, size: f.size, contentType: f.type || 'application/octet-stream', contentBytes: base64 });
+    } catch (err) {
+      showToast('Anhang konnte nicht gelesen werden: ' + f.name, 'error');
+    }
+  }
+  emailComposerRenderAttachments();
+}
+
+function _fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const result = r.result || '';
+      const idx = String(result).indexOf(',');
+      resolve(idx >= 0 ? String(result).slice(idx + 1) : String(result));
+    };
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+function emailComposerRenderAttachments() {
+  const box = document.getElementById('ec-attachments');
+  if (!box) return;
+  box.innerHTML = _emailComposerAttachments.map((a, i) => {
+    const kb = a.size < 1024*1024 ? (a.size/1024).toFixed(0) + ' KB' : (a.size/1024/1024).toFixed(1) + ' MB';
+    return `<span class="ec-att-chip">&#128206; ${escapeHtml(a.name)} <span style="color:#a19f9d;">(${kb})</span><button type="button" class="ec-att-remove" onclick="emailComposerRemoveAttachment(${i})">&times;</button></span>`;
+  }).join('');
+}
+
+function emailComposerRemoveAttachment(idx) {
+  _emailComposerAttachments.splice(idx, 1);
+  emailComposerRenderAttachments();
+}
+
+// ----- Anhang-Auswahl: Lokal vs. S3 -----
+function emailComposerAttachMenu(e) {
+  e.stopPropagation();
+  closeEmailComposerAttachMenu();
+  const btn = document.getElementById('ec-attach-btn');
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.id = 'ec-attach-menu';
+  menu.className = 'ec-attach-menu';
+  menu.innerHTML = `
+    <button type="button" onclick="emailComposerAttachLocal()"><span class="ec-menu-ico">&#128193;</span> Vom PC...</button>
+    <button type="button" onclick="emailComposerAttachFromS3()"><span class="ec-menu-ico">&#9729;</span> Aus Online-Speicher (Akte)</button>
+  `;
+  menu.style.left = rect.left + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  document.body.appendChild(menu);
+  setTimeout(() => document.addEventListener('click', closeEmailComposerAttachMenu, { once: true }), 0);
+}
+
+function closeEmailComposerAttachMenu() {
+  const m = document.getElementById('ec-attach-menu');
+  if (m) m.remove();
+}
+
+function emailComposerAttachLocal() {
+  closeEmailComposerAttachMenu();
+  document.getElementById('ec-file-input').click();
+}
+
+function emailComposerAttachFromS3() {
+  closeEmailComposerAttachMenu();
+  if (!_emailComposerCtx.rootPath) {
+    showToast('Akten-Pfad nicht verfügbar', 'error');
+    return;
+  }
+  openS3AttachBrowser();
+}
+
+// ----- S3-Anhang-Browser (Sub-Modal über dem Composer) -----
+let _s3AttachState = { currentPath: '', selected: new Map() };
+
+function openS3AttachBrowser() {
+  _s3AttachState = { currentPath: _emailComposerCtx.rootPath, selected: new Map() };
+  // Vorhandenes Overlay entfernen falls noch offen
+  const existing = document.getElementById('s3-attach-overlay');
+  if (existing) existing.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 's3-attach-overlay';
+  overlay.className = 's3-attach-overlay';
+  overlay.innerHTML = `
+    <div class="s3-attach-modal" onclick="event.stopPropagation();">
+      <div class="s3a-header">
+        <h3>Aus Online-Speicher anhängen — Akte ${escapeHtml(_emailComposerCtx.aktennummer || _emailComposerCtx.akteId)}</h3>
+        <button type="button" class="s3a-x" onclick="closeS3AttachBrowser()">&times;</button>
+      </div>
+      <div class="s3a-breadcrumb" id="s3a-breadcrumb"></div>
+      <div class="s3a-list" id="s3a-list"></div>
+      <div class="s3a-footer">
+        <span class="s3a-count" id="s3a-count">Keine Datei ausgewählt</span>
+        <button type="button" class="s3a-cancel" onclick="closeS3AttachBrowser()">Abbrechen</button>
+        <button type="button" class="s3a-add" id="s3a-add-btn" onclick="s3AttachConfirm()" disabled>Hinzufügen</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  s3AttachLoadFolder(_emailComposerCtx.rootPath);
+}
+
+function closeS3AttachBrowser() {
+  const o = document.getElementById('s3-attach-overlay');
+  if (o) o.remove();
+  _s3AttachState = { currentPath: '', selected: new Map() };
+}
+
+async function s3AttachLoadFolder(folder) {
+  _s3AttachState.currentPath = folder;
+  const listEl = document.getElementById('s3a-list');
+  const bcEl = document.getElementById('s3a-breadcrumb');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="s3a-empty">Laden...</div>';
+
+  // Breadcrumb
+  const rootPath = _emailComposerCtx.rootPath;
+  const relPath = folder.startsWith(rootPath) ? folder.substring(rootPath.length).replace(/^\//, '') : '';
+  const parts = relPath ? relPath.split('/').filter(Boolean) : [];
+  let bcHtml = `<a href="#" onclick="s3AttachLoadFolder('${escapeHtml(rootPath)}');return false;" style="color:#0078d4;text-decoration:none;font-weight:600;">Akte</a>`;
+  let cum = rootPath;
+  parts.forEach((p, i) => {
+    cum += '/' + p;
+    bcHtml += ' <span style="color:#a19f9d;">/</span> ';
+    if (i === parts.length - 1) bcHtml += `<span style="font-weight:600;">${escapeHtml(p)}</span>`;
+    else bcHtml += `<a href="#" onclick="s3AttachLoadFolder('${escapeHtml(cum)}');return false;" style="color:#0078d4;text-decoration:none;">${escapeHtml(p)}</a>`;
+  });
+  bcEl.innerHTML = bcHtml;
+
+  try {
+    const result = await api('/api/files/list?folder=' + encodeURIComponent(folder));
+    let html = '';
+    if (folder !== rootPath) {
+      const parent = folder.split('/').slice(0, -1).join('/');
+      html += `<div class="s3a-row s3a-folder" onclick="s3AttachLoadFolder('${escapeHtml(parent)}')">
+        <span style="width:18px;"></span><span class="s3a-ico">&#128194;</span>
+        <span class="s3a-name">..</span><span class="s3a-size"></span><span class="s3a-date"></span></div>`;
+    }
+    (result.folders || []).forEach(f => {
+      const fullPath = folder + '/' + f;
+      html += `<div class="s3a-row s3a-folder" onclick="s3AttachLoadFolder('${escapeHtml(fullPath)}')">
+        <span style="width:18px;"></span><span class="s3a-ico">&#128193;</span>
+        <span class="s3a-name">${escapeHtml(f)}</span><span class="s3a-size">—</span><span class="s3a-date">—</span></div>`;
+    });
+    (result.files || []).filter(f => f.name && f.name !== '.folder').forEach(f => {
+      const sizeStr = f.size < 1024 ? f.size + ' B' : f.size < 1048576 ? (f.size/1024).toFixed(1)+' KB' : (f.size/1048576).toFixed(1)+' MB';
+      const dateStr = f.modified ? formatDateTime(f.modified) : '—';
+      const checked = _s3AttachState.selected.has(f.key) ? 'checked' : '';
+      const b64Key = btoa(unescape(encodeURIComponent(f.key)));
+      const b64Name = btoa(unescape(encodeURIComponent(f.name)));
+      html += `<div class="s3a-row" onclick="s3AttachToggle(this, '${b64Key}', '${b64Name}', ${f.size})">
+        <input type="checkbox" ${checked} onclick="event.stopPropagation();s3AttachToggle(this.parentNode, '${b64Key}', '${b64Name}', ${f.size})">
+        <span class="s3a-ico">${s3FileIcon((f.name.split('.').pop() || '').toLowerCase())}</span>
+        <span class="s3a-name">${escapeHtml(f.name)}</span>
+        <span class="s3a-size">${sizeStr}</span>
+        <span class="s3a-date">${dateStr}</span>
+      </div>`;
+    });
+    if ((result.folders || []).length === 0 && (result.files || []).filter(f => f.name && f.name !== '.folder').length === 0 && folder === rootPath) {
+      html += '<div class="s3a-empty">Ordner ist leer.</div>';
+    }
+    listEl.innerHTML = html;
+    s3AttachUpdateFooter();
+  } catch (err) {
+    listEl.innerHTML = `<div class="s3a-empty" style="color:#a4262c;">Fehler: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function s3AttachToggle(rowEl, b64Key, b64Name, size) {
+  const key = decodeURIComponent(escape(atob(b64Key)));
+  const name = decodeURIComponent(escape(atob(b64Name)));
+  const cb = rowEl.querySelector('input[type=checkbox]');
+  if (_s3AttachState.selected.has(key)) {
+    _s3AttachState.selected.delete(key);
+    if (cb) cb.checked = false;
+  } else {
+    _s3AttachState.selected.set(key, { name, size });
+    if (cb) cb.checked = true;
+  }
+  s3AttachUpdateFooter();
+}
+
+function s3AttachUpdateFooter() {
+  const cnt = document.getElementById('s3a-count');
+  const btn = document.getElementById('s3a-add-btn');
+  const n = _s3AttachState.selected.size;
+  if (cnt) cnt.textContent = n === 0 ? 'Keine Datei ausgewählt' : `${n} Datei${n>1?'en':''} ausgewählt`;
+  if (btn) {
+    btn.disabled = n === 0;
+    btn.textContent = n === 0 ? 'Hinzufügen' : `Hinzufügen (${n})`;
+  }
+}
+
+async function s3AttachConfirm() {
+  const btn = document.getElementById('s3a-add-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Lade...'; }
+  // Größenprüfung kombiniert mit bestehenden Anhängen
+  let totalBytes = _emailComposerAttachments.reduce((s, a) => s + a.size, 0);
+  for (const [, info] of _s3AttachState.selected) totalBytes += info.size;
+  if (totalBytes / 1024 / 1024 > _EMAIL_ATTACH_LIMIT_MB) {
+    showToast(`Anhang-Limit (${_EMAIL_ATTACH_LIMIT_MB} MB) überschritten — bitte weniger Dateien wählen`, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Hinzufügen'; }
+    return;
+  }
+  try {
+    const keys = [..._s3AttachState.selected.keys()];
+    for (const key of keys) {
+      const info = _s3AttachState.selected.get(key);
+      const att = await _fetchS3FileAsAttachment(key, info.name);
+      _emailComposerAttachments.push(att);
+    }
+    emailComposerRenderAttachments();
+    closeS3AttachBrowser();
+    showToast(`${keys.length} Anhang${keys.length>1?'änge':''} hinzugefügt`, 'success');
+  } catch (err) {
+    showToast('Anhang fehlgeschlagen: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Hinzufügen'; }
+  }
+}
+
+async function _fetchS3FileAsAttachment(key, name) {
+  const headers = {};
+  if (loggedInUser) {
+    headers['X-User-Permission'] = loggedInUser.permission_level || 'Benutzer';
+    headers['X-User-Id'] = String(loggedInUser.id || '');
+    headers['X-User-Name'] = loggedInUser.username || '';
+  }
+  const resp = await fetch('/api/files/proxy-download?key=' + encodeURIComponent(key), { headers });
+  if (!resp.ok) throw new Error('Download fehlgeschlagen (' + resp.status + ')');
+  const blob = await resp.blob();
+  const base64 = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const result = r.result || '';
+      const idx = String(result).indexOf(',');
+      resolve(idx >= 0 ? String(result).slice(idx + 1) : String(result));
+    };
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+  return { name, size: blob.size, contentType: blob.type || 'application/octet-stream', contentBytes: base64 };
+}
+
+async function sendComposerEmail() {
+  const btn = document.getElementById('ec-send-btn');
+  const from = document.getElementById('ec-from').value.trim();
+  const to = document.getElementById('ec-to').value.trim();
+  const cc = document.getElementById('ec-cc')?.value.trim() || '';
+  const bcc = document.getElementById('ec-bcc')?.value.trim() || '';
+  const subject = document.getElementById('ec-subject').value.trim();
+  const body = document.getElementById('ec-editor').innerHTML;
+
+  if (!to) { showToast('Bitte mindestens einen Empfänger angeben', 'error'); return; }
+  if (!subject) {
+    const ok = await showConfirm('Kein Betreff', 'Die Nachricht hat keinen Betreff. Trotzdem senden?', { yesLabel: 'Senden' });
+    if (!ok) return;
+  }
+  // Body-Plausibilität: erlauben — auch leerer Body ist möglich (Outlook erlaubt das mit Warnung).
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Senden...'; }
+  try {
+    const payload = { from, to, cc, bcc, subject, body, attachments: _emailComposerAttachments };
+    await api('/api/o365/send', { method: 'POST', body: payload });
+    showToast('E-Mail gesendet', 'success');
+    _emailComposerAttachments = [];
+    closeModal();
+  } catch (err) {
+    showToast('Versand fehlgeschlagen: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '&#9993; Senden'; }
+  }
+}
+
+// ===== PAGE: E-Mail-Vorlagen =====
+let _emailTemplatesData = [];
+let _emailTemplateCategories = [];
+let _emailTemplatesSort = { field: 'kategorie', dir: 'asc' };
+
+async function renderEmailVorlagen() {
+  const main = document.getElementById('main-content');
+  main.innerHTML = `
+    <div class="page-header">
+      <h2>E-Mail-Vorlagen</h2>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" onclick="openCategoryManager()">+ Neue Kategorie</button>
+        <button class="btn btn-primary" onclick="openEmailVorlageForm()">+ Neue Vorlage</button>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="filter-bar">
+        <div class="form-group" style="flex:1;min-width:250px;">
+          <label>Suche (Betreff, Kategorie oder Verfasser)</label>
+          <input type="text" id="evt-search" placeholder="z.B. Mahnung, Anfrage, Müller" oninput="filterEmailVorlagen()">
+        </div>
+        <div class="form-group" style="min-width:200px;">
+          <label>Kategorie</label>
+          <select id="evt-cat-filter" onchange="filterEmailVorlagen()">
+            <option value="">Alle Kategorien</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" onclick="document.getElementById('evt-search').value='';document.getElementById('evt-cat-filter').value='';filterEmailVorlagen()">Zurücksetzen</button>
+      </div>
+    </div>
+    <div class="card">
+      <div id="evt-table-content"><div class="loading">Laden...</div></div>
+    </div>
+  `;
+  try {
+    const [templates, categories] = await Promise.all([
+      api('/api/email-templates'),
+      api('/api/email-template-categories')
+    ]);
+    _emailTemplatesData = templates;
+    _emailTemplateCategories = categories;
+    _populateEmailVorlagenCatFilter();
+    renderEmailVorlagenTable();
+  } catch (err) {
+    document.getElementById('evt-table-content').innerHTML = '<div class="empty-state"><p>Fehler: ' + escapeHtml(err.message) + '</p></div>';
+  }
+}
+
+function _populateEmailVorlagenCatFilter() {
+  const sel = document.getElementById('evt-cat-filter');
+  if (!sel) return;
+  const cats = [...new Set(_emailTemplatesData.map(t => (t.kategorie || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+  sel.innerHTML = '<option value="">Alle Kategorien</option>' + cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+}
+
+function filterEmailVorlagen() {
+  renderEmailVorlagenTable();
+}
+
+function sortEmailVorlagen(field) {
+  if (_emailTemplatesSort.field === field) {
+    _emailTemplatesSort.dir = _emailTemplatesSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _emailTemplatesSort.field = field;
+    _emailTemplatesSort.dir = 'asc';
+  }
+  renderEmailVorlagenTable();
+}
+
+function emailVorlagenSortIcon(field) {
+  if (_emailTemplatesSort.field !== field) return '<span style="opacity:0.3;">&#9650;</span>';
+  return _emailTemplatesSort.dir === 'asc' ? '<span>&#9650;</span>' : '<span>&#9660;</span>';
+}
+
+function _stripHtmlForPreview(html) {
+  if (!html) return '';
+  const tmp = document.createElement('div');
+  tmp.innerHTML = String(html);
+  const text = (tmp.textContent || tmp.innerText || '').replace(/\s+/g, ' ').trim();
+  return text.length > 80 ? text.slice(0, 80) + '…' : text;
+}
+
+function renderEmailVorlagenTable() {
+  const container = document.getElementById('evt-table-content');
+  if (!container) return;
+  let data = [..._emailTemplatesData];
+  const term = (document.getElementById('evt-search')?.value || '').toLowerCase().trim();
+  const cat = (document.getElementById('evt-cat-filter')?.value || '').trim();
+
+  if (term) {
+    data = data.filter(t => [t.betreff, t.kategorie, t.verfasser].join(' ').toLowerCase().includes(term));
+  }
+  if (cat) {
+    data = data.filter(t => (t.kategorie || '').trim() === cat);
+  }
+
+  data.sort((a, b) => {
+    const f = _emailTemplatesSort.field;
+    const va = (a[f] || '').toString().toLowerCase();
+    const vb = (b[f] || '').toString().toLowerCase();
+    return _emailTemplatesSort.dir === 'asc' ? va.localeCompare(vb, 'de') : vb.localeCompare(va, 'de');
+  });
+
+  if (data.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>Keine Vorlagen gefunden.</p></div>';
+    return;
+  }
+
+  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap;';
+  container.innerHTML = `
+    <div style="padding:8px 16px;color:var(--text-muted);font-size:13px;">${data.length} Vorlage${data.length !== 1 ? 'n' : ''}</div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr>
+          <th style="${thStyle}" onclick="sortEmailVorlagen('kategorie')">Kategorie ${emailVorlagenSortIcon('kategorie')}</th>
+          <th style="${thStyle}" onclick="sortEmailVorlagen('betreff')">Betreff ${emailVorlagenSortIcon('betreff')}</th>
+          <th>Vorschau</th>
+          <th style="${thStyle}" onclick="sortEmailVorlagen('verfasser')">Verfasser ${emailVorlagenSortIcon('verfasser')}</th>
+          <th style="${thStyle}" onclick="sortEmailVorlagen('updated_at')">Aktualisiert ${emailVorlagenSortIcon('updated_at')}</th>
+          <th>Aktionen</th>
+        </tr></thead>
+        <tbody>
+          ${data.map(t => `<tr>
+            <td>${escapeHtml(t.kategorie || '')}</td>
+            <td><strong>${escapeHtml(t.betreff || '')}</strong></td>
+            <td style="color:var(--text-muted);font-size:13px;">${escapeHtml(_stripHtmlForPreview(t.body))}</td>
+            <td>${escapeHtml(t.verfasser || '')}</td>
+            <td>${escapeHtml(formatDateTime(t.updated_at || t.created_at || ''))}</td>
+            <td><div style="display:flex;gap:6px;white-space:nowrap;">
+              <button class="btn btn-sm btn-primary" onclick="openEmailVorlageForm(${t.id})">Bearbeiten</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteEmailVorlage(${t.id}, '${escapeHtml((t.betreff || '').replace(/'/g, '&#39;'))}')">Löschen</button>
+            </div></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function openEmailVorlageForm(editId) {
+  let t = { betreff: '', kategorie: '', body: '', verfasser: '' };
+  if (editId) {
+    try { t = await api('/api/email-templates/' + editId); } catch { showToast('Vorlage nicht gefunden', 'error'); return; }
+  }
+  // Kategorien-Liste aus DB; alter Wert (z.B. wenn Kategorie zwischenzeitlich gelöscht wurde) wird angehängt, falls nicht enthalten
+  const currentCat = (t.kategorie || '').trim();
+  const catOptions = _emailTemplateCategories.map(c => c.name);
+  if (currentCat && !catOptions.includes(currentCat)) catOptions.push(currentCat);
+
+  const html = `
+    <form onsubmit="saveEmailVorlage(event, ${editId || 'null'})">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div class="form-group">
+          <label>Kategorie *</label>
+          <select id="evt-form-kategorie" required>
+            ${currentCat ? '' : '<option value="" disabled selected>Bitte wählen…</option>'}
+            ${catOptions.map(c => `<option value="${escapeHtml(c)}"${c === currentCat ? ' selected' : ''}>${escapeHtml(c)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Verfasser</label>
+          <input type="text" value="${escapeHtml(t.verfasser || (loggedInUser && (loggedInUser.name || loggedInUser.username)) || '')}" disabled style="background:var(--bg);color:var(--text-muted);">
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:14px;">
+        <label>Betreff *</label>
+        <input type="text" id="evt-form-betreff" value="${escapeHtml(t.betreff || '')}" required placeholder="z.B. Mahnung 1. Stufe – Rechnung Nr. ...">
+      </div>
+      <div class="form-group">
+        <label>Vorlagentext</label>
+        <div class="email-composer" style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
+          <div class="email-composer-formatbar" style="flex-wrap:nowrap;overflow-x:auto;">
+            <select onchange="evtFormExec('fontName', this.value)" title="Schriftart">
+              <option value="Calibri">Calibri</option>
+              <option value="Arial">Arial</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Verdana">Verdana</option>
+              <option value="Courier New">Courier New</option>
+            </select>
+            <select onchange="evtFormSetSize(this.value)" title="Schriftgröße">
+              <option value="1">8pt</option>
+              <option value="2">10pt</option>
+              <option value="3" selected>11pt</option>
+              <option value="4">14pt</option>
+              <option value="5">18pt</option>
+              <option value="6">24pt</option>
+              <option value="7">36pt</option>
+            </select>
+            <span class="ec-divider"></span>
+            <button type="button" onmousedown="event.preventDefault();" onclick="evtFormExec('bold')" title="Fett (Strg+B)"><b>F</b></button>
+            <button type="button" onmousedown="event.preventDefault();" onclick="evtFormExec('italic')" title="Kursiv (Strg+I)"><i>K</i></button>
+            <button type="button" onmousedown="event.preventDefault();" onclick="evtFormExec('underline')" title="Unterstreichen (Strg+U)"><u>U</u></button>
+            <span class="ec-divider"></span>
+            <button type="button" onmousedown="event.preventDefault();" onclick="evtFormExec('insertUnorderedList')" title="Aufzählung">&#8226; Liste</button>
+            <button type="button" onmousedown="event.preventDefault();" onclick="evtFormExec('insertOrderedList')" title="Nummerierte Liste">1. Liste</button>
+            <span class="ec-divider"></span>
+            <button type="button" onmousedown="event.preventDefault();" onclick="evtFormExec('justifyLeft')" title="Linksbündig">&#8676;</button>
+            <button type="button" onmousedown="event.preventDefault();" onclick="evtFormExec('justifyCenter')" title="Zentriert">&#8644;</button>
+            <button type="button" onmousedown="event.preventDefault();" onclick="evtFormExec('justifyRight')" title="Rechtsbündig">&#8677;</button>
+            <span class="ec-divider"></span>
+            <button type="button" onmousedown="event.preventDefault();" onclick="evtFormInsertLink()" title="Link einfügen">&#128279;</button>
+            <button type="button" onmousedown="event.preventDefault();" onclick="evtFormExec('removeFormat')" title="Formatierung entfernen">&#10005;</button>
+          </div>
+          <div id="evt-form-editor" class="email-composer-editor" contenteditable="true" data-placeholder="Vorlagentext eingeben — Formatierung wird beim Einfügen in die E-Mail übernommen..."></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">${editId ? 'Speichern' : 'Anlegen'}</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `;
+  openModal(editId ? 'Vorlage bearbeiten' : 'Neue E-Mail-Vorlage', html, 'modal-form-wide');
+  // Body erst NACH Modal-Render einfügen, damit das HTML korrekt erhalten bleibt
+  const ed = document.getElementById('evt-form-editor');
+  if (ed) ed.innerHTML = t.body || '';
+}
+
+function evtFormExec(cmd, val) {
+  const ed = document.getElementById('evt-form-editor');
+  if (ed) ed.focus();
+  try { document.execCommand(cmd, false, val); } catch (e) {}
+}
+
+function evtFormSetSize(sizeIdx) {
+  const ed = document.getElementById('evt-form-editor');
+  if (ed) ed.focus();
+  try { document.execCommand('fontSize', false, sizeIdx); } catch (e) {}
+}
+
+function evtFormInsertLink() {
+  const url = prompt('Link-URL:');
+  if (!url) return;
+  evtFormExec('createLink', url);
+}
+
+async function saveEmailVorlage(e, editId) {
+  e.preventDefault();
+  const data = {
+    betreff: document.getElementById('evt-form-betreff').value.trim(),
+    kategorie: document.getElementById('evt-form-kategorie').value.trim(),
+    body: document.getElementById('evt-form-editor').innerHTML
+  };
+  if (!data.betreff) { showToast('Betreff ist Pflicht', 'error'); return; }
+  try {
+    if (editId) {
+      await api('/api/email-templates/' + editId, { method: 'PUT', body: data });
+      showToast('Vorlage aktualisiert');
+    } else {
+      await api('/api/email-templates', { method: 'POST', body: data });
+      showToast('Vorlage angelegt');
+    }
+    closeModal();
+    renderEmailVorlagen();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteEmailVorlage(id, betreff) {
+  const ok = await showConfirm('Vorlage löschen?', `Vorlage „${betreff}" wirklich löschen?`, { yesLabel: 'Löschen', danger: true });
+  if (!ok) return;
+  try {
+    await api('/api/email-templates/' + id, { method: 'DELETE' });
+    showToast('Vorlage gelöscht');
+    renderEmailVorlagen();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ===== Kategorien-Verwaltung =====
+
+async function openCategoryManager() {
+  // Frische Liste laden, falls sich serverseitig was geändert hat
+  try {
+    _emailTemplateCategories = await api('/api/email-template-categories');
+  } catch (err) {
+    showToast('Kategorien konnten nicht geladen werden: ' + err.message, 'error');
+    return;
+  }
+  const html = `
+    <div style="margin-bottom:8px;color:var(--text-muted);font-size:13px;">
+      Kategorien werden in allen Vorlagen verwendet. Beim Umbenennen wird der neue Name automatisch in alle bestehenden Vorlagen übernommen. Eine Kategorie kann nur gelöscht werden, wenn sie in keiner Vorlage mehr verwendet wird.
+    </div>
+    <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border);">
+      <div class="form-group" style="flex:1;margin:0;">
+        <label>Neue Kategorie</label>
+        <input type="text" id="cat-mgr-new-input" placeholder="Name eingeben..." onkeydown="if(event.key==='Enter'){event.preventDefault();addCategoryFromManager();}">
+      </div>
+      <button type="button" class="btn btn-primary" onclick="addCategoryFromManager()">Hinzufügen</button>
+    </div>
+    <div id="cat-mgr-list"></div>
+    <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
+      <button type="button" class="btn btn-secondary" onclick="closeCategoryManager()">Schließen</button>
+    </div>
+  `;
+  openModal('Kategorien verwalten', html);
+  renderCategoryManagerList();
+}
+
+function renderCategoryManagerList() {
+  const list = document.getElementById('cat-mgr-list');
+  if (!list) return;
+  if (!_emailTemplateCategories.length) {
+    list.innerHTML = '<div class="empty-state" style="padding:18px;font-size:13px;">Noch keine Kategorien angelegt.</div>';
+    return;
+  }
+  // Anzahl Vorlagen pro Kategorie aus dem Cache
+  const usage = {};
+  _emailTemplatesData.forEach(t => {
+    const k = (t.kategorie || '').trim();
+    if (k) usage[k] = (usage[k] || 0) + 1;
+  });
+  list.innerHTML = _emailTemplateCategories.map(c => {
+    const used = usage[c.name] || 0;
+    const usageLabel = used === 0 ? '<span style="color:var(--text-muted);font-size:12px;">nicht verwendet</span>'
+      : `<span style="color:var(--text-muted);font-size:12px;">in ${used} Vorlage${used > 1 ? 'n' : ''}</span>`;
+    return `
+      <div style="display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
+        <input type="text" id="cat-edit-${c.id}" value="${escapeHtml(c.name)}" data-original="${escapeHtml(c.name)}" style="flex:1;">
+        <div style="min-width:110px;text-align:right;">${usageLabel}</div>
+        <button type="button" class="btn btn-sm btn-primary" onclick="renameCategoryFromManager(${c.id})">Speichern</button>
+        <button type="button" class="btn btn-sm btn-danger" onclick="deleteCategoryFromManager(${c.id})">Löschen</button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function addCategoryFromManager() {
+  const input = document.getElementById('cat-mgr-new-input');
+  const name = (input?.value || '').trim();
+  if (!name) { showToast('Bitte einen Namen eingeben', 'error'); return; }
+  try {
+    await api('/api/email-template-categories', { method: 'POST', body: { name } });
+    input.value = '';
+    _emailTemplateCategories = await api('/api/email-template-categories');
+    renderCategoryManagerList();
+    showToast('Kategorie hinzugefügt');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function renameCategoryFromManager(id) {
+  const input = document.getElementById('cat-edit-' + id);
+  if (!input) return;
+  const newName = input.value.trim();
+  const oldName = input.getAttribute('data-original') || '';
+  if (!newName) { showToast('Name darf nicht leer sein', 'error'); input.value = oldName; return; }
+  if (newName === oldName) { showToast('Keine Änderung'); return; }
+  try {
+    await api('/api/email-template-categories/' + id, { method: 'PUT', body: { name: newName } });
+    // Cache der Vorlagen neu laden, weil Kategorie-Namen propagiert wurden
+    [_emailTemplateCategories, _emailTemplatesData] = await Promise.all([
+      api('/api/email-template-categories'),
+      api('/api/email-templates')
+    ]);
+    renderCategoryManagerList();
+    showToast('Kategorie umbenannt');
+  } catch (err) {
+    showToast(err.message, 'error');
+    input.value = oldName;
+  }
+}
+
+async function deleteCategoryFromManager(id) {
+  const cat = _emailTemplateCategories.find(c => c.id === id);
+  if (!cat) return;
+  const ok = await showConfirm('Kategorie löschen?', `Kategorie „${cat.name}" wirklich löschen?`, { yesLabel: 'Löschen', danger: true });
+  if (!ok) return;
+  try {
+    await api('/api/email-template-categories/' + id, { method: 'DELETE' });
+    _emailTemplateCategories = await api('/api/email-template-categories');
+    renderCategoryManagerList();
+    showToast('Kategorie gelöscht');
+  } catch (err) {
+    // Backend liefert hier 409 mit klarer Fehlermeldung wenn die Kategorie noch verwendet wird
+    showToast(err.message, 'error');
+  }
+}
+
+function closeCategoryManager() {
+  closeModal();
+  // Vorlagen-Tabelle + Kategorie-Filter neu rendern, da sich Kategorien geändert haben können
+  renderEmailVorlagen();
 }
 
 // ===== Initialization =====
