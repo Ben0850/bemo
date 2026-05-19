@@ -1069,4 +1069,21 @@ function execute(sql, params = []) {
   return { lastId };
 }
 
-module.exports = { getDb, queryAll, queryOne, execute, save };
+// Defensiv: stellt sicher, dass eine Spalte auf einer bestehenden Tabelle existiert.
+// Idempotent. Wird von Endpoints aufgerufen, die neue Spalten brauchen, falls die
+// initiale Migration aus irgendeinem Grund nicht angekommen ist.
+function ensureColumn(table, columnName, columnDef) {
+  if (!db) return;
+  try {
+    const info = db.exec(`PRAGMA table_info(${table})`);
+    const exists = info.length > 0 && info[0].values.some(row => row[1] === columnName);
+    if (exists) return;
+    db.run(`ALTER TABLE ${table} ADD COLUMN ${columnName} ${columnDef}`);
+    save();
+    console.log(`[migration] added column ${table}.${columnName}`);
+  } catch (e) {
+    console.error(`[migration] ensureColumn(${table}, ${columnName}) failed:`, e.message);
+  }
+}
+
+module.exports = { getDb, queryAll, queryOne, execute, save, ensureColumn };

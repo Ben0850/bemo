@@ -8,7 +8,7 @@ const os = require('os');
 const msal = require('@azure/msal-node');
 const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-const { getDb, queryAll, queryOne, execute } = require('./db');
+const { getDb, queryAll, queryOne, execute, ensureColumn } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -600,34 +600,50 @@ function validatePassword(pw) {
 }
 
 app.post('/api/staff', (req, res) => {
-  const { name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature } = req.body;
-  if (!name) return res.status(400).json({ error: 'Name ist Pflichtfeld' });
-  const pwError = validatePassword(password);
-  if (pwError) return res.status(400).json({ error: pwError });
-  const callerPermission = req.headers['x-user-permission'];
-  const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
-  const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : 'Benutzer';
-  if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
-  const result = execute('INSERT INTO staff (name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [name, station || '', password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours || 40, default_station_id || null, work_days || '1,2,3,4,5', username || '', hidden_in_planning ? 1 : 0, signature || '']);
-  res.json({ id: result.lastId, message: 'Mitarbeiter hinzugefügt' });
+  try {
+    // Defensive: stellt sicher dass die signature-Spalte existiert (falls die initiale ALTER TABLE-Migration
+    // in der Produktions-DB nicht durchgelaufen ist — sonst würde der INSERT mit "no such column" scheitern).
+    ensureColumn('staff', 'signature', "TEXT DEFAULT ''");
+
+    const { name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature } = req.body;
+    if (!name) return res.status(400).json({ error: 'Name ist Pflichtfeld' });
+    const pwError = validatePassword(password);
+    if (pwError) return res.status(400).json({ error: pwError });
+    const callerPermission = req.headers['x-user-permission'];
+    const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
+    const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : 'Benutzer';
+    if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
+    const result = execute('INSERT INTO staff (name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, station || '', password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours || 40, default_station_id || null, work_days || '1,2,3,4,5', username || '', hidden_in_planning ? 1 : 0, signature || '']);
+    res.json({ id: result.lastId, message: 'Mitarbeiter hinzugefügt' });
+  } catch (err) {
+    console.error('POST /api/staff failed:', err && err.stack ? err.stack : err);
+    res.status(500).json({ error: 'Anlegen fehlgeschlagen: ' + (err && err.message ? err.message : String(err)) });
+  }
 });
 
 app.put('/api/staff/:id', (req, res) => {
-  const { name, station, active, password, permission_level, has_calendar, calendar_visibility, vacation_days, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature } = req.body;
-  const pwError = validatePassword(password);
-  if (pwError) return res.status(400).json({ error: pwError });
-  const callerPermission = req.headers['x-user-permission'];
-  const existing = queryOne('SELECT permission_level, hidden_in_planning, signature FROM staff WHERE id = ?', [Number(req.params.id)]);
-  const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
-  const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : (existing ? existing.permission_level : 'Benutzer');
-  if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
-  const finalHidden = (hidden_in_planning !== undefined) ? (hidden_in_planning ? 1 : 0) : (existing ? (existing.hidden_in_planning || 0) : 0);
-  // Signatur: explizit übergebener Wert (auch leer) gewinnt; sonst bestehender Wert behalten
-  const finalSignature = (signature !== undefined) ? String(signature) : (existing ? (existing.signature || '') : '');
-  execute('UPDATE staff SET name=?, station=?, active=?, password=?, permission_level=?, has_calendar=?, calendar_visibility=?, vacation_days=?, entry_date=?, exit_date=?, email=?, street=?, zip=?, city=?, phone_private=?, phone_business=?, emergency_name=?, emergency_phone=?, weekly_hours=?, default_station_id=?, work_days=?, username=?, hidden_in_planning=?, signature=? WHERE id=?',
-    [name, station || '', active !== undefined ? active : 1, password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days !== undefined ? vacation_days : 30, entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours !== undefined ? weekly_hours : 40, default_station_id !== undefined ? default_station_id : null, work_days || '1,2,3,4,5', username || '', finalHidden, finalSignature, Number(req.params.id)]);
-  res.json({ message: 'Mitarbeiter aktualisiert' });
+  try {
+    ensureColumn('staff', 'signature', "TEXT DEFAULT ''");
+
+    const { name, station, active, password, permission_level, has_calendar, calendar_visibility, vacation_days, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature } = req.body;
+    const pwError = validatePassword(password);
+    if (pwError) return res.status(400).json({ error: pwError });
+    const callerPermission = req.headers['x-user-permission'];
+    const existing = queryOne('SELECT permission_level, hidden_in_planning, signature FROM staff WHERE id = ?', [Number(req.params.id)]);
+    const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
+    const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : (existing ? existing.permission_level : 'Benutzer');
+    if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
+    const finalHidden = (hidden_in_planning !== undefined) ? (hidden_in_planning ? 1 : 0) : (existing ? (existing.hidden_in_planning || 0) : 0);
+    // Signatur: explizit übergebener Wert (auch leer) gewinnt; sonst bestehender Wert behalten
+    const finalSignature = (signature !== undefined) ? String(signature) : (existing ? (existing.signature || '') : '');
+    execute('UPDATE staff SET name=?, station=?, active=?, password=?, permission_level=?, has_calendar=?, calendar_visibility=?, vacation_days=?, entry_date=?, exit_date=?, email=?, street=?, zip=?, city=?, phone_private=?, phone_business=?, emergency_name=?, emergency_phone=?, weekly_hours=?, default_station_id=?, work_days=?, username=?, hidden_in_planning=?, signature=? WHERE id=?',
+      [name, station || '', active !== undefined ? active : 1, password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days !== undefined ? vacation_days : 30, entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours !== undefined ? weekly_hours : 40, default_station_id !== undefined ? default_station_id : null, work_days || '1,2,3,4,5', username || '', finalHidden, finalSignature, Number(req.params.id)]);
+    res.json({ message: 'Mitarbeiter aktualisiert' });
+  } catch (err) {
+    console.error('PUT /api/staff/:id failed:', err && err.stack ? err.stack : err);
+    res.status(500).json({ error: 'Speichern fehlgeschlagen: ' + (err && err.message ? err.message : String(err)) });
+  }
 });
 
 app.delete('/api/staff/:id', (req, res) => {
