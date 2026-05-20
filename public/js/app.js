@@ -14904,7 +14904,8 @@ async function renderAkteDetail(id) {
         ${cell('Mietende', r.end_date ? fmt(formatDate(r.end_date)) : fmt(''))}
         ${cell('Mietdauer', dauer !== null ? dauer + ' Tage' : fmt(''))}
         ${cell('Mietart', fmt(r.mietart))}
-        ${cell('Status', r.status ? rentalStatusBadge(r.status) : fmt(''))}`;
+        ${cell('Status', r.status ? rentalStatusBadge(r.status) : fmt(''))}
+        ${cell('Mietvorgangs-Nr.', '#' + r.id)}`;
     } else {
       mietvorgangHtml = `<div style="color:var(--text-muted);">Kein Mietvorgang verkn\u00fcpft</div>`;
     }
