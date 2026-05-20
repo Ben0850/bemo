@@ -1585,10 +1585,17 @@ app.get('/api/invoices', (req, res) => {
   // sodass der JOIN auch bei vielen tausend Zahlungen performant bleibt.
   let sql = `SELECT i.*,
     CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name ELSE c.last_name || ', ' || c.first_name END as customer_name,
+    r.start_date AS rental_start_date,
+    r.end_date AS rental_end_date,
+    fv.license_plate AS rental_license_plate,
+    fv.manufacturer AS rental_manufacturer,
+    fv.model AS rental_model,
     COALESCE(SUM(CASE WHEN p.direction='in'  THEN p.amount ELSE 0 END), 0)
     - COALESCE(SUM(CASE WHEN p.direction='out' THEN p.amount ELSE 0 END), 0) AS payment_saldo
     FROM invoices i
     JOIN customers c ON i.customer_id = c.id
+    LEFT JOIN rentals r ON r.id = i.rental_id
+    LEFT JOIN fleet_vehicles fv ON fv.id = r.vehicle_id
     LEFT JOIN invoice_payments p ON p.invoice_id = i.id
     WHERE 1=1`;
   const params = [];
@@ -1597,8 +1604,9 @@ app.get('/api/invoices', (req, res) => {
   if (date_to) { sql += ' AND i.invoice_date <= ?'; params.push(date_to); }
   if (search) {
     const term = `%${search}%`;
-    sql += ' AND (i.invoice_number LIKE ? OR c.last_name LIKE ? OR c.first_name LIKE ? OR c.company_name LIKE ?)';
-    params.push(term, term, term, term);
+    // Suche erweitert um Mietvorgangs-Daten (Kennzeichen, Fahrzeug) und Mietvorgangs-Nr.
+    sql += ' AND (i.invoice_number LIKE ? OR c.last_name LIKE ? OR c.first_name LIKE ? OR c.company_name LIKE ? OR fv.license_plate LIKE ? OR fv.manufacturer LIKE ? OR fv.model LIKE ? OR CAST(i.rental_id AS TEXT) LIKE ?)';
+    params.push(term, term, term, term, term, term, term, term);
   }
   sql += ' GROUP BY i.id ORDER BY i.invoice_date DESC, i.id DESC';
   const rows = queryAll(sql, params);
@@ -1631,7 +1639,18 @@ app.get('/api/invoices/:id', async (req, res) => {
   if (invoice.vermittler_id) {
     vermittler_obj = await fetchStammdatenById(`/api/vermittler/${invoice.vermittler_id}`);
   }
-  res.json({ ...invoice, items, payment_saldo, payment_status, vermittler_obj });
+  // Mietvorgangs-Daten (Fahrzeug, Daten, KM) falls verknüpft
+  let rental_obj = null;
+  if (invoice.rental_id) {
+    rental_obj = queryOne(`
+      SELECT r.id, r.start_date, r.end_date, r.km_start, r.km_end, r.mietart, r.status,
+             fv.license_plate, fv.manufacturer, fv.model
+      FROM rentals r
+      LEFT JOIN fleet_vehicles fv ON fv.id = r.vehicle_id
+      WHERE r.id = ?
+    `, [invoice.rental_id]);
+  }
+  res.json({ ...invoice, items, payment_saldo, payment_status, vermittler_obj, rental_obj });
 });
 
 // Default-Vortext für neue Rechnungen
@@ -1643,10 +1662,13 @@ app.post('/api/invoices', (req, res) => {
   if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
-  // Defensiv: intro_text-Spalte garantieren (falls Migration nicht durchgelaufen ist)
+  // Defensiv: neue Spalten garantieren (falls Migration nicht durchgelaufen ist)
   ensureColumn('invoices', 'intro_text', "TEXT DEFAULT ''");
+  ensureColumn('invoices', 'abgerechnete_fahrzeuggruppe', "INTEGER DEFAULT NULL");
+  ensureColumn('invoices', 'kundenfahrzeuggruppe', "INTEGER DEFAULT NULL");
+  ensureColumn('invoices', 'rental_id', "INTEGER DEFAULT NULL");
 
-  const { customer_id, invoice_date, due_date, service_date, payment_method, notes, bank_account_id, vermittler_id, intro_text } = req.body;
+  const { customer_id, invoice_date, due_date, service_date, payment_method, notes, bank_account_id, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id } = req.body;
   if (!customer_id || !invoice_date) {
     return res.status(400).json({ error: 'Kunde und Rechnungsdatum sind Pflichtfelder' });
   }
@@ -1659,11 +1681,13 @@ app.post('/api/invoices', (req, res) => {
   }
   try {
     const snapshot = JSON.stringify(buildSnapshot(bank_account_id));
-    // intro_text: wenn explizit übergeben (auch leer), Wert nehmen; sonst Default
     const finalIntroText = (intro_text !== undefined) ? String(intro_text) : DEFAULT_INVOICE_INTRO_TEXT;
+    const finalGroupBilled = abgerechnete_fahrzeuggruppe ? Number(abgerechnete_fahrzeuggruppe) : null;
+    const finalGroupCustomer = kundenfahrzeuggruppe ? Number(kundenfahrzeuggruppe) : null;
+    const finalRentalId = rental_id ? Number(rental_id) : null;
     const result = execute(
-      'INSERT INTO invoices (invoice_number, customer_id, invoice_date, due_date, service_date, payment_method, notes, company_snapshot, vermittler_id, intro_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [invoice_number, customer_id, invoice_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot, vermittler_id || null, finalIntroText]
+      'INSERT INTO invoices (invoice_number, customer_id, invoice_date, due_date, service_date, payment_method, notes, company_snapshot, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [invoice_number, customer_id, invoice_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot, vermittler_id || null, finalIntroText, finalGroupBilled, finalGroupCustomer, finalRentalId]
     );
     res.json({ id: result.lastId, invoice_number, message: 'Rechnung erstellt' });
   } catch(e) {
@@ -1678,44 +1702,57 @@ app.put('/api/invoices/:id', (req, res) => {
   if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
-  // Defensiv: intro_text-Spalte garantieren
+  // Defensiv: neue Spalten garantieren
   ensureColumn('invoices', 'intro_text', "TEXT DEFAULT ''");
+  ensureColumn('invoices', 'abgerechnete_fahrzeuggruppe', "INTEGER DEFAULT NULL");
+  ensureColumn('invoices', 'kundenfahrzeuggruppe', "INTEGER DEFAULT NULL");
+  ensureColumn('invoices', 'rental_id', "INTEGER DEFAULT NULL");
 
   // AUTH-04: invoice_date und invoice_number sind nach Erstellung unveränderbar.
   // Sie werden hier bewusst NICHT aus req.body gelesen und NICHT im UPDATE-Statement verwendet.
-  const { due_date, status, service_date, payment_method, notes, vermittler_id, intro_text } = req.body;
+  const { due_date, status, service_date, payment_method, notes, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id } = req.body;
   const id = Number(req.params.id);
 
-  // Vermittler-only Update: nur vermittler_id setzen, andere Felder unangetastet lassen
-  // (Vermittler ist kein finanzieller Teil der Rechnung, jederzeit änderbar)
-  const onlyVermittler = vermittler_id !== undefined
-    && due_date === undefined && status === undefined
-    && service_date === undefined && payment_method === undefined && notes === undefined
-    && intro_text === undefined;
-  if (onlyVermittler) {
+  // Helper für Detection ob ein Feld im Body explizit übergeben wurde
+  const isSet = v => v !== undefined;
+  const coreSet = isSet(due_date) || isSet(status) || isSet(service_date) || isSet(payment_method) || isSet(notes);
+  const extrasSet = isSet(abgerechnete_fahrzeuggruppe) || isSet(kundenfahrzeuggruppe) || isSet(rental_id);
+
+  // Vermittler-only Update
+  if (isSet(vermittler_id) && !coreSet && !isSet(intro_text) && !extrasSet) {
     execute('UPDATE invoices SET vermittler_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [vermittler_id || null, id]);
-    res.json({ message: 'Vermittler aktualisiert' });
-    return;
+    return res.json({ message: 'Vermittler aktualisiert' });
   }
 
-  // Intro-Text-only Update (jederzeit änderbar, nicht finanziell)
-  const onlyIntroText = intro_text !== undefined
-    && due_date === undefined && status === undefined
-    && service_date === undefined && payment_method === undefined && notes === undefined
-    && vermittler_id === undefined;
-  if (onlyIntroText) {
+  // Intro-Text-only Update
+  if (isSet(intro_text) && !coreSet && !isSet(vermittler_id) && !extrasSet) {
     execute('UPDATE invoices SET intro_text=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [String(intro_text), id]);
-    res.json({ message: 'Vortext aktualisiert' });
-    return;
+    return res.json({ message: 'Vortext aktualisiert' });
   }
 
-  // Vollständiger Update mit allen optionalen Feldern
-  const existing = queryOne('SELECT intro_text, vermittler_id FROM invoices WHERE id = ?', [id]);
-  const finalIntroText = (intro_text !== undefined) ? String(intro_text) : (existing ? (existing.intro_text || '') : '');
-  const finalVermittlerId = (vermittler_id !== undefined) ? (vermittler_id || null) : (existing ? existing.vermittler_id : null);
+  // Extras-only Update (Fahrzeuggruppen + Mietvorgang-Verknüpfung)
+  if (extrasSet && !coreSet && !isSet(intro_text) && !isSet(vermittler_id)) {
+    const existing = queryOne('SELECT abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id FROM invoices WHERE id = ?', [id]);
+    const finalGroupBilled = isSet(abgerechnete_fahrzeuggruppe) ? (abgerechnete_fahrzeuggruppe ? Number(abgerechnete_fahrzeuggruppe) : null) : (existing ? existing.abgerechnete_fahrzeuggruppe : null);
+    const finalGroupCustomer = isSet(kundenfahrzeuggruppe) ? (kundenfahrzeuggruppe ? Number(kundenfahrzeuggruppe) : null) : (existing ? existing.kundenfahrzeuggruppe : null);
+    const finalRentalId = isSet(rental_id) ? (rental_id ? Number(rental_id) : null) : (existing ? existing.rental_id : null);
+    execute(
+      'UPDATE invoices SET abgerechnete_fahrzeuggruppe=?, kundenfahrzeuggruppe=?, rental_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+      [finalGroupBilled, finalGroupCustomer, finalRentalId, id]
+    );
+    return res.json({ message: 'Zusatzinfos aktualisiert' });
+  }
+
+  // Vollständiger Update mit allen optionalen Feldern (Bestandswerte für nicht übergebene Felder)
+  const existing = queryOne('SELECT intro_text, vermittler_id, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id FROM invoices WHERE id = ?', [id]);
+  const finalIntroText = isSet(intro_text) ? String(intro_text) : (existing ? (existing.intro_text || '') : '');
+  const finalVermittlerId = isSet(vermittler_id) ? (vermittler_id || null) : (existing ? existing.vermittler_id : null);
+  const finalGroupBilled = isSet(abgerechnete_fahrzeuggruppe) ? (abgerechnete_fahrzeuggruppe ? Number(abgerechnete_fahrzeuggruppe) : null) : (existing ? existing.abgerechnete_fahrzeuggruppe : null);
+  const finalGroupCustomer = isSet(kundenfahrzeuggruppe) ? (kundenfahrzeuggruppe ? Number(kundenfahrzeuggruppe) : null) : (existing ? existing.kundenfahrzeuggruppe : null);
+  const finalRentalId = isSet(rental_id) ? (rental_id ? Number(rental_id) : null) : (existing ? existing.rental_id : null);
   execute(
-    'UPDATE invoices SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, vermittler_id=?, intro_text=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-    [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', finalVermittlerId, finalIntroText, id]
+    'UPDATE invoices SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, vermittler_id=?, intro_text=?, abgerechnete_fahrzeuggruppe=?, kundenfahrzeuggruppe=?, rental_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', finalVermittlerId, finalIntroText, finalGroupBilled, finalGroupCustomer, finalRentalId, id]
   );
   res.json({ message: 'Rechnung aktualisiert' });
 });

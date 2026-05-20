@@ -423,6 +423,9 @@ async function getDb() {
   try { db.run("ALTER TABLE invoices ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE invoices ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
   try { db.run("ALTER TABLE invoices ADD COLUMN intro_text TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN abgerechnete_fahrzeuggruppe INTEGER DEFAULT NULL"); } catch(e) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN kundenfahrzeuggruppe INTEGER DEFAULT NULL"); } catch(e) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN rental_id INTEGER DEFAULT NULL"); } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
   // Bank accounts (Bankverbindungen)

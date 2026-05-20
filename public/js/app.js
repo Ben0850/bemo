@@ -7143,6 +7143,65 @@ async function renderInvoiceDetail(id) {
         </div>
       </div>
 
+      <div style="margin:8px 0;">
+        <button type="button" class="btn btn-sm btn-secondary" onclick="toggleInvoiceExtras()" id="inv-extras-toggle-btn">
+          ${_invoiceExtrasVisible(inv) ? 'Zusatzinfos ausblenden' : 'Zusatzinfos einblenden'}
+        </button>
+      </div>
+
+      <div class="card" id="inv-extras-card" style="${_invoiceExtrasVisible(inv) ? '' : 'display:none;'}">
+        <div class="card-header"><h3>Zusatzinfos</h3></div>
+        <div style="padding:0 16px 16px 16px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+            <div class="form-group">
+              <label>Abgerechnete Fahrzeuggruppe</label>
+              ${canEdit
+                ? `<select id="inv-edit-group-billed" onchange="saveInvoiceExtras(${id})">
+                     <option value="">—</option>
+                     ${[1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${Number(inv.abgerechnete_fahrzeuggruppe)===n?'selected':''}>${n}</option>`).join('')}
+                   </select>`
+                : `<div class="form-control-static">${inv.abgerechnete_fahrzeuggruppe || '—'}</div>`}
+            </div>
+            <div class="form-group">
+              <label>Kundenfahrzeuggruppe</label>
+              ${canEdit
+                ? `<select id="inv-edit-group-customer" onchange="saveInvoiceExtras(${id})">
+                     <option value="">—</option>
+                     ${[1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${Number(inv.kundenfahrzeuggruppe)===n?'selected':''}>${n}</option>`).join('')}
+                   </select>`
+                : `<div class="form-control-static">${inv.kundenfahrzeuggruppe || '—'}</div>`}
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:8px;">
+            <label style="display:flex;justify-content:space-between;align-items:center;">
+              <span>Mietvorgang</span>
+              <div style="display:flex;gap:6px;">
+                ${canEdit && inv.rental_obj ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openRentalDetail(${inv.rental_obj.id})">Öffnen</button>` : ''}
+                ${canEdit ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openInvoiceMietvorgangPicker(${id})">${inv.rental_obj ? 'Ändern' : 'Zuweisen'}</button>` : ''}
+                ${canEdit && inv.rental_obj ? `<button type="button" class="btn btn-sm btn-danger" onclick="clearInvoiceMietvorgang(${id})">Entfernen</button>` : ''}
+              </div>
+            </label>
+            ${inv.rental_obj
+              ? (() => {
+                  const r = inv.rental_obj;
+                  const fzg = ((r.manufacturer || '') + ' ' + (r.model || '')).trim();
+                  const kmStart = (r.km_start ?? '') !== '' ? Number(r.km_start) : null;
+                  const kmEnd = (r.km_end ?? '') !== '' ? Number(r.km_end) : null;
+                  const kmDiff = (kmStart !== null && kmEnd !== null && !isNaN(kmStart) && !isNaN(kmEnd)) ? (kmEnd - kmStart) : null;
+                  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;padding:10px 12px;background:var(--bg-subtle, #f9fafb);border:1px solid var(--border);border-radius:6px;font-size:13px;">
+                    <div><span style="color:var(--text-muted);">Fahrzeug:</span> <strong>${escapeHtml(fzg || '—')}</strong></div>
+                    <div><span style="color:var(--text-muted);">Kennzeichen:</span> <strong>${escapeHtml(r.license_plate || '—')}</strong></div>
+                    <div><span style="color:var(--text-muted);">Mietbeginn:</span> <strong>${r.start_date ? formatDate(r.start_date) : '—'}</strong></div>
+                    <div><span style="color:var(--text-muted);">Rückgabe:</span> <strong>${r.end_date ? formatDate(r.end_date) : '—'}</strong></div>
+                    <div style="grid-column:1 / -1;"><span style="color:var(--text-muted);">Gefahrene Kilometer:</span> <strong>${kmDiff !== null ? kmDiff.toLocaleString('de-DE') + ' km' : '—'}</strong></div>
+                  </div>`;
+                })()
+              : `<div style="padding:10px 12px;background:var(--bg-subtle, #f9fafb);border:1px dashed var(--border);border-radius:6px;color:var(--text-muted);font-size:13px;">Kein Mietvorgang zugewiesen</div>`}
+          </div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <h3>Positionen</h3>
@@ -7497,6 +7556,181 @@ async function saveInvoiceIntroText(invoiceId) {
     showToast('Vortext gespeichert');
   } catch (err) {
     showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+// === Zusatzinfos (Fahrzeuggruppen + Mietvorgang-Verknüpfung) ===
+
+// Sichtbarkeit: Card ist eingeblendet wenn mind. eines der Zusatzfelder gefüllt ist
+// (damit User die Daten direkt sieht), sonst Initial ausgeblendet.
+function _invoiceExtrasVisible(inv) {
+  return !!(inv && (inv.abgerechnete_fahrzeuggruppe || inv.kundenfahrzeuggruppe || inv.rental_id));
+}
+
+function toggleInvoiceExtras() {
+  const card = document.getElementById('inv-extras-card');
+  const btn = document.getElementById('inv-extras-toggle-btn');
+  if (!card || !btn) return;
+  const visible = card.style.display !== 'none';
+  card.style.display = visible ? 'none' : '';
+  btn.textContent = visible ? 'Zusatzinfos einblenden' : 'Zusatzinfos ausblenden';
+}
+
+async function saveInvoiceExtras(invoiceId) {
+  if (!canEditInvoice()) { showToast('Keine Berechtigung', 'error'); return; }
+  const groupBilled = document.getElementById('inv-edit-group-billed')?.value || '';
+  const groupCustomer = document.getElementById('inv-edit-group-customer')?.value || '';
+  try {
+    await api(`/api/invoices/${invoiceId}`, { method: 'PUT', body: {
+      abgerechnete_fahrzeuggruppe: groupBilled ? Number(groupBilled) : null,
+      kundenfahrzeuggruppe: groupCustomer ? Number(groupCustomer) : null
+    }});
+    showToast('Zusatzinfos gespeichert');
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+async function clearInvoiceMietvorgang(invoiceId) {
+  if (!canEditInvoice()) { showToast('Keine Berechtigung', 'error'); return; }
+  try {
+    await api(`/api/invoices/${invoiceId}`, { method: 'PUT', body: { rental_id: null } });
+    showToast('Mietvorgang entfernt');
+    renderInvoiceDetail(invoiceId);
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+// Mietvorgang-Picker für Rechnungen — eigene State-Variablen, sonst gleiches Pattern wie Akten-Picker
+let _invMietPickerRentals = [];
+let _invMietPickerMatches = [];
+let _invMietPickerSortField = null;
+let _invMietPickerSortDir = 'asc';
+let _invMietPickerCurrentInvoiceId = null;
+
+async function openInvoiceMietvorgangPicker(invoiceId) {
+  _invMietPickerCurrentInvoiceId = invoiceId;
+  try {
+    _invMietPickerRentals = await api('/api/rentals');
+  } catch (err) {
+    showToast('Fehler beim Laden: ' + (err.message || err), 'error');
+    return;
+  }
+  _invMietPickerMatches = [];
+  _invMietPickerSortField = null;
+  _invMietPickerSortDir = 'asc';
+  openModal('Mietvorgang zuweisen', `
+    <div class="form-group">
+      <label>Mietvorgang suchen (Kennzeichen, Fahrzeug, Datum, Kunde)</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="inv-miet-pick-search" placeholder="z.B. K-AB 123 oder Mustermann oder 03.2026" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();doInvoiceMietvorgangSearch();}" autocomplete="off">
+        <button type="button" class="btn btn-primary" onclick="doInvoiceMietvorgangSearch()">Suchen</button>
+      </div>
+    </div>
+    <div id="inv-miet-pick-results" style="max-height:360px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;display:none;"></div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Mietvorgang anklicken zum Übernehmen · Spaltenkopf für Sortierung</div>
+    <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
+      <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+    </div>
+  `, 'modal-wide');
+  setTimeout(() => { const inp = document.getElementById('inv-miet-pick-search'); if (inp) inp.focus(); }, 0);
+}
+
+function _invMietPickerSortIcon(field) {
+  if (_invMietPickerSortField !== field) return '<span style="opacity:0.3;margin-left:4px;">↕</span>';
+  return _invMietPickerSortDir === 'asc' ? '<span style="margin-left:4px;">▲</span>' : '<span style="margin-left:4px;">▼</span>';
+}
+
+function _invMietPickerCompare(a, b, field) {
+  let va, vb;
+  switch (field) {
+    case 'id': va = Number(a.id) || 0; vb = Number(b.id) || 0; break;
+    case 'license_plate': va = (a.license_plate || '').toLowerCase(); vb = (b.license_plate || '').toLowerCase(); break;
+    case 'fahrzeug': va = ((a.manufacturer || '') + ' ' + (a.model || '')).toLowerCase(); vb = ((b.manufacturer || '') + ' ' + (b.model || '')).toLowerCase(); break;
+    case 'start_date': va = a.start_date || ''; vb = b.start_date || ''; break;
+    case 'customer_name': va = (a.customer_name || '').toLowerCase(); vb = (b.customer_name || '').toLowerCase(); break;
+    case 'status': va = (a.status || '').toLowerCase(); vb = (b.status || '').toLowerCase(); break;
+    default: return 0;
+  }
+  if (va < vb) return _invMietPickerSortDir === 'asc' ? -1 : 1;
+  if (va > vb) return _invMietPickerSortDir === 'asc' ? 1 : -1;
+  return 0;
+}
+
+function sortInvMietPicker(field) {
+  if (_invMietPickerSortField === field) {
+    _invMietPickerSortDir = _invMietPickerSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _invMietPickerSortField = field;
+    _invMietPickerSortDir = 'asc';
+  }
+  _renderInvMietPickerResults();
+}
+
+function _renderInvMietPickerResults() {
+  const resultsEl = document.getElementById('inv-miet-pick-results');
+  if (!resultsEl) return;
+  if (_invMietPickerMatches.length === 0) {
+    resultsEl.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center;">Keine Mietvorgänge gefunden</div>';
+    return;
+  }
+  const sorted = _invMietPickerSortField
+    ? [..._invMietPickerMatches].sort((a, b) => _invMietPickerCompare(a, b, _invMietPickerSortField))
+    : _invMietPickerMatches;
+  const th = (label, field) =>
+    `<th style="cursor:pointer;user-select:none;" onclick="sortInvMietPicker('${field}')">${label}${_invMietPickerSortIcon(field)}</th>`;
+  resultsEl.innerHTML = '<table class="data-table miet-pick-table" style="margin:0;font-size:13px;user-select:none;"><thead><tr>'
+    + th('Nr.', 'id')
+    + th('Kennzeichen', 'license_plate')
+    + th('Fahrzeug', 'fahrzeug')
+    + th('Zeitraum', 'start_date')
+    + th('Kunde', 'customer_name')
+    + th('Status', 'status')
+    + '</tr></thead><tbody>'
+    + sorted.slice(0, 50).map(r => {
+        const fzg = ((r.manufacturer || '') + ' ' + (r.model || '')).trim() || '-';
+        const zeitraum = (r.start_date ? formatDate(r.start_date) : '?') + ' – ' + (r.end_date ? formatDate(r.end_date) : '?');
+        return `<tr class="miet-pick-row" style="cursor:pointer;" onclick="selectInvoiceMietvorgang(${r.id})">
+          <td><strong>${r.id}</strong></td>
+          <td><strong>${escapeHtml(r.license_plate || '-')}</strong></td>
+          <td>${escapeHtml(fzg)}</td>
+          <td>${zeitraum}</td>
+          <td>${escapeHtml(r.customer_name || '-')}</td>
+          <td>${r.status ? rentalStatusBadge(r.status) : '-'}</td>
+        </tr>`;
+      }).join('')
+    + '</tbody></table>';
+}
+
+function doInvoiceMietvorgangSearch() {
+  const term = (document.getElementById('inv-miet-pick-search').value || '').trim().toLowerCase();
+  const resultsEl = document.getElementById('inv-miet-pick-results');
+  if (!resultsEl) return;
+  if (!term) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; _invMietPickerMatches = []; return; }
+  _invMietPickerMatches = _invMietPickerRentals.filter(r => {
+    const haystack = [
+      r.license_plate || '', r.manufacturer || '', r.model || '',
+      r.customer_name || '', r.start_date || '', r.end_date || '',
+      r.start_date ? formatDate(r.start_date) : '',
+      r.end_date ? formatDate(r.end_date) : '',
+      r.mietart || '', r.status || '', String(r.id || '')
+    ].join(' ').toLowerCase();
+    return haystack.includes(term);
+  });
+  resultsEl.style.display = 'block';
+  _renderInvMietPickerResults();
+}
+
+async function selectInvoiceMietvorgang(rentalId) {
+  if (!_invMietPickerCurrentInvoiceId || !rentalId) return;
+  try {
+    await api(`/api/invoices/${_invMietPickerCurrentInvoiceId}`, { method: 'PUT', body: { rental_id: rentalId } });
+    closeModal();
+    showToast('Mietvorgang zugewiesen');
+    renderInvoiceDetail(_invMietPickerCurrentInvoiceId);
+  } catch (err) {
+    showToast('Fehler: ' + (err.message || err), 'error');
   }
 }
 
