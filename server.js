@@ -1634,13 +1634,19 @@ app.get('/api/invoices/:id', async (req, res) => {
   res.json({ ...invoice, items, payment_saldo, payment_status, vermittler_obj });
 });
 
+// Default-Vortext für neue Rechnungen
+const DEFAULT_INVOICE_INTRO_TEXT = 'Unfallersatz Mietwagenrechnung\nAbrechnung erfolgt nach der BeMo-Preistabelle';
+
 app.post('/api/invoices', (req, res) => {
   // AUTH-02: Nur Verwaltung, Buchhaltung, Admin dürfen Rechnungen erstellen
   const permission = req.headers['x-user-permission'];
   if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
-  const { customer_id, invoice_date, due_date, service_date, payment_method, notes, bank_account_id, vermittler_id } = req.body;
+  // Defensiv: intro_text-Spalte garantieren (falls Migration nicht durchgelaufen ist)
+  ensureColumn('invoices', 'intro_text', "TEXT DEFAULT ''");
+
+  const { customer_id, invoice_date, due_date, service_date, payment_method, notes, bank_account_id, vermittler_id, intro_text } = req.body;
   if (!customer_id || !invoice_date) {
     return res.status(400).json({ error: 'Kunde und Rechnungsdatum sind Pflichtfelder' });
   }
@@ -1653,13 +1659,16 @@ app.post('/api/invoices', (req, res) => {
   }
   try {
     const snapshot = JSON.stringify(buildSnapshot(bank_account_id));
+    // intro_text: wenn explizit übergeben (auch leer), Wert nehmen; sonst Default
+    const finalIntroText = (intro_text !== undefined) ? String(intro_text) : DEFAULT_INVOICE_INTRO_TEXT;
     const result = execute(
-      'INSERT INTO invoices (invoice_number, customer_id, invoice_date, due_date, service_date, payment_method, notes, company_snapshot, vermittler_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [invoice_number, customer_id, invoice_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot, vermittler_id || null]
+      'INSERT INTO invoices (invoice_number, customer_id, invoice_date, due_date, service_date, payment_method, notes, company_snapshot, vermittler_id, intro_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [invoice_number, customer_id, invoice_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot, vermittler_id || null, finalIntroText]
     );
     res.json({ id: result.lastId, invoice_number, message: 'Rechnung erstellt' });
   } catch(e) {
-    res.status(500).json({ error: 'Rechnung konnte nicht erstellt werden' });
+    console.error('POST /api/invoices failed:', e && e.stack ? e.stack : e);
+    res.status(500).json({ error: 'Rechnung konnte nicht erstellt werden: ' + (e && e.message ? e.message : '') });
   }
 });
 
@@ -1669,31 +1678,44 @@ app.put('/api/invoices/:id', (req, res) => {
   if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
+  // Defensiv: intro_text-Spalte garantieren
+  ensureColumn('invoices', 'intro_text', "TEXT DEFAULT ''");
+
   // AUTH-04: invoice_date und invoice_number sind nach Erstellung unveränderbar.
   // Sie werden hier bewusst NICHT aus req.body gelesen und NICHT im UPDATE-Statement verwendet.
-  const { due_date, status, service_date, payment_method, notes, vermittler_id } = req.body;
+  const { due_date, status, service_date, payment_method, notes, vermittler_id, intro_text } = req.body;
   const id = Number(req.params.id);
+
   // Vermittler-only Update: nur vermittler_id setzen, andere Felder unangetastet lassen
   // (Vermittler ist kein finanzieller Teil der Rechnung, jederzeit änderbar)
   const onlyVermittler = vermittler_id !== undefined
     && due_date === undefined && status === undefined
-    && service_date === undefined && payment_method === undefined && notes === undefined;
+    && service_date === undefined && payment_method === undefined && notes === undefined
+    && intro_text === undefined;
   if (onlyVermittler) {
     execute('UPDATE invoices SET vermittler_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [vermittler_id || null, id]);
     res.json({ message: 'Vermittler aktualisiert' });
     return;
   }
-  if (vermittler_id !== undefined) {
-    execute(
-      'UPDATE invoices SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, vermittler_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-      [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', vermittler_id || null, id]
-    );
-    res.json({ message: 'Rechnung aktualisiert' });
+
+  // Intro-Text-only Update (jederzeit änderbar, nicht finanziell)
+  const onlyIntroText = intro_text !== undefined
+    && due_date === undefined && status === undefined
+    && service_date === undefined && payment_method === undefined && notes === undefined
+    && vermittler_id === undefined;
+  if (onlyIntroText) {
+    execute('UPDATE invoices SET intro_text=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [String(intro_text), id]);
+    res.json({ message: 'Vortext aktualisiert' });
     return;
   }
+
+  // Vollständiger Update mit allen optionalen Feldern
+  const existing = queryOne('SELECT intro_text, vermittler_id FROM invoices WHERE id = ?', [id]);
+  const finalIntroText = (intro_text !== undefined) ? String(intro_text) : (existing ? (existing.intro_text || '') : '');
+  const finalVermittlerId = (vermittler_id !== undefined) ? (vermittler_id || null) : (existing ? existing.vermittler_id : null);
   execute(
-    'UPDATE invoices SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-    [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', id]
+    'UPDATE invoices SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, vermittler_id=?, intro_text=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', finalVermittlerId, finalIntroText, id]
   );
   res.json({ message: 'Rechnung aktualisiert' });
 });
@@ -2051,8 +2073,18 @@ app.get('/api/invoices/:id/pdf', (req, res) => {
   doc.fontSize(16).font('Helvetica-Bold').text('Rechnung', 50, 260);
   doc.moveTo(50, 280).lineTo(545, 280).stroke();
 
+  // --- Optionaler Vortext (oberhalb der Positionen) ---
+  let tableTop = 295;
+  const introText = (invoice.intro_text || '').toString();
+  if (introText.trim()) {
+    doc.fontSize(10).font('Helvetica');
+    const introWidth = 495; // 545 - 50
+    const introHeight = doc.heightOfString(introText, { width: introWidth, lineGap: 2 });
+    doc.text(introText, 50, tableTop, { width: introWidth, lineGap: 2 });
+    tableTop = tableTop + introHeight + 14; // Abstand zur Items-Tabelle
+  }
+
   // --- Items table ---
-  const tableTop = 295;
   const colPos   = 50;
   const colDesc  = 80;
   const colQty   = 340;

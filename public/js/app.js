@@ -7132,6 +7132,15 @@ async function renderInvoiceDetail(id) {
       </div>
 
       <div class="card">
+        <div class="form-group" style="padding:16px 16px 0 16px;">
+          <label style="display:flex;justify-content:space-between;align-items:center;">
+            <span>Vortexte auf der Rechnung</span>
+            <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">erscheint im PDF direkt über den Positionen · leer lassen = nichts</span>
+          </label>
+          ${canEdit
+            ? `<textarea id="inv-edit-intro-text" rows="3" onchange="saveInvoiceIntroText(${id})" placeholder="Wird oberhalb der Positionen gedruckt. Leer lassen für keinen Vortext.">${escapeHtml(inv.intro_text || '')}</textarea>`
+            : `<div class="form-control-static" style="min-height:60px;white-space:pre-wrap;">${escapeHtml(inv.intro_text || '—')}</div>`}
+        </div>
         <div class="card-header">
           <h3>Positionen</h3>
           ${canEdit ? `<button class="btn btn-sm btn-primary" onclick="addInvoiceItemRow(${id})">+ Position</button>` : ''}
@@ -7475,6 +7484,17 @@ function renderInvoiceSummary(inv) {
     <tr><td style="text-align:right;">zzgl. 19% MwSt:</td><td style="text-align:right;">${Number(inv.total_vat).toFixed(2)} &euro;</td></tr>
     <tr class="total-row"><td style="text-align:right;">Brutto:</td><td style="text-align:right;">${Number(inv.total_gross).toFixed(2)} &euro;</td></tr>
   </table>`;
+}
+
+async function saveInvoiceIntroText(invoiceId) {
+  if (!canEditInvoice()) { showToast('Keine Berechtigung', 'error'); return; }
+  const intro = document.getElementById('inv-edit-intro-text')?.value ?? '';
+  try {
+    await api(`/api/invoices/${invoiceId}`, { method: 'PUT', body: { intro_text: intro } });
+    showToast('Vortext gespeichert');
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
 }
 
 async function saveInvoiceHeader(invoiceId) {

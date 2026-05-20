@@ -422,6 +422,7 @@ async function getDb() {
   // GoBD: Firmendaten-Snapshot bei Erstellung einfrieren
   try { db.run("ALTER TABLE invoices ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE invoices ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN intro_text TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
   // Bank accounts (Bankverbindungen)
