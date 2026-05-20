@@ -7209,7 +7209,7 @@ async function renderInvoiceDetail(id) {
             <label style="display:flex;justify-content:space-between;align-items:center;">
               <span>Mietvorgang</span>
               <div style="display:flex;gap:6px;">
-                ${canEdit && inv.rental_obj ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openRentalDetail(${inv.rental_obj.id})">Öffnen</button>` : ''}
+                ${canEdit && inv.rental_obj ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openRentalDetail(${inv.rental_obj.id}, null, ${id})">Öffnen</button>` : ''}
                 ${canEditContent ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openInvoiceMietvorgangPicker(${id})">${inv.rental_obj ? 'Ändern' : 'Zuweisen'}</button>` : ''}
                 ${canEditContent && inv.rental_obj ? `<button type="button" class="btn btn-sm btn-danger" onclick="clearInvoiceMietvorgang(${id})">Entfernen</button>` : ''}
               </div>
@@ -13654,12 +13654,14 @@ async function deleteVermittler(id, name) {
 // ===== Rental Detail View =====
 let currentRentalId = null;
 let _rentalBetActiveTab = null;
-// Wohin der Zurück-Link zeigt: wenn aus einer Akte heraus geöffnet, zur Akte; sonst zur Vermietungsübersicht.
+// Wohin der Zurück-Link zeigt: Akte > Rechnung > Vermietungsübersicht (in dieser Priorität).
 let _rentalReturnToAkteId = null;
+let _rentalReturnToInvoiceId = null;
 
-function openRentalDetail(id, returnToAkteId) {
+function openRentalDetail(id, returnToAkteId, returnToInvoiceId) {
   currentRentalId = id;
   _rentalReturnToAkteId = returnToAkteId || null;
+  _rentalReturnToInvoiceId = returnToInvoiceId || null;
   renderRentalDetail(id);
 }
 
@@ -13924,7 +13926,9 @@ async function renderRentalDetail(id) {
 
     const backLinkHtml = _rentalReturnToAkteId
       ? `<a class="back-link" onclick="navigate('akte-detail', ${_rentalReturnToAkteId})">&larr; Zur\u00fcck zur Akte</a>`
-      : `<a class="back-link" onclick="renderVermietung()">&larr; Zur\u00fcck zur Vermietungs\u00fcbersicht</a>`;
+      : (_rentalReturnToInvoiceId
+        ? `<a class="back-link" onclick="navigate('invoice-detail', ${_rentalReturnToInvoiceId})">&larr; Zur\u00fcck zur Rechnung</a>`
+        : `<a class="back-link" onclick="renderVermietung()">&larr; Zur\u00fcck zur Vermietungs\u00fcbersicht</a>`);
 
     main.innerHTML = `
       ${backLinkHtml}
