@@ -7049,6 +7049,13 @@ async function renderInvoiceDetail(id) {
 
       ${renderInvoicePaymentSaldoHeader(inv)}
 
+      <div class="akte-tabs">
+        <button class="akte-tab active" data-inv-tab="rechnung" onclick="switchInvoiceTab('rechnung')">Rechnung</button>
+        <button class="akte-tab" data-inv-tab="zahlungen" onclick="switchInvoiceTab('zahlungen')">Zahlungsströme</button>
+      </div>
+
+      <div class="akte-tab-panel" data-inv-tab="rechnung" style="display:block;">
+
       <div class="card">
         <div class="card-header"><h3>Kundendaten</h3></div>
         <div class="customer-info-grid">
@@ -7217,7 +7224,11 @@ async function renderInvoiceDetail(id) {
         </div>
       </div>
 
-      <div id="invoice-payments-block-placeholder"></div>
+      </div><!-- Ende Tab Rechnung -->
+
+      <div class="akte-tab-panel" data-inv-tab="zahlungen" style="display:none;">
+        <div id="invoice-payments-block-placeholder"></div>
+      </div>
     `;
 
     // Phase 6 Plan 06-02: Zahlungs-Block laden und rendern (nach initialem Render der Detailseite).
@@ -7548,6 +7559,19 @@ function renderInvoiceSummary(inv) {
     <tr><td style="text-align:right;">zzgl. 19% MwSt:</td><td style="text-align:right;">${Number(inv.total_vat).toFixed(2)} &euro;</td></tr>
     <tr class="total-row"><td style="text-align:right;">Brutto:</td><td style="text-align:right;">${Number(inv.total_gross).toFixed(2)} &euro;</td></tr>
   </table>`;
+}
+
+// Tab-Wechsel in der Rechnungs-Detail-Ansicht (eigene Funktion + data-attribut, damit
+// kein Konflikt mit Akten-Tabs entsteht, falls beide gleichzeitig im DOM sein sollten).
+function switchInvoiceTab(tabName) {
+  document.querySelectorAll('[data-inv-tab]').forEach(el => {
+    const isMatch = el.dataset.invTab === tabName;
+    if (el.classList.contains('akte-tab')) {
+      el.classList.toggle('active', isMatch);
+    } else {
+      el.style.display = isMatch ? 'block' : 'none';
+    }
+  });
 }
 
 async function saveInvoiceIntroText(invoiceId) {
