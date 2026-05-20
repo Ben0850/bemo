@@ -7210,7 +7210,7 @@ async function renderInvoiceDetail(id) {
               <span>Mietvorgang</span>
               <div style="display:flex;gap:6px;">
                 ${canEdit && inv.rental_obj ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openRentalDetail(${inv.rental_obj.id}, null, ${id})">Öffnen</button>` : ''}
-                ${canEditContent ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openInvoiceMietvorgangPicker(${id})">${inv.rental_obj ? 'Ändern' : 'Zuweisen'}</button>` : ''}
+                ${canEditContent && !inv.rental_obj ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openInvoiceMietvorgangPicker(${id})">Zuweisen</button>` : ''}
                 ${canEditContent && inv.rental_obj ? `<button type="button" class="btn btn-sm btn-danger" onclick="clearInvoiceMietvorgang(${id})">Entfernen</button>` : ''}
               </div>
             </label>
