@@ -13326,9 +13326,12 @@ async function deleteVermittler(id, name) {
 // ===== Rental Detail View =====
 let currentRentalId = null;
 let _rentalBetActiveTab = null;
+// Wohin der Zurück-Link zeigt: wenn aus einer Akte heraus geöffnet, zur Akte; sonst zur Vermietungsübersicht.
+let _rentalReturnToAkteId = null;
 
-function openRentalDetail(id) {
+function openRentalDetail(id, returnToAkteId) {
   currentRentalId = id;
+  _rentalReturnToAkteId = returnToAkteId || null;
   renderRentalDetail(id);
 }
 
@@ -13591,8 +13594,12 @@ async function renderRentalDetail(id) {
       ${cell('Mietdauer', fmt(dauer))}
       ${cell('Mietart', fmt(r.mietart))}`;
 
+    const backLinkHtml = _rentalReturnToAkteId
+      ? `<a class="back-link" onclick="navigate('akte-detail', ${_rentalReturnToAkteId})">&larr; Zur\u00fcck zur Akte</a>`
+      : `<a class="back-link" onclick="renderVermietung()">&larr; Zur\u00fcck zur Vermietungs\u00fcbersicht</a>`;
+
     main.innerHTML = `
-      <a class="back-link" onclick="renderVermietung()">&larr; Zur\u00fcck zur Vermietungs\u00fcbersicht</a>
+      ${backLinkHtml}
 
       <div class="akte-header">
         <div class="akte-header-fields">
@@ -14971,7 +14978,7 @@ async function renderAkteDetail(id) {
             <div class="akte-card-right-header">
               <span>Mietvorgang</span>
               <div style="display:flex;gap:6px;">
-                ${canEdit && a.rental ? `<button class="btn-add-beteiligter" onclick="openRentalDetail(${a.rental.id})">Bearbeiten</button>` : ''}
+                ${canEdit && a.rental ? `<button class="btn-add-beteiligter" onclick="openRentalDetail(${a.rental.id}, ${a.id})">Bearbeiten</button>` : ''}
                 ${canEdit ? '<button class="btn-add-beteiligter" onclick="openMietvorgangPicker()">Zuweisen</button>' : ''}
               </div>
             </div>
