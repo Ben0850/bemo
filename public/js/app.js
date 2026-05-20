@@ -316,6 +316,7 @@ function navigate(page, data) {
     case 'staff': renderStaff(); break;
     case 'settings-company': renderSettingsCompany(); break;
     case 'settings-program': renderSettingsProgram(); break;
+    case 'settings-invoicing': renderSettingsInvoicing(); break;
     case 'file-log': renderFileLog(); break;
     case 'settings': renderSettingsCompany(); break;
     default: renderDashboard();
@@ -7789,7 +7790,7 @@ async function deleteInvoice(invoiceId) {
 }
 
 // --- Inline Invoice Items ---
-function addInvoiceItemRow(invoiceId) {
+async function addInvoiceItemRow(invoiceId) {
   if (!canEditInvoice()) return;
   const container = document.getElementById('invoice-items-list');
   const noMsg = container.querySelector('p');
@@ -7806,8 +7807,28 @@ function addInvoiceItemRow(invoiceId) {
   const tbody = table.querySelector('tbody');
   // Don't add if already adding
   if (document.getElementById('inv-item-row-new')) return;
+
+  // Vorgefertigte Positions-Vorlagen einmal laden (cache pro Session in _invoicePositionTemplatesCache)
+  if (!_invoicePositionTemplatesCache.length) {
+    try { _invoicePositionTemplatesCache = await api('/api/invoice-position-templates'); } catch (e) {}
+  }
+  const tpls = _invoicePositionTemplatesCache;
+  const tplOptions = tpls.length
+    ? `<select id="new-inv-item-tpl" onchange="applyInvoiceItemTemplate(this.value)" style="width:100%;">
+         <option value="">— Vorlage übernehmen —</option>
+         ${tpls.map(t => `<option value="${t.id}">${escapeHtml(t.description || '')} (${Number(t.unit_price || 0).toFixed(2)} €)</option>`).join('')}
+       </select>`
+    : '';
+
   const tr = document.createElement('tr');
   tr.id = 'inv-item-row-new';
+  // Wenn Vorlagen vorhanden: zwei Zeilen — obere mit Vorlagen-Picker (colspan), untere mit Eingabefeldern.
+  if (tplOptions) {
+    const tplRow = document.createElement('tr');
+    tplRow.id = 'inv-item-row-tpl';
+    tplRow.innerHTML = `<td colspan="6" style="background:var(--bg-subtle,#f9fafb);padding:8px 12px;">${tplOptions}</td>`;
+    tbody.appendChild(tplRow);
+  }
   tr.innerHTML = `
     <td>-</td>
     <td><input type="text" id="new-inv-item-desc" placeholder="Bezeichnung"></td>
@@ -7821,11 +7842,32 @@ function addInvoiceItemRow(invoiceId) {
     <td>-</td>
     <td style="white-space:nowrap;">
       <button class="btn btn-sm btn-primary" onclick="saveInvoiceItemNew(${invoiceId})">Speichern</button>
-      <button class="btn btn-sm btn-secondary" onclick="this.closest('tr').remove()">Abbrechen</button>
+      <button class="btn btn-sm btn-secondary" onclick="cancelInvoiceItemRowNew()">Abbrechen</button>
     </td>
   `;
   tbody.appendChild(tr);
   tr.querySelector('#new-inv-item-desc').focus();
+}
+
+function cancelInvoiceItemRowNew() {
+  document.getElementById('inv-item-row-tpl')?.remove();
+  document.getElementById('inv-item-row-new')?.remove();
+}
+
+function applyInvoiceItemTemplate(tplId) {
+  if (!tplId) return;
+  const tpl = _invoicePositionTemplatesCache.find(t => String(t.id) === String(tplId));
+  if (!tpl) return;
+  const descEl = document.getElementById('new-inv-item-desc');
+  const qtyEl = document.getElementById('new-inv-item-qty');
+  const priceEl = document.getElementById('new-inv-item-price');
+  if (descEl) descEl.value = tpl.description || '';
+  if (qtyEl) qtyEl.value = Number(tpl.quantity || 1);
+  if (priceEl) priceEl.value = Number(tpl.unit_price || 0).toFixed(2);
+  // Vorlage liefert Netto-Preis — sicherstellen, dass der Toggle auf Netto steht
+  _itemPriceMode['new'] = 'netto';
+  const toggleBtn = document.getElementById('new-inv-item-price-toggle');
+  if (toggleBtn) { toggleBtn.textContent = 'Netto'; toggleBtn.classList.remove('price-toggle-brutto'); }
 }
 
 // Track price input mode per row: key = prefix ('new' or 'edit-{id}'), value = 'netto' | 'brutto'
@@ -18583,6 +18625,153 @@ function closeCategoryManager() {
   closeModal();
   // Vorlagen-Tabelle + Kategorie-Filter neu rendern, da sich Kategorien geändert haben können
   renderEmailVorlagen();
+}
+
+// ===== PAGE: Rechnungseinstellungen (vorgefertigte Positionen) =====
+let _invoicePositionTemplatesCache = [];
+
+async function renderSettingsInvoicing() {
+  const main = document.getElementById('main-content');
+  if (!isFinance()) {
+    main.innerHTML = `
+      <a class="back-link" onclick="navigate('dashboard')">&larr; Zurück</a>
+      <div class="page-header"><h2>Rechnungseinstellungen</h2></div>
+      <div class="card" style="padding:20px;color:var(--text-muted);">Nur Verwaltung, Buchhaltung oder Admin dürfen Rechnungseinstellungen bearbeiten.</div>
+    `;
+    return;
+  }
+  main.innerHTML = `
+    <div class="page-header">
+      <h2>Rechnungseinstellungen</h2>
+      <button class="btn btn-primary" onclick="openInvoicePositionTemplateForm()">+ Neue Vorlage</button>
+    </div>
+    <div class="card" style="margin-bottom:14px;">
+      <div style="padding:14px 18px;color:var(--text-muted);font-size:13px;">
+        Vorgefertigte Positionen für Rechnungen. Beim Hinzufügen einer Position in einer Rechnung
+        kannst du eine dieser Vorlagen auswählen — Bezeichnung, Menge, Einzelpreis und MwSt-Satz
+        werden direkt übernommen.
+      </div>
+    </div>
+    <div class="card">
+      <div id="ipt-table-content"><div class="loading">Laden…</div></div>
+    </div>
+  `;
+  try {
+    _invoicePositionTemplatesCache = await api('/api/invoice-position-templates');
+    renderInvoicePositionTemplatesTable();
+  } catch (err) {
+    document.getElementById('ipt-table-content').innerHTML = `<div class="empty-state"><p>Fehler: ${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
+function renderInvoicePositionTemplatesTable() {
+  const container = document.getElementById('ipt-table-content');
+  if (!container) return;
+  const data = _invoicePositionTemplatesCache;
+  if (!data.length) {
+    container.innerHTML = '<div class="empty-state" style="padding:30px;text-align:center;color:var(--text-muted);">Noch keine vorgefertigten Positionen angelegt.</div>';
+    return;
+  }
+  container.innerHTML = `
+    <div style="padding:8px 16px;color:var(--text-muted);font-size:13px;">${data.length} Vorlage${data.length !== 1 ? 'n' : ''}</div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr>
+          <th>Bezeichnung</th>
+          <th style="width:80px;text-align:right;">Menge</th>
+          <th style="width:120px;text-align:right;">Einzelpreis netto</th>
+          <th style="width:90px;text-align:right;">MwSt-Satz</th>
+          <th style="width:200px;">Aktionen</th>
+        </tr></thead>
+        <tbody>
+          ${data.map(t => `<tr>
+            <td><strong>${escapeHtml(t.description || '')}</strong></td>
+            <td style="text-align:right;">${Number(t.quantity || 1).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</td>
+            <td style="text-align:right;white-space:nowrap;">${Number(t.unit_price || 0).toFixed(2)}&nbsp;&euro;</td>
+            <td style="text-align:right;">${(Number(t.vat_rate || 0.19) * 100).toFixed(0)}&nbsp;%</td>
+            <td><div style="display:flex;gap:6px;">
+              <button class="btn btn-sm btn-secondary" onclick="openInvoicePositionTemplateForm(${t.id})">Bearbeiten</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteInvoicePositionTemplate(${t.id}, '${(t.description || '').replace(/'/g, '&#39;')}')">Löschen</button>
+            </div></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function openInvoicePositionTemplateForm(editId) {
+  let t = { description: '', quantity: 1, unit_price: 0, vat_rate: 0.19 };
+  if (editId) {
+    const found = _invoicePositionTemplatesCache.find(x => x.id === editId);
+    if (found) t = found;
+  }
+  openModal(editId ? 'Vorlage bearbeiten' : 'Neue Vorlage', `
+    <form onsubmit="saveInvoicePositionTemplate(event, ${editId || 'null'})">
+      <div class="form-group">
+        <label>Bezeichnung *</label>
+        <input type="text" id="ipt-desc" value="${escapeHtml(t.description || '')}" required placeholder="z.B. Mietwagen pro Tag Gruppe 3">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+        <div class="form-group">
+          <label>Menge</label>
+          <input type="number" id="ipt-qty" step="0.01" min="0" value="${Number(t.quantity || 1)}">
+        </div>
+        <div class="form-group">
+          <label>Einzelpreis netto (&euro;)</label>
+          <input type="number" id="ipt-price" step="0.01" min="0" value="${Number(t.unit_price || 0).toFixed(2)}">
+        </div>
+        <div class="form-group">
+          <label>MwSt-Satz</label>
+          <select id="ipt-vat">
+            <option value="0.19" ${Number(t.vat_rate) === 0.19 ? 'selected' : ''}>19 %</option>
+            <option value="0.07" ${Number(t.vat_rate) === 0.07 ? 'selected' : ''}>7 %</option>
+            <option value="0" ${Number(t.vat_rate) === 0 ? 'selected' : ''}>0 %</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">${editId ? 'Speichern' : 'Anlegen'}</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `);
+}
+
+async function saveInvoicePositionTemplate(e, editId) {
+  e.preventDefault();
+  const data = {
+    description: document.getElementById('ipt-desc').value.trim(),
+    quantity: parseFloat(document.getElementById('ipt-qty').value) || 1,
+    unit_price: parseFloat(document.getElementById('ipt-price').value) || 0,
+    vat_rate: parseFloat(document.getElementById('ipt-vat').value) || 0.19,
+  };
+  if (!data.description) { showToast('Bezeichnung ist Pflicht', 'error'); return; }
+  try {
+    if (editId) {
+      await api('/api/invoice-position-templates/' + editId, { method: 'PUT', body: data });
+      showToast('Vorlage aktualisiert');
+    } else {
+      await api('/api/invoice-position-templates', { method: 'POST', body: data });
+      showToast('Vorlage angelegt');
+    }
+    closeModal();
+    renderSettingsInvoicing();
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+async function deleteInvoicePositionTemplate(id, desc) {
+  const ok = await showConfirm('Vorlage löschen?', `Vorlage „${desc}" wirklich löschen?`, { yesLabel: 'Löschen', danger: true });
+  if (!ok) return;
+  try {
+    await api('/api/invoice-position-templates/' + id, { method: 'DELETE' });
+    showToast('Vorlage gelöscht');
+    renderSettingsInvoicing();
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
 }
 
 // ===== Initialization =====

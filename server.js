@@ -70,7 +70,8 @@ app.use((req, res, next) => {
         && !req.path.startsWith('/api/invoices/')
         && !req.path.startsWith('/api/invoice-items/')
         && !req.path.startsWith('/api/credit-notes/')
-        && !req.path.startsWith('/api/credit-note-items/')) {
+        && !req.path.startsWith('/api/credit-note-items/')
+        && !req.path.startsWith('/api/invoice-position-templates/')) {
       return res.status(403).json({ error: 'Nur Admins dürfen Einträge löschen' });
     }
   }
@@ -959,6 +960,50 @@ app.put('/api/email-template-categories/:id', (req, res) => {
   execute('UPDATE email_template_categories SET name = ? WHERE id = ?', [newName, id]);
   execute('UPDATE email_templates SET kategorie = ?, updated_at = CURRENT_TIMESTAMP WHERE kategorie = ?', [newName, existing.name]);
   res.json({ message: 'Kategorie umbenannt' });
+});
+
+// ===== Rechnungspositions-Vorlagen =====
+// Vom User in Rechnungseinstellungen gepflegt; werden im Position-hinzufügen-Modal als Quick-Pick angeboten.
+
+app.get('/api/invoice-position-templates', (req, res) => {
+  res.json(queryAll('SELECT id, description, quantity, unit_price, vat_rate, created_at, updated_at FROM invoice_position_templates ORDER BY description COLLATE NOCASE'));
+});
+
+app.post('/api/invoice-position-templates', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { description, quantity, unit_price, vat_rate } = req.body || {};
+  if (!description || !String(description).trim()) return res.status(400).json({ error: 'Bezeichnung ist Pflicht' });
+  const result = execute(
+    'INSERT INTO invoice_position_templates (description, quantity, unit_price, vat_rate) VALUES (?, ?, ?, ?)',
+    [String(description).trim(), Number(quantity) || 1, Number(unit_price) || 0, Number(vat_rate) || 0.19]
+  );
+  res.json({ id: result.lastId, message: 'Vorlage angelegt' });
+});
+
+app.put('/api/invoice-position-templates/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const id = Number(req.params.id);
+  const existing = queryOne('SELECT id FROM invoice_position_templates WHERE id = ?', [id]);
+  if (!existing) return res.status(404).json({ error: 'Vorlage nicht gefunden' });
+  const { description, quantity, unit_price, vat_rate } = req.body || {};
+  if (!description || !String(description).trim()) return res.status(400).json({ error: 'Bezeichnung ist Pflicht' });
+  execute(
+    'UPDATE invoice_position_templates SET description=?, quantity=?, unit_price=?, vat_rate=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    [String(description).trim(), Number(quantity) || 1, Number(unit_price) || 0, Number(vat_rate) || 0.19, id]
+  );
+  res.json({ message: 'Vorlage aktualisiert' });
+});
+
+app.delete('/api/invoice-position-templates/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const id = Number(req.params.id);
+  const existing = queryOne('SELECT id FROM invoice_position_templates WHERE id = ?', [id]);
+  if (!existing) return res.status(404).json({ error: 'Vorlage nicht gefunden' });
+  execute('DELETE FROM invoice_position_templates WHERE id = ?', [id]);
+  res.json({ message: 'Vorlage gelöscht' });
 });
 
 app.delete('/api/email-template-categories/:id', (req, res) => {
