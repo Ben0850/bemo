@@ -14970,7 +14970,10 @@ async function renderAkteDetail(id) {
           <div class="akte-card-right">
             <div class="akte-card-right-header">
               <span>Mietvorgang</span>
-              ${canEdit ? '<button class="btn-add-beteiligter" onclick="openMietvorgangPicker()">Mietvorgang zuweisen</button>' : ''}
+              <div style="display:flex;gap:6px;">
+                ${canEdit && a.rental ? `<button class="btn-add-beteiligter" onclick="openRentalDetail(${a.rental.id})">Bearbeiten</button>` : ''}
+                ${canEdit ? '<button class="btn-add-beteiligter" onclick="openMietvorgangPicker()">Zuweisen</button>' : ''}
+              </div>
             </div>
             <div class="akte-card-right-body">
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;">
