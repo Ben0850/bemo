@@ -2059,8 +2059,17 @@ app.delete('/api/payments/:id', (req, res) => {
 // PDF Generation
 app.get('/api/invoices/:id/pdf', (req, res) => {
   const invoice = queryOne(
-    `SELECT i.*, c.first_name, c.last_name, c.company_name, c.customer_type, c.street, c.zip, c.city
-     FROM invoices i JOIN customers c ON i.customer_id = c.id WHERE i.id = ?`,
+    `SELECT i.*, c.first_name, c.last_name, c.company_name, c.customer_type, c.street, c.zip, c.city,
+            r.start_date AS rental_start_date, r.end_date AS rental_end_date,
+            r.km_start AS rental_km_start, r.km_end AS rental_km_end,
+            fv.license_plate AS rental_license_plate,
+            fv.manufacturer AS rental_manufacturer,
+            fv.model AS rental_model
+     FROM invoices i
+     JOIN customers c ON i.customer_id = c.id
+     LEFT JOIN rentals r ON r.id = i.rental_id
+     LEFT JOIN fleet_vehicles fv ON fv.id = r.vehicle_id
+     WHERE i.id = ?`,
     [Number(req.params.id)]
   );
   if (!invoice) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
@@ -2200,7 +2209,42 @@ app.get('/api/invoices/:id/pdf', (req, res) => {
     const introWidth = 495; // 545 - 50
     const introHeight = doc.heightOfString(introText, { width: introWidth, lineGap: 2 });
     doc.text(introText, 50, tableTop, { width: introWidth, lineGap: 2 });
-    tableTop = tableTop + introHeight + 14; // Abstand zur Items-Tabelle
+    tableTop = tableTop + introHeight + 14; // Abstand zur naechsten Sektion
+  }
+
+  // --- Optionale Zusatzinfos (Fahrzeuggruppen + Mietvorgangs-Daten) ---
+  // Wird komplett uebersprungen, wenn weder Fahrzeuggruppen noch Mietvorgang gesetzt sind.
+  const hasGroupBilled = invoice.abgerechnete_fahrzeuggruppe != null && invoice.abgerechnete_fahrzeuggruppe !== '';
+  const hasGroupCustomer = invoice.kundenfahrzeuggruppe != null && invoice.kundenfahrzeuggruppe !== '';
+  const hasRental = invoice.rental_id != null;
+  if (hasGroupBilled || hasGroupCustomer || hasRental) {
+    const labelX = 50;
+    const valueX = 200;
+    let y = tableTop;
+    doc.fontSize(9);
+
+    function drawRow(label, value) {
+      doc.font('Helvetica-Bold').text(label, labelX, y, { width: 145, lineBreak: false });
+      doc.font('Helvetica').text(value || '—', valueX, y, { width: 345, lineBreak: false });
+      y += 14;
+    }
+
+    if (hasGroupBilled) drawRow('Abgerechnete Fahrzeuggruppe:', String(invoice.abgerechnete_fahrzeuggruppe));
+    if (hasGroupCustomer) drawRow('Kundenfahrzeuggruppe:', String(invoice.kundenfahrzeuggruppe));
+    if (hasRental) {
+      const fahrzeug = ((invoice.rental_manufacturer || '') + ' ' + (invoice.rental_model || '')).trim();
+      const fzgUndKz = [fahrzeug, invoice.rental_license_plate].filter(Boolean).join(' – ');
+      if (fzgUndKz) drawRow('Fahrzeug:', fzgUndKz);
+      if (invoice.rental_start_date) drawRow('Mietbeginn:', formatDateDE(invoice.rental_start_date));
+      if (invoice.rental_end_date) drawRow('Rückgabe:', formatDateDE(invoice.rental_end_date));
+      const kmStart = (invoice.rental_km_start ?? '') !== '' ? Number(invoice.rental_km_start) : null;
+      const kmEnd = (invoice.rental_km_end ?? '') !== '' ? Number(invoice.rental_km_end) : null;
+      if (kmStart !== null && kmEnd !== null && !isNaN(kmStart) && !isNaN(kmEnd)) {
+        const diff = kmEnd - kmStart;
+        drawRow('Gefahrene Kilometer:', diff.toLocaleString('de-DE') + ' km');
+      }
+    }
+    tableTop = y + 10; // kleiner Abstand zur Items-Tabelle
   }
 
   // --- Items table ---
