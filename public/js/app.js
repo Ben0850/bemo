@@ -11898,7 +11898,7 @@ function renderRentalList(entries) {
           <th style="cursor:pointer;" onclick="sortRentalList('created_at')">Angelegt am${rentalSortIcon('created_at')}</th>
           <th>Fahrzeug</th>
           <th style="cursor:pointer;" onclick="sortRentalList('customer_name')">Kunde${rentalSortIcon('customer_name')}</th>
-          <th>Von</th><th>Bis</th><th>Tage</th><th>Mietart</th><th>Status</th><th>Aktionen</th>
+          <th>Von</th><th>Bis</th><th>Tage</th><th>Mietart</th><th>Status</th><th>Akte</th><th>Aktionen</th>
         </tr></thead>
         <tbody>
           ${sorted.map(e => {
@@ -11908,6 +11908,9 @@ function renderRentalList(entries) {
               tage = String(d);
             }
             const angelegt = e.created_at ? formatDate(e.created_at.split(' ')[0] || e.created_at.split('T')[0]) : '-';
+            const akteCell = e.akte_id
+              ? `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();navigate('akte-detail', ${e.akte_id})">${escapeHtml(e.aktennummer || String(e.akte_id))}</button>`
+              : '<span style="color:var(--text-muted);">\u2014</span>';
             return `<tr style="cursor:pointer;" onclick="openRentalDetail(${e.id})">
               <td><strong>${e.id}</strong></td>
               <td>${angelegt}</td>
@@ -11918,6 +11921,7 @@ function renderRentalList(entries) {
               <td>${escapeHtml(tage)}</td>
               <td>${escapeHtml(e.mietart || '')}</td>
               <td>${rentalStatusBadge(e.status)}</td>
+              <td>${akteCell}</td>
               <td><button class="btn btn-sm btn-danger" onclick="event.stopPropagation();confirmDeleteRental(${e.id})">L\u00f6schen</button></td>
             </tr>`;
           }).join('')}

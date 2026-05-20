@@ -2986,7 +2986,9 @@ app.delete('/api/fleet-damages/:id', (req, res) => {
 
 app.get('/api/rentals', (req, res) => {
   const { year } = req.query;
-  let sql = `SELECT r.id, r.vehicle_id, fv.license_plate, fv.manufacturer, fv.model, r.customer_name, r.start_date, r.end_date, r.start_time, r.end_time, r.km_start, r.km_end, r.mietart, r.status, r.notes, r.created_at
+  let sql = `SELECT r.id, r.vehicle_id, fv.license_plate, fv.manufacturer, fv.model, r.customer_name, r.start_date, r.end_date, r.start_time, r.end_time, r.km_start, r.km_end, r.mietart, r.status, r.notes, r.created_at,
+    (SELECT a.id FROM akten a WHERE a.rental_id = r.id ORDER BY a.created_at DESC LIMIT 1) AS akte_id,
+    (SELECT a.aktennummer FROM akten a WHERE a.rental_id = r.id ORDER BY a.created_at DESC LIMIT 1) AS aktennummer
     FROM rentals r
     JOIN fleet_vehicles fv ON r.vehicle_id = fv.id
     WHERE 1=1`;
