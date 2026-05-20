@@ -6713,8 +6713,8 @@ function applyInvoiceFilters() {
       <td>${formatDate(inv.invoice_date)}</td>
       <td>${escapeHtml(inv.customer_name || '')}</td>
       <td>${escapeHtml(inv.payment_method || '')}</td>
-      <td>${Number(inv.total_net).toFixed(2)} &euro;</td>
-      <td>${Number(inv.total_gross).toFixed(2)} &euro;</td>
+      <td style="white-space:nowrap;">${Number(inv.total_net).toFixed(2)}&nbsp;&euro;</td>
+      <td style="white-space:nowrap;">${Number(inv.total_gross).toFixed(2)}&nbsp;&euro;</td>
       <td>${getInvoiceStatusBadge(inv.status)}</td>
       <td>${getPaymentStatusBadge(inv.payment_status)}</td>
       <td style="white-space:nowrap;">
@@ -7762,8 +7762,8 @@ function applyCreditFilters() {
       <td>${formatDate(cn.credit_date)}</td>
       <td>${escapeHtml(cn.customer_name || '')}</td>
       <td>${escapeHtml(cn.payment_method || '')}</td>
-      <td>${Number(cn.total_net).toFixed(2)} &euro;</td>
-      <td>${Number(cn.total_gross).toFixed(2)} &euro;</td>
+      <td style="white-space:nowrap;">${Number(cn.total_net).toFixed(2)}&nbsp;&euro;</td>
+      <td style="white-space:nowrap;">${Number(cn.total_gross).toFixed(2)}&nbsp;&euro;</td>
       <td>${getCreditStatusBadge(cn.status)}</td>
       <td style="white-space:nowrap;">
         <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); navigate('credit-detail', ${cn.id})">Öffnen</button>
