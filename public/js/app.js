@@ -7134,12 +7134,14 @@ async function renderInvoiceDetail(id) {
       <div class="card">
         <div class="card-header">
           <h3>Vortext</h3>
-          <span style="font-size:12px;color:var(--text-muted);">erscheint im PDF direkt über den Positionen · leer lassen = nichts</span>
+          <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">erscheint im PDF direkt über den Positionen · leer lassen = nichts</span>
         </div>
         <div style="padding:0 16px 16px 16px;">
-          ${canEdit
-            ? `<textarea id="inv-edit-intro-text" rows="3" onchange="saveInvoiceIntroText(${id})" style="width:100%;" placeholder="Wird oberhalb der Positionen gedruckt. Leer lassen für keinen Vortext.">${escapeHtml(inv.intro_text || '')}</textarea>`
-            : `<div class="form-control-static" style="min-height:60px;white-space:pre-wrap;">${escapeHtml(inv.intro_text || '—')}</div>`}
+          <div class="form-group" style="margin:0;">
+            ${canEdit
+              ? `<textarea id="inv-edit-intro-text" rows="3" onchange="saveInvoiceIntroText(${id})" placeholder="Wird oberhalb der Positionen gedruckt. Leer lassen für keinen Vortext.">${escapeHtml(inv.intro_text || '')}</textarea>`
+              : `<div class="form-control-static" style="min-height:60px;white-space:pre-wrap;">${escapeHtml(inv.intro_text || '—')}</div>`}
+          </div>
         </div>
       </div>
 
