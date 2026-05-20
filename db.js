@@ -436,10 +436,21 @@ async function getDb() {
       quantity REAL DEFAULT 1,
       unit_price REAL DEFAULT 0,
       vat_rate REAL DEFAULT 0.19,
+      sort_order INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  try { db.run("ALTER TABLE invoice_position_templates ADD COLUMN sort_order INTEGER DEFAULT 0"); } catch(e) {}
+  // Backfill: bestehenden Vorlagen ohne sort_order eine fortlaufende Reihenfolge nach id geben
+  try {
+    const rows = db.exec("SELECT id FROM invoice_position_templates WHERE sort_order IS NULL OR sort_order = 0 ORDER BY id ASC");
+    if (rows.length && rows[0].values) {
+      const maxRow = db.exec("SELECT COALESCE(MAX(sort_order), 0) as m FROM invoice_position_templates WHERE sort_order > 0");
+      let next = (maxRow.length && maxRow[0].values[0][0]) || 0;
+      rows[0].values.forEach(([id]) => { next += 1; db.run("UPDATE invoice_position_templates SET sort_order = ? WHERE id = ?", [next, id]); });
+    }
+  } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
   // Bank accounts (Bankverbindungen)

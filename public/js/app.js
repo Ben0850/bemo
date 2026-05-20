@@ -8716,7 +8716,8 @@ async function initApp() {
 
   // Show/hide permission-based nav items
   document.getElementById('nav-staff').style.display = isVerwaltung() ? '' : 'none';
-  document.getElementById('nav-settings').style.display = isAdmin() ? '' : 'none';
+  document.getElementById('nav-settings').style.display = '';
+  document.querySelectorAll('.nav-settings-admin').forEach(el => { el.style.display = isAdmin() ? '' : 'none'; });
   document.getElementById('nav-ordnerstruktur').style.display = isAdmin() ? '' : 'none';
   document.getElementById('nav-buchhaltung').style.display = '';
 
@@ -18667,14 +18668,6 @@ let _invoicePositionTemplatesCache = [];
 
 async function renderSettingsInvoicing() {
   const main = document.getElementById('main-content');
-  if (!isFinance()) {
-    main.innerHTML = `
-      <a class="back-link" onclick="navigate('dashboard')">&larr; Zurück</a>
-      <div class="page-header"><h2>Rechnungseinstellungen</h2></div>
-      <div class="card" style="padding:20px;color:var(--text-muted);">Nur Verwaltung, Buchhaltung oder Admin dürfen Rechnungseinstellungen bearbeiten.</div>
-    `;
-    return;
-  }
   main.innerHTML = `
     <div class="page-header">
       <h2>Rechnungseinstellungen</h2>
@@ -18712,6 +18705,7 @@ function renderInvoicePositionTemplatesTable() {
     <div class="table-wrapper">
       <table>
         <thead><tr>
+          <th style="width:80px;text-align:center;">Reihenfolge</th>
           <th>Bezeichnung</th>
           <th style="width:80px;text-align:right;">Menge</th>
           <th style="width:120px;text-align:right;">Einzelpreis netto</th>
@@ -18719,7 +18713,11 @@ function renderInvoicePositionTemplatesTable() {
           <th style="width:200px;">Aktionen</th>
         </tr></thead>
         <tbody>
-          ${data.map(t => `<tr>
+          ${data.map((t, idx) => `<tr>
+            <td style="text-align:center;white-space:nowrap;">
+              <button class="btn btn-sm btn-secondary" onclick="moveInvoicePositionTemplate(${t.id}, 'up')" ${idx === 0 ? 'disabled style="opacity:0.3;"' : ''} title="Nach oben">&#9650;</button>
+              <button class="btn btn-sm btn-secondary" onclick="moveInvoicePositionTemplate(${t.id}, 'down')" ${idx === data.length - 1 ? 'disabled style="opacity:0.3;"' : ''} title="Nach unten">&#9660;</button>
+            </td>
             <td><strong>${escapeHtml(t.description || '')}</strong></td>
             <td style="text-align:right;">${Number(t.quantity || 1).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</td>
             <td style="text-align:right;white-space:nowrap;">${Number(t.unit_price || 0).toFixed(2)}&nbsp;&euro;</td>
@@ -18733,6 +18731,16 @@ function renderInvoicePositionTemplatesTable() {
       </table>
     </div>
   `;
+}
+
+async function moveInvoicePositionTemplate(id, direction) {
+  try {
+    await api(`/api/invoice-position-templates/${id}/move`, { method: 'POST', body: { direction } });
+    _invoicePositionTemplatesCache = await api('/api/invoice-position-templates');
+    renderInvoicePositionTemplatesTable();
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
 }
 
 async function openInvoicePositionTemplateForm(editId) {

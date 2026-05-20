@@ -966,7 +966,7 @@ app.put('/api/email-template-categories/:id', (req, res) => {
 // Vom User in Rechnungseinstellungen gepflegt; werden im Position-hinzufügen-Modal als Quick-Pick angeboten.
 
 app.get('/api/invoice-position-templates', (req, res) => {
-  res.json(queryAll('SELECT id, description, quantity, unit_price, vat_rate, created_at, updated_at FROM invoice_position_templates ORDER BY description COLLATE NOCASE'));
+  res.json(queryAll('SELECT id, description, quantity, unit_price, vat_rate, sort_order, created_at, updated_at FROM invoice_position_templates ORDER BY sort_order ASC, id ASC'));
 });
 
 app.post('/api/invoice-position-templates', (req, res) => {
@@ -974,11 +974,29 @@ app.post('/api/invoice-position-templates', (req, res) => {
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const { description, quantity, unit_price, vat_rate } = req.body || {};
   if (!description || !String(description).trim()) return res.status(400).json({ error: 'Bezeichnung ist Pflicht' });
+  const maxRow = queryOne('SELECT COALESCE(MAX(sort_order), 0) AS m FROM invoice_position_templates');
+  const nextOrder = (maxRow && maxRow.m ? maxRow.m : 0) + 1;
   const result = execute(
-    'INSERT INTO invoice_position_templates (description, quantity, unit_price, vat_rate) VALUES (?, ?, ?, ?)',
-    [String(description).trim(), Number(quantity) || 1, Number(unit_price) || 0, Number(vat_rate) || 0.19]
+    'INSERT INTO invoice_position_templates (description, quantity, unit_price, vat_rate, sort_order) VALUES (?, ?, ?, ?, ?)',
+    [String(description).trim(), Number(quantity) || 1, Number(unit_price) || 0, Number(vat_rate) || 0.19, nextOrder]
   );
   res.json({ id: result.lastId, message: 'Vorlage angelegt' });
+});
+
+app.post('/api/invoice-position-templates/:id/move', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const id = Number(req.params.id);
+  const direction = req.body && req.body.direction === 'down' ? 'down' : 'up';
+  const current = queryOne('SELECT id, sort_order FROM invoice_position_templates WHERE id = ?', [id]);
+  if (!current) return res.status(404).json({ error: 'Vorlage nicht gefunden' });
+  const neighbor = direction === 'up'
+    ? queryOne('SELECT id, sort_order FROM invoice_position_templates WHERE sort_order < ? ORDER BY sort_order DESC LIMIT 1', [current.sort_order])
+    : queryOne('SELECT id, sort_order FROM invoice_position_templates WHERE sort_order > ? ORDER BY sort_order ASC LIMIT 1', [current.sort_order]);
+  if (!neighbor) return res.json({ message: 'Bereits am Rand' });
+  execute('UPDATE invoice_position_templates SET sort_order = ? WHERE id = ?', [neighbor.sort_order, current.id]);
+  execute('UPDATE invoice_position_templates SET sort_order = ? WHERE id = ?', [current.sort_order, neighbor.id]);
+  res.json({ message: 'Verschoben' });
 });
 
 app.put('/api/invoice-position-templates/:id', (req, res) => {
@@ -1732,6 +1750,25 @@ app.post('/api/invoices', (req, res) => {
       'INSERT INTO invoices (invoice_number, customer_id, invoice_date, due_date, service_date, payment_method, notes, company_snapshot, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [invoice_number, customer_id, invoice_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot, vermittler_id || null, finalIntroText, finalGroupBilled, finalGroupCustomer, finalRentalId]
     );
+    // Vorgefertigte Positions-Vorlagen automatisch als Positionen in die neue Rechnung übernehmen,
+    // in der konfigurierten Reihenfolge (sort_order). Reihenfolge = Position auf der Rechnung.
+    try {
+      const templates = queryAll('SELECT description, quantity, unit_price, vat_rate FROM invoice_position_templates ORDER BY sort_order ASC, id ASC');
+      templates.forEach((tpl, idx) => {
+        const qty = Number(tpl.quantity) || 1;
+        const price = Number(tpl.unit_price) || 0;
+        const rate = Number(tpl.vat_rate) || 0.19;
+        const totalNet = Math.round(qty * price * 100) / 100;
+        const totalGross = Math.round(totalNet * (1 + rate) * 100) / 100;
+        execute(
+          'INSERT INTO invoice_items (invoice_id, position, description, quantity, unit_price, total_net, total_gross, vat_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [result.lastId, idx + 1, tpl.description, qty, price, totalNet, totalGross, rate]
+        );
+      });
+      if (templates.length) recalcInvoiceTotals(result.lastId);
+    } catch (tplErr) {
+      console.error('Vorlagen-Übernahme fehlgeschlagen:', tplErr && tplErr.message ? tplErr.message : tplErr);
+    }
     res.json({ id: result.lastId, invoice_number, message: 'Rechnung erstellt' });
   } catch(e) {
     console.error('POST /api/invoices failed:', e && e.stack ? e.stack : e);
