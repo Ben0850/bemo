@@ -7132,15 +7132,18 @@ async function renderInvoiceDetail(id) {
       </div>
 
       <div class="card">
-        <div class="form-group" style="padding:16px 16px 0 16px;">
-          <label style="display:flex;justify-content:space-between;align-items:center;">
-            <span>Vortexte auf der Rechnung</span>
-            <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">erscheint im PDF direkt über den Positionen · leer lassen = nichts</span>
-          </label>
+        <div class="card-header">
+          <h3>Vortext</h3>
+          <span style="font-size:12px;color:var(--text-muted);">erscheint im PDF direkt über den Positionen · leer lassen = nichts</span>
+        </div>
+        <div style="padding:0 16px 16px 16px;">
           ${canEdit
-            ? `<textarea id="inv-edit-intro-text" rows="3" onchange="saveInvoiceIntroText(${id})" placeholder="Wird oberhalb der Positionen gedruckt. Leer lassen für keinen Vortext.">${escapeHtml(inv.intro_text || '')}</textarea>`
+            ? `<textarea id="inv-edit-intro-text" rows="3" onchange="saveInvoiceIntroText(${id})" style="width:100%;" placeholder="Wird oberhalb der Positionen gedruckt. Leer lassen für keinen Vortext.">${escapeHtml(inv.intro_text || '')}</textarea>`
             : `<div class="form-control-static" style="min-height:60px;white-space:pre-wrap;">${escapeHtml(inv.intro_text || '—')}</div>`}
         </div>
+      </div>
+
+      <div class="card">
         <div class="card-header">
           <h3>Positionen</h3>
           ${canEdit ? `<button class="btn btn-sm btn-primary" onclick="addInvoiceItemRow(${id})">+ Position</button>` : ''}
