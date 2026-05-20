@@ -995,6 +995,10 @@ async function saveCustomer(e, id) {
     closeModal();
     if (currentPage === 'customer-detail') {
       renderCustomerDetail(id);
+    } else if (currentPage === 'invoice-detail' && _currentInvoiceId) {
+      // Customer-Edit wurde aus der Rechnung heraus geoeffnet — zurueck zur Rechnung mit
+      // frisch geladenen Kundendaten (joined view).
+      renderInvoiceDetail(_currentInvoiceId);
     } else {
       loadCustomerTable('');
     }
@@ -7037,7 +7041,10 @@ async function createInvoice() {
 }
 
 // --- Invoice Detail Page ---
+// Aktuell offene Rechnungs-ID für Cross-Page-Refresh (z.B. nach Customer-Edit aus der Rechnung).
+let _currentInvoiceId = null;
 async function renderInvoiceDetail(id) {
+  _currentInvoiceId = id;
   const main = document.getElementById('main-content');
   try {
     const inv = await api(`/api/invoices/${id}`);
@@ -7070,7 +7077,10 @@ async function renderInvoiceDetail(id) {
       <div class="akte-tab-panel" data-inv-tab="rechnung" style="display:block;">
 
       <div class="card">
-        <div class="card-header"><h3>Kundendaten</h3></div>
+        <div class="card-header">
+          <h3>Kundendaten</h3>
+          ${canEditContent ? `<button class="btn btn-sm btn-secondary" onclick="openCustomerForm(${inv.customer_id})">Bearbeiten</button>` : ''}
+        </div>
         <div class="customer-info-grid">
           <div class="info-item"><div class="info-label">Kunde</div><div class="info-value">${customerName}</div></div>
           <div class="info-item"><div class="info-label">Adresse</div><div class="info-value">${escapeHtml(inv.street)}<br>${escapeHtml(inv.zip)} ${escapeHtml(inv.city)}</div></div>
