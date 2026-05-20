@@ -2244,7 +2244,7 @@ app.get('/api/invoices/:id/pdf', (req, res) => {
         drawRow('Gefahrene Kilometer:', diff.toLocaleString('de-DE') + ' km');
       }
     }
-    tableTop = y + 10; // kleiner Abstand zur Items-Tabelle
+    tableTop = y + 28; // ca. 1 cm Abstand zur Items-Tabelle (28pt ≈ 1cm bei 72dpi)
   }
 
   // --- Items table ---
