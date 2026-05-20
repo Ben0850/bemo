@@ -60,7 +60,17 @@ app.use((req, res, next) => {
         && !req.path.startsWith('/api/files/')
         && !req.path.startsWith('/api/payments/')
         && !req.path.startsWith('/api/email-templates/')
-        && !req.path.startsWith('/api/email-template-categories/')) {
+        && !req.path.startsWith('/api/email-template-categories/')
+        // Rechnungswesen-Pfade — Inline-Guard in den Endpoints prüft Verwaltung/Buchhaltung/Admin
+        && !req.path.startsWith('/api/credits/')
+        && !req.path.startsWith('/api/rebates/')
+        && !req.path.startsWith('/api/vermittler-credits/')
+        && !req.path.startsWith('/api/vermittler-rebates/')
+        && !req.path.startsWith('/api/bank-accounts/')
+        && !req.path.startsWith('/api/invoices/')
+        && !req.path.startsWith('/api/invoice-items/')
+        && !req.path.startsWith('/api/credit-notes/')
+        && !req.path.startsWith('/api/credit-note-items/')) {
       return res.status(403).json({ error: 'Nur Admins dürfen Einträge löschen' });
     }
   }
@@ -286,7 +296,7 @@ app.get('/api/credit-notes/lookup/:number', (req, res) => {
 
 app.delete('/api/credits/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Gutschriften löschen' });
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   execute('DELETE FROM credits WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'Gutschrift gelöscht' });
 });
@@ -333,7 +343,7 @@ app.put('/api/rebates/:id/due-date', (req, res) => {
 
 app.put('/api/rebates/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Vereinbarungen bearbeiten' });
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const { rebate_text, rebate_type, rebate_period, agreed_with_staff_id, next_due_date } = req.body;
   execute(
     'UPDATE customer_rebates SET rebate_text=?, rebate_type=?, rebate_period=?, agreed_with_staff_id=?, next_due_date=? WHERE id=?',
@@ -355,7 +365,7 @@ app.get('/api/rebates/due', (req, res) => {
 
 app.delete('/api/rebates/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Einträge löschen' });
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   execute('DELETE FROM customer_rebates WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'Eintrag gelöscht' });
 });
@@ -431,7 +441,7 @@ app.put('/api/vermittler-rebates/:id/due-date', (req, res) => {
 
 app.put('/api/vermittler-rebates/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Vereinbarungen bearbeiten' });
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const { rebate_text, rebate_type, rebate_period, agreed_with_staff_id, next_due_date } = req.body;
   execute('UPDATE vermittler_rebates SET rebate_text=?, rebate_type=?, rebate_period=?, agreed_with_staff_id=?, next_due_date=? WHERE id=?',
     [rebate_text || '', rebate_type || '', rebate_period || '', agreed_with_staff_id ? Number(agreed_with_staff_id) : null, next_due_date || '', Number(req.params.id)]);
@@ -440,7 +450,7 @@ app.put('/api/vermittler-rebates/:id', (req, res) => {
 
 app.delete('/api/vermittler-rebates/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Einträge löschen' });
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   execute('DELETE FROM vermittler_rebates WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'Eintrag gelöscht' });
 });
@@ -481,7 +491,7 @@ app.put('/api/vermittler-credits/:id', (req, res) => {
 
 app.delete('/api/vermittler-credits/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (permission !== 'Admin') return res.status(403).json({ error: 'Nur Admin darf Gutschriften löschen' });
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   execute('DELETE FROM vermittler_credits WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'Gutschrift gelöscht' });
 });
@@ -808,7 +818,8 @@ app.get('/api/bank-accounts', (req, res) => {
 });
 
 app.post('/api/bank-accounts', (req, res) => {
-  if (req.headers['x-user-permission'] !== 'Admin') return res.status(403).json({ error: 'Nur Admins' });
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const { label, iban, bic, bank_name, is_default } = req.body;
   if (!iban) return res.status(400).json({ error: 'IBAN ist Pflichtfeld' });
   if (is_default) {
@@ -822,7 +833,8 @@ app.post('/api/bank-accounts', (req, res) => {
 });
 
 app.put('/api/bank-accounts/:id', (req, res) => {
-  if (req.headers['x-user-permission'] !== 'Admin') return res.status(403).json({ error: 'Nur Admins' });
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const { label, iban, bic, bank_name, is_default } = req.body;
   if (!iban) return res.status(400).json({ error: 'IBAN ist Pflichtfeld' });
   if (is_default) {
@@ -836,7 +848,8 @@ app.put('/api/bank-accounts/:id', (req, res) => {
 });
 
 app.delete('/api/bank-accounts/:id', (req, res) => {
-  if (req.headers['x-user-permission'] !== 'Admin') return res.status(403).json({ error: 'Nur Admins' });
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   execute('DELETE FROM bank_accounts WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'Bankverbindung gelöscht' });
 });
@@ -1686,7 +1699,9 @@ app.put('/api/invoices/:id', (req, res) => {
 });
 
 app.delete('/api/invoices/:id', (req, res) => {
-  // AUTH-03: Admin-only-Guard läuft bereits via globales Middleware (server.js:33)
+  // Inline-Guard: Verwaltung/Buchhaltung/Admin — globale Middleware lässt /api/invoices/ jetzt durch
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   // AUTH-05: GoBD — finalisierte Rechnungen (status != Entwurf) dürfen nicht gelöscht werden
   const invoice = queryOne('SELECT status FROM invoices WHERE id = ?', [Number(req.params.id)]);
   if (!invoice) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
@@ -1748,6 +1763,8 @@ app.put('/api/invoice-items/:id', (req, res) => {
 });
 
 app.delete('/api/invoice-items/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const item = queryOne('SELECT invoice_id FROM invoice_items WHERE id = ?', [Number(req.params.id)]);
   execute('DELETE FROM invoice_items WHERE id = ?', [Number(req.params.id)]);
   if (item) recalcInvoiceTotals(item.invoice_id);
@@ -2224,6 +2241,8 @@ app.put('/api/credit-notes/:id', (req, res) => {
 });
 
 app.delete('/api/credit-notes/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const cn = queryOne('SELECT status FROM credit_notes WHERE id = ?', [Number(req.params.id)]);
   if (!cn) return res.status(404).json({ error: 'Gutschrift nicht gefunden' });
   if (cn.status !== 'Entwurf') {
@@ -2278,6 +2297,8 @@ app.put('/api/credit-note-items/:id', (req, res) => {
 });
 
 app.delete('/api/credit-note-items/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const item = queryOne('SELECT credit_note_id FROM credit_note_items WHERE id = ?', [Number(req.params.id)]);
   execute('DELETE FROM credit_note_items WHERE id = ?', [Number(req.params.id)]);
   if (item) recalcCreditTotals(item.credit_note_id);

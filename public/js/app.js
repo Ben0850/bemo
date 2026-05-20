@@ -29,6 +29,15 @@ function isVerwaltung() {
 function isBuchhaltung() {
   return loggedInUser && (loggedInUser.permission_level === 'Buchhaltung' || loggedInUser.permission_level === 'Admin');
 }
+// Berechtigung für sämtliche Rechnungswesen-Aktionen (Gutschriften, Rebates, Bankkonten, Rechnungen,
+// Zahlungen, Vermittler-Provisionen). Buchhaltung hat hier Vollzugriff genau wie Verwaltung/Admin.
+function isFinance() {
+  return loggedInUser && (
+    loggedInUser.permission_level === 'Verwaltung' ||
+    loggedInUser.permission_level === 'Buchhaltung' ||
+    loggedInUser.permission_level === 'Admin'
+  );
+}
 function canEditInvoice() {
   return loggedInUser && (
     loggedInUser.permission_level === 'Verwaltung' ||
@@ -1105,7 +1114,7 @@ function renderCreditsTable(credits, customerId) {
       <td>${formatMonthRange(c.settled_period)}</td>
       <td style="white-space:nowrap;">
         <button class="btn btn-sm btn-secondary" onclick="openCreditForm(${customerId}, ${c.id})">Bearbeiten</button>
-        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteCredit(${c.id}, ${customerId})">Löschen</button>` : ''}
+        ${isFinance() ? `<button class="btn btn-sm btn-danger" onclick="deleteCredit(${c.id}, ${customerId})">Löschen</button>` : ''}
       </td>
     </tr>`;
   });
@@ -1135,8 +1144,8 @@ function renderRebatesTable(rebates, customerId) {
       <td>${active && r.next_due_date ? `<span class="badge ${isDue ? 'badge-red' : 'badge-green'}">${formatDate(r.next_due_date)}</span>` : '-'}</td>
       <td>${escapeHtml(r.agreed_with_name || '-')}</td>
       <td style="white-space:nowrap;">
-        ${active && isAdmin() ? `<button class="btn btn-sm btn-secondary" onclick="openRebateForm(${customerId}, ${r.id})">Bearbeiten</button>` : ''}
-        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteRebate(${r.id}, ${customerId})">Löschen</button>` : ''}
+        ${active && isFinance() ? `<button class="btn btn-sm btn-secondary" onclick="openRebateForm(${customerId}, ${r.id})">Bearbeiten</button>` : ''}
+        ${isFinance() ? `<button class="btn btn-sm btn-danger" onclick="deleteRebate(${r.id}, ${customerId})">Löschen</button>` : ''}
       </td>
     </tr>`;
   });
@@ -7034,7 +7043,7 @@ async function renderInvoiceDetail(id) {
         <h2>Rechnung ${escapeHtml(inv.invoice_number)}</h2>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-primary" onclick="window.open('/api/invoices/${id}/pdf','_blank')">PDF anzeigen</button>
-          ${isAdmin() ? `<button class="btn btn-danger" onclick="deleteInvoice(${id})">Löschen</button>` : ''}
+          ${isFinance() ? `<button class="btn btn-danger" onclick="deleteInvoice(${id})">Löschen</button>` : ''}
         </div>
       </div>
 
@@ -7452,7 +7461,7 @@ function renderInvoiceItemsTable(items, invoiceId, canEdit) {
       <td>${Number(item.total_net).toFixed(2)} &euro;</td>
       ${canEdit ? `<td style="white-space:nowrap;">
         <button class="btn btn-sm btn-secondary" onclick="editInvoiceItemRow(${item.id}, ${invoiceId})">Bearbeiten</button>
-        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteInvoiceItem(${item.id}, ${invoiceId})">Löschen</button>` : ''}
+        ${isFinance() ? `<button class="btn btn-sm btn-danger" onclick="deleteInvoiceItem(${item.id}, ${invoiceId})">Löschen</button>` : ''}
       </td>` : '<td></td>'}
     </tr>`;
   });
@@ -7959,7 +7968,7 @@ async function renderCreditNoteDetail(id) {
         <h2>Gutschrift ${escapeHtml(cn.credit_number)}</h2>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-primary" onclick="window.open('/api/credit-notes/${id}/pdf','_blank')">PDF anzeigen</button>
-          ${isAdmin() ? `<button class="btn btn-danger" onclick="deleteCreditNote(${id})">Löschen</button>` : ''}
+          ${isFinance() ? `<button class="btn btn-danger" onclick="deleteCreditNote(${id})">Löschen</button>` : ''}
         </div>
       </div>
 
@@ -8044,7 +8053,7 @@ function renderCreditItemsTable(items, creditId, canEdit) {
       <td>${Number(item.total_net).toFixed(2)} &euro;</td>
       ${canEdit ? `<td style="white-space:nowrap;">
         <button class="btn btn-sm btn-secondary" onclick="editCreditItemRow(${item.id}, ${creditId})">Bearbeiten</button>
-        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteCreditItem(${item.id}, ${creditId})">Löschen</button>` : ''}
+        ${isFinance() ? `<button class="btn btn-sm btn-danger" onclick="deleteCreditItem(${item.id}, ${creditId})">Löschen</button>` : ''}
       </td>` : '<td></td>'}
     </tr>`;
   });
@@ -12751,7 +12760,7 @@ function renderVermittlerCreditsTable(credits, vermittlerId) {
       <td>${formatMonthRange(c.settled_period)}</td>
       <td style="white-space:nowrap;">
         <button class="btn btn-sm btn-secondary" onclick="openVermittlerCreditForm(${vermittlerId}, ${c.id})">Bearbeiten</button>
-        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteVermittlerCredit(${c.id}, ${vermittlerId})">Löschen</button>` : ''}
+        ${isFinance() ? `<button class="btn btn-sm btn-danger" onclick="deleteVermittlerCredit(${c.id}, ${vermittlerId})">Löschen</button>` : ''}
       </td>
     </tr>`;
   });
@@ -12776,8 +12785,8 @@ function renderVermittlerRebatesTable(rebates, vermittlerId) {
       <td>${active && r.next_due_date ? `<span class="badge ${isDue ? 'badge-red' : 'badge-green'}">${formatDate(r.next_due_date)}</span>` : '-'}</td>
       <td>${escapeHtml(r.agreed_with_name || '-')}</td>
       <td style="white-space:nowrap;">
-        ${active && isAdmin() ? `<button class="btn btn-sm btn-secondary" onclick="openVermittlerRebateForm(${vermittlerId}, ${r.id})">Bearbeiten</button>` : ''}
-        ${isAdmin() ? `<button class="btn btn-sm btn-danger" onclick="deleteVermittlerRebate(${r.id}, ${vermittlerId})">Löschen</button>` : ''}
+        ${active && isFinance() ? `<button class="btn btn-sm btn-secondary" onclick="openVermittlerRebateForm(${vermittlerId}, ${r.id})">Bearbeiten</button>` : ''}
+        ${isFinance() ? `<button class="btn btn-sm btn-danger" onclick="deleteVermittlerRebate(${r.id}, ${vermittlerId})">Löschen</button>` : ''}
       </td>
     </tr>`;
   });
