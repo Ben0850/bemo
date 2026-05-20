@@ -6708,7 +6708,7 @@ function applyInvoiceFilters() {
   }
 
   tbody.innerHTML = filtered.map(inv => `
-    <tr class="clickable" ondblclick="navigate('invoice-detail', ${inv.id})">
+    <tr class="clickable" onclick="navigate('invoice-detail', ${inv.id})">
       <td><strong>${escapeHtml(inv.invoice_number)}</strong></td>
       <td>${formatDate(inv.invoice_date)}</td>
       <td>${escapeHtml(inv.customer_name || '')}</td>
