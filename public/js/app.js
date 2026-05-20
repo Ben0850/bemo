@@ -14703,6 +14703,9 @@ function renderAktenTable() {
     } else if (f === 'vermittler') {
       va = (a.vermittler_id ? (_aktenVermittlerMap[a.vermittler_id] || '') : (a.vermittler || '')).toLowerCase();
       vb = (b.vermittler_id ? (_aktenVermittlerMap[b.vermittler_id] || '') : (b.vermittler || '')).toLowerCase();
+    } else if (f === 'rental_license_plate') {
+      va = (a.rental_license_plate || '').toLowerCase();
+      vb = (b.rental_license_plate || '').toLowerCase();
     } else {
       va = (a[f] || '').toString().toLowerCase();
       vb = (b[f] || '').toString().toLowerCase();
@@ -14724,6 +14727,7 @@ function renderAktenTable() {
           <th style="${thStyle}" onclick="sortAkten('aktennummer')">Aktennr. ${aktenSortIcon('aktennummer')}</th>
           <th style="${thStyle}" onclick="sortAkten('datum')">Datum ${aktenSortIcon('datum')}</th>
           <th style="${thStyle}" onclick="sortAkten('customer_name')">Kunde ${aktenSortIcon('customer_name')}</th>
+          <th style="${thStyle}" onclick="sortAkten('rental_license_plate')">Fahrzeug ${aktenSortIcon('rental_license_plate')}</th>
           <th style="${thStyle}" onclick="sortAkten('anwalt')">Anwalt ${aktenSortIcon('anwalt')}</th>
           <th style="${thStyle}" onclick="sortAkten('versicherung')">Versicherung ${aktenSortIcon('versicherung')}</th>
           <th style="${thStyle}" onclick="sortAkten('vermittler')">Vermittler ${aktenSortIcon('vermittler')}</th>
@@ -14732,15 +14736,20 @@ function renderAktenTable() {
         </tr></thead>
         <tbody>
           ${data.map(a => {
-            const kunde = a.bet_kunde || a.customer_name || a.kunde || '';
+            const kundeRaw = a.bet_kunde || a.customer_name || a.kunde || '';
+            const kunde = kundeRaw.replace(/\s-\s\d{4,5}\s+.+$/, '');
             const anwalt = a.bet_anwalt || a.anwalt || '';
             const versicherung = a.bet_versicherung || (a.versicherung_id ? (_aktenInsuranceMap[a.versicherung_id] || '') : '');
             const vermittler = a.bet_vermittler || (a.vermittler_id ? (_aktenVermittlerMap[a.vermittler_id] || '') : (a.vermittler || ''));
+            const fahrzeug = a.rental_license_plate
+              ? [a.rental_license_plate, a.rental_manufacturer, a.rental_model].filter(Boolean).join(' ')
+              : '';
             const _aNr = escapeHtml(a.aktennummer || '').replace(/'/g, "\\'");
             return `<tr style="cursor:pointer;" onclick="navigate('akte-detail', ${a.id})" oncontextmenu="event.preventDefault();akteRowContextMenu(event, ${a.id}, '${_aNr}')">
             <td><strong>${escapeHtml(a.aktennummer || '')}</strong></td>
             <td>${formatDate(a.datum || a.created_at)}</td>
             <td>${escapeHtml(kunde)}</td>
+            <td>${a.rental_license_plate ? escapeHtml(a.rental_license_plate + ((a.rental_manufacturer || a.rental_model) ? ' / ' + [a.rental_manufacturer, a.rental_model].filter(Boolean).join(' ') : '')) : ''}</td>
             <td>${escapeHtml(anwalt)}</td>
             <td>${escapeHtml(versicherung)}</td>
             <td>${escapeHtml(vermittler)}</td>

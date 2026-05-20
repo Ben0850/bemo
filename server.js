@@ -4058,9 +4058,14 @@ app.get('/api/akten', (req, res) => {
       (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type = 'kunde' ORDER BY sort_order ASC LIMIT 1) as bet_kunde,
       (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type = 'anwalt' ORDER BY sort_order ASC LIMIT 1) as bet_anwalt,
       (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type = 'versicherung' ORDER BY sort_order ASC LIMIT 1) as bet_versicherung,
-      (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type IN ('vermittler','werkstatt') ORDER BY sort_order ASC LIMIT 1) as bet_vermittler
+      (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type IN ('vermittler','werkstatt') ORDER BY sort_order ASC LIMIT 1) as bet_vermittler,
+      fv.license_plate as rental_license_plate,
+      fv.manufacturer as rental_manufacturer,
+      fv.model as rental_model
     FROM akten a
     LEFT JOIN customers c ON a.customer_id = c.id
+    LEFT JOIN rentals r ON a.rental_id = r.id
+    LEFT JOIN fleet_vehicles fv ON r.vehicle_id = fv.id
   `;
   if (search) {
     const term = `%${search}%`;
