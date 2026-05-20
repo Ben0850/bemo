@@ -6514,18 +6514,26 @@ async function finalizeScanSave(existingCustomerId, newCustomerData, vehicleData
 
 // ===== PAGE: Invoices =====
 
-const INVOICE_STATUSES = ['Entwurf', 'Offen', 'Bezahlt', 'Storniert', 'Mahnstufe 1', 'Mahnstufe 2'];
+const INVOICE_STATUSES = ['Entwurf', 'Final', 'Mahnstufe 1', 'Mahnstufe 2'];
 
 function getInvoiceStatusBadge(status) {
   const map = {
     'Entwurf':     'gray',
+    'Final':       'blue',
+    'Mahnstufe 1': 'mahnstufe1',
+    'Mahnstufe 2': 'mahnstufe2',
+    // Legacy-Werte aus aelteren Datensaetzen
     'Offen':       'blue',
     'Bezahlt':     'green',
     'Storniert':   'red',
-    'Mahnstufe 1': 'mahnstufe1',
-    'Mahnstufe 2': 'mahnstufe2',
   };
   return `<span class="badge badge-${map[status] || 'gray'}">${escapeHtml(status)}</span>`;
+}
+
+// Sperr-Helper: Rechnung im Final/Mahnstufen-Status darf nur noch Status + Vermittler aendern.
+// Kunde, Texte, Positionen, Datumsfelder, Zahlungsart, Bemerkungen, Zusatzinfos sind gesperrt.
+function isInvoiceLocked(inv) {
+  return !!(inv && inv.status && inv.status !== 'Entwurf');
 }
 
 // Zahlungsstatus-Badge fuer abgeleiteten payment_status aus /api/invoices.
@@ -7034,6 +7042,10 @@ async function renderInvoiceDetail(id) {
   try {
     const inv = await api(`/api/invoices/${id}`);
     const canEdit = canEditInvoice();
+    // Lock-Logik: Sobald die Rechnung nicht mehr im 'Entwurf' ist (also Final, Mahnstufe 1, Mahnstufe 2),
+    // sind Inhaltsfelder gesperrt. Status und Vermittler bleiben aenderbar.
+    const locked = isInvoiceLocked(inv);
+    const canEditContent = canEdit && !locked;
     const customerName = (inv.customer_type === 'Firmenkunde' || inv.customer_type === 'Werkstatt')
       ? escapeHtml(inv.company_name)
       : escapeHtml(inv.last_name) + ', ' + escapeHtml(inv.first_name);
@@ -7110,20 +7122,20 @@ async function renderInvoiceDetail(id) {
             <label>Status</label>
             ${canEdit
               ? `<select id="inv-edit-status" onchange="saveInvoiceHeader(${id})">
-                   ${INVOICE_STATUSES.map(s => `<option value="${s}" ${s === inv.status ? 'selected' : ''}>${s}</option>`).join('')}
+                   ${(INVOICE_STATUSES.includes(inv.status) || !inv.status ? INVOICE_STATUSES : [inv.status, ...INVOICE_STATUSES]).map(s => `<option value="${s}" ${s === inv.status ? 'selected' : ''}>${s}</option>`).join('')}
                  </select>`
               : `<div class="form-control-static">${getInvoiceStatusBadge(inv.status)}</div>`}
           </div>
         </div>
         <div class="form-group">
           <label>Leistungsdatum <span style="color:var(--danger);">*</span></label>
-          ${canEdit
+          ${canEditContent
             ? `<input type="date" id="inv-edit-service-date" value="${inv.service_date || ''}" onchange="saveInvoiceHeader(${id})">`
             : `<div class="form-control-static">${inv.service_date ? formatDate(inv.service_date) : '—'}</div>`}
         </div>
         <div class="form-group">
           <label>Zahlart</label>
-          ${canEdit
+          ${canEditContent
             ? `<select id="inv-edit-payment-method" onchange="saveInvoiceHeader(${id})">
                  ${ ['Überweisung','Bar','Karte'].map(m =>
                      `<option value="${m}" ${(inv.payment_method||'Überweisung')===m?'selected':''}>${m}</option>`
@@ -7133,7 +7145,7 @@ async function renderInvoiceDetail(id) {
         </div>
         <div class="form-group">
           <label>Bemerkungen</label>
-          ${canEdit
+          ${canEditContent
             ? `<textarea id="inv-edit-notes" rows="2" onchange="saveInvoiceHeader(${id})">${escapeHtml(inv.notes || '')}</textarea>`
             : `<div class="form-control-static" style="min-height:60px;">${escapeHtml(inv.notes || '—')}</div>`}
         </div>
@@ -7146,7 +7158,7 @@ async function renderInvoiceDetail(id) {
         </div>
         <div style="padding:0 16px 16px 16px;">
           <div class="form-group" style="margin:0;">
-            ${canEdit
+            ${canEditContent
               ? `<textarea id="inv-edit-intro-text" rows="3" onchange="saveInvoiceIntroText(${id})" placeholder="Wird oberhalb der Positionen gedruckt. Leer lassen für keinen Vortext.">${escapeHtml(inv.intro_text || '')}</textarea>`
               : `<div class="form-control-static" style="min-height:60px;white-space:pre-wrap;">${escapeHtml(inv.intro_text || '—')}</div>`}
           </div>
@@ -7165,7 +7177,7 @@ async function renderInvoiceDetail(id) {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
             <div class="form-group">
               <label>Abgerechnete Fahrzeuggruppe</label>
-              ${canEdit
+              ${canEditContent
                 ? `<select id="inv-edit-group-billed" onchange="saveInvoiceExtras(${id})">
                      <option value="">—</option>
                      ${[1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${Number(inv.abgerechnete_fahrzeuggruppe)===n?'selected':''}>${n}</option>`).join('')}
@@ -7174,7 +7186,7 @@ async function renderInvoiceDetail(id) {
             </div>
             <div class="form-group">
               <label>Kundenfahrzeuggruppe</label>
-              ${canEdit
+              ${canEditContent
                 ? `<select id="inv-edit-group-customer" onchange="saveInvoiceExtras(${id})">
                      <option value="">—</option>
                      ${[1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${Number(inv.kundenfahrzeuggruppe)===n?'selected':''}>${n}</option>`).join('')}
@@ -7188,8 +7200,8 @@ async function renderInvoiceDetail(id) {
               <span>Mietvorgang</span>
               <div style="display:flex;gap:6px;">
                 ${canEdit && inv.rental_obj ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openRentalDetail(${inv.rental_obj.id})">Öffnen</button>` : ''}
-                ${canEdit ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openInvoiceMietvorgangPicker(${id})">${inv.rental_obj ? 'Ändern' : 'Zuweisen'}</button>` : ''}
-                ${canEdit && inv.rental_obj ? `<button type="button" class="btn btn-sm btn-danger" onclick="clearInvoiceMietvorgang(${id})">Entfernen</button>` : ''}
+                ${canEditContent ? `<button type="button" class="btn btn-sm btn-secondary" onclick="openInvoiceMietvorgangPicker(${id})">${inv.rental_obj ? 'Ändern' : 'Zuweisen'}</button>` : ''}
+                ${canEditContent && inv.rental_obj ? `<button type="button" class="btn btn-sm btn-danger" onclick="clearInvoiceMietvorgang(${id})">Entfernen</button>` : ''}
               </div>
             </label>
             ${inv.rental_obj
@@ -7215,10 +7227,10 @@ async function renderInvoiceDetail(id) {
       <div class="card">
         <div class="card-header">
           <h3>Positionen</h3>
-          ${canEdit ? `<button class="btn btn-sm btn-primary" onclick="addInvoiceItemRow(${id})">+ Position</button>` : ''}
+          ${canEditContent ? `<button class="btn btn-sm btn-primary" onclick="addInvoiceItemRow(${id})">+ Position</button>` : ''}
         </div>
         <div id="invoice-items-list">
-          ${renderInvoiceItemsTable(inv.items, id, canEdit)}
+          ${renderInvoiceItemsTable(inv.items, id, canEditContent)}
         </div>
         <div class="invoice-summary" id="invoice-summary">
           ${renderInvoiceSummary(inv)}

@@ -1756,6 +1756,30 @@ app.put('/api/invoices/:id', (req, res) => {
   const { due_date, status, service_date, payment_method, notes, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id } = req.body;
   const id = Number(req.params.id);
 
+  // Lock-Logik: Wenn die Rechnung bereits Final/Mahnstufe ist, darf nur Status und Vermittler
+  // geändert werden — alles andere ist gesperrt (Kunde, Texte, Positionen-Felder, Datumsfelder).
+  const currentStatus = (queryOne('SELECT status FROM invoices WHERE id = ?', [id]) || {}).status;
+  const isLocked = currentStatus && currentStatus !== 'Entwurf';
+  if (isLocked) {
+    const contentChanged = (due_date !== undefined) || (service_date !== undefined)
+      || (payment_method !== undefined) || (notes !== undefined) || (intro_text !== undefined)
+      || (abgerechnete_fahrzeuggruppe !== undefined) || (kundenfahrzeuggruppe !== undefined)
+      || (rental_id !== undefined);
+    if (contentChanged) {
+      return res.status(403).json({ error: 'Rechnung ist nicht im Entwurf-Status. Nur Status und Vermittler können geändert werden.' });
+    }
+    // Erlaubt: Status- und/oder Vermittler-Update
+    if (status !== undefined || vermittler_id !== undefined) {
+      const existing = queryOne('SELECT status, vermittler_id FROM invoices WHERE id = ?', [id]);
+      const finalStatus = (status !== undefined) ? status : existing.status;
+      const finalVermittlerId = (vermittler_id !== undefined) ? (vermittler_id || null) : existing.vermittler_id;
+      execute('UPDATE invoices SET status=?, vermittler_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+        [finalStatus, finalVermittlerId, id]);
+      return res.json({ message: 'Rechnung aktualisiert' });
+    }
+    return res.json({ message: 'Keine Änderung' });
+  }
+
   // Helper für Detection ob ein Feld im Body explizit übergeben wurde
   const isSet = v => v !== undefined;
   const coreSet = isSet(due_date) || isSet(status) || isSet(service_date) || isSet(payment_method) || isSet(notes);
@@ -1822,6 +1846,11 @@ app.post('/api/invoices/:id/items', (req, res) => {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   const invoiceId = Number(req.params.id);
+  // Lock-Check: Rechnung muss im Entwurf sein, damit Positionen geaendert werden duerfen.
+  const invStatus = (queryOne('SELECT status FROM invoices WHERE id = ?', [invoiceId]) || {}).status;
+  if (invStatus && invStatus !== 'Entwurf') {
+    return res.status(403).json({ error: 'Rechnung ist nicht im Entwurf-Status. Positionen sind gesperrt.' });
+  }
   const { description, quantity, unit_price, vat_rate } = req.body;
   if (!description) return res.status(400).json({ error: 'Bezeichnung ist Pflichtfeld' });
   const qty = Number(quantity) || 1;
@@ -1847,6 +1876,11 @@ app.put('/api/invoice-items/:id', (req, res) => {
   if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
+  // Lock-Check: Rechnung muss im Entwurf sein
+  const parent = queryOne('SELECT i.status FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id WHERE it.id = ?', [Number(req.params.id)]);
+  if (parent && parent.status && parent.status !== 'Entwurf') {
+    return res.status(403).json({ error: 'Rechnung ist nicht im Entwurf-Status. Positionen sind gesperrt.' });
+  }
   const { description, quantity, unit_price, vat_rate } = req.body;
   const qty = Number(quantity) || 1;
   const price = Number(unit_price) || 0;
@@ -1867,6 +1901,11 @@ app.put('/api/invoice-items/:id', (req, res) => {
 app.delete('/api/invoice-items/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  // Lock-Check: Rechnung muss im Entwurf sein
+  const parent = queryOne('SELECT i.status FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id WHERE it.id = ?', [Number(req.params.id)]);
+  if (parent && parent.status && parent.status !== 'Entwurf') {
+    return res.status(403).json({ error: 'Rechnung ist nicht im Entwurf-Status. Positionen sind gesperrt.' });
+  }
   const item = queryOne('SELECT invoice_id FROM invoice_items WHERE id = ?', [Number(req.params.id)]);
   execute('DELETE FROM invoice_items WHERE id = ?', [Number(req.params.id)]);
   if (item) recalcInvoiceTotals(item.invoice_id);
