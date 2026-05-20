@@ -6528,15 +6528,17 @@ function getInvoiceStatusBadge(status) {
   return `<span class="badge badge-${map[status] || 'gray'}">${escapeHtml(status)}</span>`;
 }
 
-// Phase 5 (PAY-STAT-03): Zahlungsstatus-Badge fuer abgeleiteten payment_status aus /api/invoices
-// Backend liefert lowercase ohne Umlaut: 'offen' | 'teilbezahlt' | 'bezahlt' | 'ueberzahlt'
+// Zahlungsstatus-Badge fuer abgeleiteten payment_status aus /api/invoices.
+// Backend liefert lowercase: 'offen' | 'teilzahlung' | 'bezahlt' (Ueberzahlung -> 'bezahlt').
 // Frontend zeigt kapitalisiert.
 function getPaymentStatusBadge(payment_status) {
   const map = {
     'offen':       { color: 'gray',   label: 'Offen' },
-    'teilbezahlt': { color: 'orange', label: 'Teilbezahlt' },
+    'teilzahlung': { color: 'orange', label: 'Teilzahlung' },
     'bezahlt':     { color: 'green',  label: 'Bezahlt' },
-    'ueberzahlt':  { color: 'blue',   label: 'Ueberzahlt' },
+    // Legacy-Aliase aus aelteren Datensaetzen (gibt's nicht mehr aus Backend, nur safety net)
+    'teilbezahlt': { color: 'orange', label: 'Teilzahlung' },
+    'ueberzahlt':  { color: 'green',  label: 'Bezahlt' },
   };
   const entry = map[payment_status] || { color: 'gray', label: payment_status || 'Unbekannt' };
   return `<span class="badge badge-${entry.color}">${escapeHtml(entry.label)}</span>`;
@@ -6586,7 +6588,7 @@ function renderInvoicePaymentSaldoHeader(inv) {
       <div style="display:flex;align-items:center;gap:10px;">
         <span style="font-size:14px;color:var(--text-muted);">Offener Betrag:</span>
         <strong style="font-size:16px;color:${openColor};">${open.toFixed(2)} &euro;</strong>
-        ${open < 0 ? '<span style="font-size:12px;color:var(--text-muted);">(ueberzahlt)</span>' : ''}
+        ${open < 0 ? '<span style="font-size:12px;color:var(--text-muted);">(Überzahlung)</span>' : ''}
       </div>
     </div>
   `;
@@ -6643,9 +6645,8 @@ async function renderInvoices() {
                   <select id="inv-filter-payment-status" onchange="applyInvoiceFilters()" class="filter-input">
                     <option value="">Alle</option>
                     <option value="offen">Offen</option>
-                    <option value="teilbezahlt">Teilbezahlt</option>
+                    <option value="teilzahlung">Teilzahlung</option>
                     <option value="bezahlt">Bezahlt</option>
-                    <option value="ueberzahlt">Ueberzahlt</option>
                   </select>
                 </td>
                 <td></td>
@@ -16683,9 +16684,8 @@ async function openAddBillingModal() {
                 <select id="addbill-payment-status" onchange="applyAddBillingFilters()" class="filter-input">
                   <option value="">Alle</option>
                   <option value="offen">Offen</option>
-                  <option value="teilbezahlt">Teilbezahlt</option>
+                  <option value="teilzahlung">Teilzahlung</option>
                   <option value="bezahlt">Bezahlt</option>
-                  <option value="ueberzahlt">Ueberzahlt</option>
                 </select>
               </td>
               <td></td>

@@ -1612,14 +1612,12 @@ function derivePaymentStatus(saldo, total_gross) {
   const s = Number(saldo) || 0;
   const g = Number(total_gross) || 0;
   const TOL = 0.005;
-  // saldo praktisch gleich brutto -> bezahlt (auch wenn beide 0 sind)
-  if (Math.abs(s - g) < TOL) return 'bezahlt';
+  // saldo >= brutto -> bezahlt (auch Ueberzahlung gilt als 'bezahlt', kein eigener Status mehr)
+  if (s >= g - TOL) return 'bezahlt';
   // saldo praktisch 0 oder negativ -> offen
   if (s < TOL) return 'offen';
-  // saldo deutlich groesser als brutto -> ueberzahlt
-  if (s > g) return 'ueberzahlt';
-  // saldo deutlich kleiner als brutto -> teilbezahlt
-  return 'teilbezahlt';
+  // dazwischen -> teilzahlung
+  return 'teilzahlung';
 }
 
 app.get('/api/invoices', (req, res) => {
