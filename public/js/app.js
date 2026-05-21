@@ -14794,6 +14794,50 @@ function renderAktenTable() {
   `;
 }
 
+// === Akte loeschen (Admin only) — zweistufige Bestaetigung, S3 wird NIEMALS angefasst ===
+async function deleteAkte(akteId) {
+  if (!isAdmin()) return;
+  const ok1 = await showConfirm(
+    'Akte löschen?',
+    'Soll diese Akte wirklich unwiderruflich und nicht wiederherrstellbar gelöscht werden?',
+    { danger: true, yesLabel: 'Ja', noLabel: 'Abbrechen' }
+  );
+  if (!ok1) return;
+  const ok2 = await showRedConfirm('Wirklich sicher?');
+  if (!ok2) return;
+  try {
+    await api(`/api/akten/${akteId}`, { method: 'DELETE' });
+    showToast('Akte gelöscht');
+    navigate('akten');
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+// Kleines rotes Bestaetigungs-Popup mittig im Bild — fuer den finalen Loesch-Schritt.
+function showRedConfirm(message) {
+  return new Promise(resolve => {
+    const existing = document.getElementById('red-confirm-overlay');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'red-confirm-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:30000;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+      <div style="background:#dc2626;color:#fff;border-radius:10px;padding:22px 26px;max-width:340px;width:85%;text-align:center;box-shadow:0 14px 40px rgba(220,38,38,0.55);border:2px solid #b91c1c;">
+        <div style="font-size:18px;font-weight:700;margin-bottom:18px;">${escapeHtml(message)}</div>
+        <div style="display:flex;gap:10px;justify-content:center;">
+          <button type="button" id="red-confirm-no" style="background:#fff;color:#dc2626;border:none;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;">Abbrechen</button>
+          <button type="button" id="red-confirm-yes" style="background:#7f1d1d;color:#fff;border:1px solid #fff;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;">Ja, löschen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const cleanup = (val) => { overlay.remove(); resolve(val); };
+    overlay.querySelector('#red-confirm-no').addEventListener('click', e => { e.stopPropagation(); cleanup(false); });
+    overlay.querySelector('#red-confirm-yes').addEventListener('click', e => { e.stopPropagation(); cleanup(true); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(false); });
+  });
+}
+
 // Track active Akte tab & Beteiligte state
 let _akteActiveTab = 'allgemein';
 let _beteiligteActiveTab = 'kunde';
@@ -15304,7 +15348,7 @@ async function renderAkteDetail(id) {
       <a class="back-link" onclick="navigate('akten')">&larr; Zur\u00fcck zur Aktenliste</a>
 
       <!-- Akte Header -->
-      <div class="akte-header">
+      <div class="akte-header" style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
         <div class="akte-header-fields">
           <div class="akte-header-field">
             <div class="akte-header-field-label">Aktennummer</div>
@@ -15319,6 +15363,7 @@ async function renderAkteDetail(id) {
             <div class="akte-header-field-value">${fmt(a.created_by_name)}</div>
           </div>
         </div>
+        ${isAdmin() ? `<button class="btn btn-danger" onclick="deleteAkte(${a.id})" style="white-space:nowrap;">Akte löschen</button>` : ''}
       </div>
 
       <!-- Tab Navigation -->

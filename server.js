@@ -4636,14 +4636,19 @@ app.delete('/api/akten/:id/billing/:type/:itemId', (req, res) => {
 });
 
 app.delete('/api/akten/:id', (req, res) => {
-  // SEC-01: Permission guard (explicit — global middleware only allows Admin, this adds Verwaltung/Buchhaltung)
+  // Nur Admin darf eine Akte unwiderruflich loeschen
   const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+  if (permission !== 'Admin') {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
-  const existing = queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]);
+  const akteId = Number(req.params.id);
+  const existing = queryOne('SELECT id FROM akten WHERE id = ?', [akteId]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  execute('DELETE FROM akten WHERE id = ?', [Number(req.params.id)]);
+  // WICHTIG: Nur DB-Loeschung. Alle verknuepften Tabellen (akten_beteiligte, akten_eintraege,
+  // akten_post, akten_kommunikation, akten_invoices, akten_credit_notes, akten_history) sind
+  // per FK ON DELETE CASCADE konfiguriert und werden automatisch mitgeloescht.
+  // Der S3-Ordner zur Akte wird unter KEINEN Umstaenden angefasst — keinerlei S3-API-Aufruf.
+  execute('DELETE FROM akten WHERE id = ?', [akteId]);
   res.json({ success: true });
 });
 
