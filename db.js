@@ -451,6 +451,36 @@ async function getDb() {
       rows[0].values.forEach(([id]) => { next += 1; db.run("UPDATE invoice_position_templates SET sort_order = ? WHERE id = ?", [next, id]); });
     }
   } catch(e) {}
+  // Gruppen fuer Rechnungspositions-Vorlagen
+  db.run(`
+    CREATE TABLE IF NOT EXISTS invoice_position_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  try { db.run("ALTER TABLE invoice_position_templates ADD COLUMN group_id INTEGER DEFAULT NULL"); } catch(e) {}
+  // Backfill: alle bestehenden Vorlagen ohne Gruppe einer Default-Gruppe "Allgemein" zuordnen.
+  // Idempotent: laeuft nur, wenn es Vorlagen ohne group_id gibt UND noch keine "Allgemein"-Gruppe existiert
+  // mit denselben Vorlagen — sonst wird einfach gar nichts gemacht (bestehende Daten unangetastet).
+  try {
+    const orphanCheck = db.exec("SELECT COUNT(*) FROM invoice_position_templates WHERE group_id IS NULL");
+    const orphans = orphanCheck.length ? orphanCheck[0].values[0][0] : 0;
+    if (orphans > 0) {
+      const existingDefault = db.exec("SELECT id FROM invoice_position_groups WHERE name = 'Allgemein' LIMIT 1");
+      let defaultGroupId;
+      if (existingDefault.length && existingDefault[0].values.length) {
+        defaultGroupId = existingDefault[0].values[0][0];
+      } else {
+        db.run("INSERT INTO invoice_position_groups (name, sort_order) VALUES ('Allgemein', 1)");
+        const newId = db.exec("SELECT last_insert_rowid()");
+        defaultGroupId = newId[0].values[0][0];
+      }
+      db.run("UPDATE invoice_position_templates SET group_id = ? WHERE group_id IS NULL", [defaultGroupId]);
+    }
+  } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE credit_notes ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
   // Bank accounts (Bankverbindungen)

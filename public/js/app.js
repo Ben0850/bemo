@@ -7239,6 +7239,13 @@ async function renderInvoiceDetail(id) {
           <h3>Positionen</h3>
           ${canEditContent ? `<button class="btn btn-sm btn-primary" onclick="addInvoiceItemRow(${id})">+ Position</button>` : ''}
         </div>
+        ${canEditContent ? `
+        <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:var(--bg-subtle,#f9fafb);">
+          <label style="font-size:13px;color:var(--text-muted);white-space:nowrap;">Positionsgruppe einfügen:</label>
+          <select id="invoice-insert-group" onchange="insertInvoicePositionGroup(${id}, this.value); this.value='';" style="font-size:13px;padding:6px 8px;min-width:240px;">
+            <option value="">— Gruppe wählen —</option>
+          </select>
+        </div>` : ''}
         <div id="invoice-items-list">
           ${renderInvoiceItemsTable(inv.items, id, canEditContent)}
         </div>
@@ -7253,6 +7260,20 @@ async function renderInvoiceDetail(id) {
         <div id="invoice-payments-block-placeholder"></div>
       </div>
     `;
+
+    // Positionsgruppen-Dropdown befuellen (falls vorhanden — nur fuer Editier-Berechtigte)
+    try {
+      const groupSelect = document.getElementById('invoice-insert-group');
+      if (groupSelect) {
+        const groups = await api('/api/invoice-position-groups');
+        groups.forEach(g => {
+          const opt = document.createElement('option');
+          opt.value = g.id;
+          opt.textContent = `${g.name} (${g.template_count} Pos.)`;
+          groupSelect.appendChild(opt);
+        });
+      }
+    } catch (_) { /* still rendern */ }
 
     // Phase 6 Plan 06-02: Zahlungs-Block laden und rendern (nach initialem Render der Detailseite).
     // Inner try/catch verhindert, dass ein Payment-Lade-Fehler den ganzen Detail-Render killt.
@@ -7875,6 +7896,22 @@ async function addInvoiceItemRow(invoiceId) {
 function cancelInvoiceItemRowNew() {
   document.getElementById('inv-item-row-tpl')?.remove();
   document.getElementById('inv-item-row-new')?.remove();
+}
+
+// Komplette Positionsgruppe in die Rechnung einfuegen — Server fuegt alle Vorlagen
+// der Gruppe in sort_order-Reihenfolge ans Ende der Positionsliste an.
+async function insertInvoicePositionGroup(invoiceId, groupId) {
+  if (!groupId) return;
+  try {
+    const res = await api(`/api/invoices/${invoiceId}/insert-group`, {
+      method: 'POST',
+      body: { group_id: Number(groupId) }
+    });
+    showToast(res.message || 'Positionen eingefuegt');
+    await renderInvoiceDetail(invoiceId);
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
 }
 
 function applyInvoiceItemTemplate(tplId) {
@@ -18752,31 +18789,172 @@ function closeCategoryManager() {
 
 // ===== PAGE: Rechnungseinstellungen (vorgefertigte Positionen) =====
 let _invoicePositionTemplatesCache = [];
+let _invoicePositionGroupsCache = [];
+let _settingsInvoicingGroupId = null; // null = Gruppen-Uebersicht, sonst Gruppen-Detail
 
 async function renderSettingsInvoicing() {
+  if (_settingsInvoicingGroupId) {
+    await renderSettingsInvoicingGroupDetail(_settingsInvoicingGroupId);
+  } else {
+    await renderSettingsInvoicingGroupList();
+  }
+}
+
+async function renderSettingsInvoicingGroupList() {
+  _settingsInvoicingGroupId = null;
   const main = document.getElementById('main-content');
   main.innerHTML = `
     <div class="page-header">
       <h2>Rechnungseinstellungen</h2>
-      <button class="btn btn-primary" onclick="openInvoicePositionTemplateForm()">+ Neue Vorlage</button>
+      <button class="btn btn-primary" onclick="openInvoicePositionGroupForm()">+ Neue Gruppe</button>
     </div>
     <div class="card" style="margin-bottom:14px;">
       <div style="padding:14px 18px;color:var(--text-muted);font-size:13px;">
-        Vorgefertigte Positionen für Rechnungen. Beim Hinzufügen einer Position in einer Rechnung
-        kannst du eine dieser Vorlagen auswählen — Bezeichnung, Menge, Einzelpreis und MwSt-Satz
-        werden direkt übernommen.
+        Positionsgruppen für Rechnungen. Klick auf eine Gruppe, um deren Positionen zu pflegen.
+        Beim Anlegen einer Rechnung kannst du eine Gruppe per Dropdown auswählen, dann werden
+        alle Positionen der Gruppe in der konfigurierten Reihenfolge übernommen.
       </div>
+    </div>
+    <div class="card">
+      <div id="ipg-table-content"><div class="loading">Laden…</div></div>
+    </div>
+  `;
+  try {
+    _invoicePositionGroupsCache = await api('/api/invoice-position-groups');
+    renderInvoicePositionGroupsTable();
+  } catch (err) {
+    document.getElementById('ipg-table-content').innerHTML = `<div class="empty-state"><p>Fehler: ${escapeHtml(err.message)}</p></div>`;
+  }
+}
+
+function renderInvoicePositionGroupsTable() {
+  const container = document.getElementById('ipg-table-content');
+  if (!container) return;
+  const data = _invoicePositionGroupsCache;
+  if (!data.length) {
+    container.innerHTML = '<div class="empty-state" style="padding:30px;text-align:center;color:var(--text-muted);">Noch keine Gruppen angelegt.</div>';
+    return;
+  }
+  container.innerHTML = `
+    <div style="padding:8px 16px;color:var(--text-muted);font-size:13px;">${data.length} Gruppe${data.length !== 1 ? 'n' : ''}</div>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr>
+          <th style="width:80px;text-align:center;">Reihenfolge</th>
+          <th>Name</th>
+          <th style="width:120px;text-align:right;">Positionen</th>
+          <th style="width:280px;">Aktionen</th>
+        </tr></thead>
+        <tbody>
+          ${data.map((g, idx) => `<tr style="cursor:pointer;" onclick="openInvoicePositionGroup(${g.id})">
+            <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
+              <button class="btn btn-sm btn-secondary" onclick="moveInvoicePositionGroup(${g.id}, 'up')" ${idx === 0 ? 'disabled style="opacity:0.3;"' : ''} title="Nach oben">&#9650;</button>
+              <button class="btn btn-sm btn-secondary" onclick="moveInvoicePositionGroup(${g.id}, 'down')" ${idx === data.length - 1 ? 'disabled style="opacity:0.3;"' : ''} title="Nach unten">&#9660;</button>
+            </td>
+            <td><strong>${escapeHtml(g.name || '')}</strong></td>
+            <td style="text-align:right;">${Number(g.template_count || 0)}</td>
+            <td onclick="event.stopPropagation();"><div style="display:flex;gap:6px;">
+              <button class="btn btn-sm btn-secondary" onclick="openInvoicePositionGroupForm(${g.id})">Umbenennen</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteInvoicePositionGroup(${g.id}, '${(g.name || '').replace(/'/g, '&#39;')}')">Löschen</button>
+            </div></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openInvoicePositionGroup(groupId) {
+  _settingsInvoicingGroupId = groupId;
+  renderSettingsInvoicingGroupDetail(groupId);
+}
+
+async function moveInvoicePositionGroup(groupId, direction) {
+  try {
+    await api(`/api/invoice-position-groups/${groupId}/move`, { method: 'POST', body: { direction } });
+    _invoicePositionGroupsCache = await api('/api/invoice-position-groups');
+    renderInvoicePositionGroupsTable();
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+async function openInvoicePositionGroupForm(editId) {
+  let name = '';
+  if (editId) {
+    const g = _invoicePositionGroupsCache.find(x => x.id === editId);
+    name = g ? (g.name || '') : '';
+  }
+  openModal(editId ? 'Gruppe umbenennen' : 'Neue Gruppe', `
+    <form onsubmit="saveInvoicePositionGroup(event, ${editId || 'null'})">
+      <div class="form-group">
+        <label>Name *</label>
+        <input type="text" id="ipg-name" value="${escapeHtml(name)}" required placeholder="z.B. Unfallersatz, Selbstzahler, …">
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">${editId ? 'Speichern' : 'Anlegen'}</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `);
+}
+
+async function saveInvoicePositionGroup(e, editId) {
+  e.preventDefault();
+  const name = document.getElementById('ipg-name').value.trim();
+  if (!name) { showToast('Name ist Pflicht', 'error'); return; }
+  try {
+    if (editId) {
+      await api('/api/invoice-position-groups/' + editId, { method: 'PUT', body: { name } });
+      showToast('Gruppe aktualisiert');
+    } else {
+      await api('/api/invoice-position-groups', { method: 'POST', body: { name } });
+      showToast('Gruppe angelegt');
+    }
+    closeModal();
+    renderSettingsInvoicingGroupList();
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+async function deleteInvoicePositionGroup(id, name) {
+  const ok = await showConfirm('Gruppe löschen?', `Gruppe „${name}" wirklich löschen?`, { danger: true, yesLabel: 'Löschen' });
+  if (!ok) return;
+  try {
+    await api('/api/invoice-position-groups/' + id, { method: 'DELETE' });
+    showToast('Gruppe gelöscht');
+    renderSettingsInvoicingGroupList();
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+async function renderSettingsInvoicingGroupDetail(groupId) {
+  _settingsInvoicingGroupId = groupId;
+  const main = document.getElementById('main-content');
+  const group = _invoicePositionGroupsCache.find(g => g.id === groupId) || { name: 'Gruppe' };
+  main.innerHTML = `
+    <a class="back-link" onclick="backToInvoicePositionGroupList()">&larr; Zurück zur Gruppenübersicht</a>
+    <div class="page-header">
+      <h2>${escapeHtml(group.name || 'Gruppe')} — Positionen</h2>
+      <button class="btn btn-primary" onclick="openInvoicePositionTemplateForm()">+ Neue Position</button>
     </div>
     <div class="card">
       <div id="ipt-table-content"><div class="loading">Laden…</div></div>
     </div>
   `;
   try {
-    _invoicePositionTemplatesCache = await api('/api/invoice-position-templates');
+    _invoicePositionTemplatesCache = await api('/api/invoice-position-templates?group_id=' + groupId);
     renderInvoicePositionTemplatesTable();
   } catch (err) {
     document.getElementById('ipt-table-content').innerHTML = `<div class="empty-state"><p>Fehler: ${escapeHtml(err.message)}</p></div>`;
   }
+}
+
+function backToInvoicePositionGroupList() {
+  _settingsInvoicingGroupId = null;
+  renderSettingsInvoicingGroupList();
 }
 
 function renderInvoicePositionTemplatesTable() {
@@ -18882,6 +19060,8 @@ async function saveInvoicePositionTemplate(e, editId) {
       await api('/api/invoice-position-templates/' + editId, { method: 'PUT', body: data });
       showToast('Vorlage aktualisiert');
     } else {
+      if (!_settingsInvoicingGroupId) { showToast('Keine Gruppe aktiv', 'error'); return; }
+      data.group_id = _settingsInvoicingGroupId;
       await api('/api/invoice-position-templates', { method: 'POST', body: data });
       showToast('Vorlage angelegt');
     }

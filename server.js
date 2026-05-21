@@ -965,20 +965,99 @@ app.put('/api/email-template-categories/:id', (req, res) => {
 // ===== Rechnungspositions-Vorlagen =====
 // Vom User in Rechnungseinstellungen gepflegt; werden im Position-hinzufügen-Modal als Quick-Pick angeboten.
 
+// ===== Rechnungspositions-Gruppen =====
+app.get('/api/invoice-position-groups', (req, res) => {
+  res.json(queryAll(
+    `SELECT g.id, g.name, g.sort_order, g.created_at, g.updated_at,
+       (SELECT COUNT(*) FROM invoice_position_templates t WHERE t.group_id = g.id) AS template_count
+     FROM invoice_position_groups g
+     ORDER BY g.sort_order ASC, g.id ASC`
+  ));
+});
+
+app.post('/api/invoice-position-groups', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { name } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Name ist Pflicht' });
+  const maxRow = queryOne('SELECT COALESCE(MAX(sort_order), 0) AS m FROM invoice_position_groups');
+  const nextOrder = (maxRow && maxRow.m ? maxRow.m : 0) + 1;
+  const result = execute(
+    'INSERT INTO invoice_position_groups (name, sort_order) VALUES (?, ?)',
+    [String(name).trim(), nextOrder]
+  );
+  res.json({ id: result.lastId, message: 'Gruppe angelegt' });
+});
+
+app.put('/api/invoice-position-groups/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const id = Number(req.params.id);
+  const existing = queryOne('SELECT id FROM invoice_position_groups WHERE id = ?', [id]);
+  if (!existing) return res.status(404).json({ error: 'Gruppe nicht gefunden' });
+  const { name } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Name ist Pflicht' });
+  execute('UPDATE invoice_position_groups SET name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    [String(name).trim(), id]);
+  res.json({ message: 'Gruppe aktualisiert' });
+});
+
+app.delete('/api/invoice-position-groups/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const id = Number(req.params.id);
+  const existing = queryOne('SELECT id FROM invoice_position_groups WHERE id = ?', [id]);
+  if (!existing) return res.status(404).json({ error: 'Gruppe nicht gefunden' });
+  const count = queryOne('SELECT COUNT(*) AS c FROM invoice_position_templates WHERE group_id = ?', [id]);
+  if (count && count.c > 0) {
+    return res.status(400).json({ error: 'Gruppe enthaelt noch ' + count.c + ' Vorlage(n). Erst Vorlagen entfernen oder verschieben.' });
+  }
+  execute('DELETE FROM invoice_position_groups WHERE id = ?', [id]);
+  res.json({ message: 'Gruppe geloescht' });
+});
+
+app.post('/api/invoice-position-groups/:id/move', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const id = Number(req.params.id);
+  const direction = req.body && req.body.direction === 'down' ? 'down' : 'up';
+  const current = queryOne('SELECT id, sort_order FROM invoice_position_groups WHERE id = ?', [id]);
+  if (!current) return res.status(404).json({ error: 'Gruppe nicht gefunden' });
+  const neighbor = direction === 'up'
+    ? queryOne('SELECT id, sort_order FROM invoice_position_groups WHERE sort_order < ? ORDER BY sort_order DESC LIMIT 1', [current.sort_order])
+    : queryOne('SELECT id, sort_order FROM invoice_position_groups WHERE sort_order > ? ORDER BY sort_order ASC LIMIT 1', [current.sort_order]);
+  if (!neighbor) return res.json({ message: 'Bereits am Rand' });
+  execute('UPDATE invoice_position_groups SET sort_order = ? WHERE id = ?', [neighbor.sort_order, current.id]);
+  execute('UPDATE invoice_position_groups SET sort_order = ? WHERE id = ?', [current.sort_order, neighbor.id]);
+  res.json({ message: 'Verschoben' });
+});
+
 app.get('/api/invoice-position-templates', (req, res) => {
-  res.json(queryAll('SELECT id, description, quantity, unit_price, vat_rate, sort_order, created_at, updated_at FROM invoice_position_templates ORDER BY sort_order ASC, id ASC'));
+  const { group_id } = req.query;
+  if (group_id) {
+    res.json(queryAll(
+      'SELECT id, group_id, description, quantity, unit_price, vat_rate, sort_order, created_at, updated_at FROM invoice_position_templates WHERE group_id = ? ORDER BY sort_order ASC, id ASC',
+      [Number(group_id)]
+    ));
+  } else {
+    res.json(queryAll('SELECT id, group_id, description, quantity, unit_price, vat_rate, sort_order, created_at, updated_at FROM invoice_position_templates ORDER BY sort_order ASC, id ASC'));
+  }
 });
 
 app.post('/api/invoice-position-templates', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
-  const { description, quantity, unit_price, vat_rate } = req.body || {};
+  const { description, quantity, unit_price, vat_rate, group_id } = req.body || {};
   if (!description || !String(description).trim()) return res.status(400).json({ error: 'Bezeichnung ist Pflicht' });
-  const maxRow = queryOne('SELECT COALESCE(MAX(sort_order), 0) AS m FROM invoice_position_templates');
+  if (!group_id) return res.status(400).json({ error: 'Gruppe ist Pflicht' });
+  const groupExists = queryOne('SELECT id FROM invoice_position_groups WHERE id = ?', [Number(group_id)]);
+  if (!groupExists) return res.status(400).json({ error: 'Gruppe existiert nicht' });
+  // sort_order pro Gruppe fortlaufend
+  const maxRow = queryOne('SELECT COALESCE(MAX(sort_order), 0) AS m FROM invoice_position_templates WHERE group_id = ?', [Number(group_id)]);
   const nextOrder = (maxRow && maxRow.m ? maxRow.m : 0) + 1;
   const result = execute(
-    'INSERT INTO invoice_position_templates (description, quantity, unit_price, vat_rate, sort_order) VALUES (?, ?, ?, ?, ?)',
-    [String(description).trim(), Number(quantity) || 1, Number(unit_price) || 0, Number(vat_rate) || 0.19, nextOrder]
+    'INSERT INTO invoice_position_templates (group_id, description, quantity, unit_price, vat_rate, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+    [Number(group_id), String(description).trim(), Number(quantity) || 1, Number(unit_price) || 0, Number(vat_rate) || 0.19, nextOrder]
   );
   res.json({ id: result.lastId, message: 'Vorlage angelegt' });
 });
@@ -1750,25 +1829,8 @@ app.post('/api/invoices', (req, res) => {
       'INSERT INTO invoices (invoice_number, customer_id, invoice_date, due_date, service_date, payment_method, notes, company_snapshot, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [invoice_number, customer_id, invoice_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot, vermittler_id || null, finalIntroText, finalGroupBilled, finalGroupCustomer, finalRentalId]
     );
-    // Vorgefertigte Positions-Vorlagen automatisch als Positionen in die neue Rechnung übernehmen,
-    // in der konfigurierten Reihenfolge (sort_order). Reihenfolge = Position auf der Rechnung.
-    try {
-      const templates = queryAll('SELECT description, quantity, unit_price, vat_rate FROM invoice_position_templates ORDER BY sort_order ASC, id ASC');
-      templates.forEach((tpl, idx) => {
-        const qty = Number(tpl.quantity) || 1;
-        const price = Number(tpl.unit_price) || 0;
-        const rate = Number(tpl.vat_rate) || 0.19;
-        const totalNet = Math.round(qty * price * 100) / 100;
-        const totalGross = Math.round(totalNet * (1 + rate) * 100) / 100;
-        execute(
-          'INSERT INTO invoice_items (invoice_id, position, description, quantity, unit_price, total_net, total_gross, vat_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [result.lastId, idx + 1, tpl.description, qty, price, totalNet, totalGross, rate]
-        );
-      });
-      if (templates.length) recalcInvoiceTotals(result.lastId);
-    } catch (tplErr) {
-      console.error('Vorlagen-Übernahme fehlgeschlagen:', tplErr && tplErr.message ? tplErr.message : tplErr);
-    }
+    // Hinweis: Keine automatische Vorlagen-Uebernahme mehr — User waehlt im Rechnungs-Formular
+    // gezielt eine Positionsgruppe per Dropdown aus.
     res.json({ id: result.lastId, invoice_number, message: 'Rechnung erstellt' });
   } catch(e) {
     console.error('POST /api/invoices failed:', e && e.stack ? e.stack : e);
@@ -1873,6 +1935,43 @@ app.delete('/api/invoices/:id', (req, res) => {
   }
   execute('DELETE FROM invoices WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'Rechnung gelöscht' });
+});
+
+// Alle Vorlagen einer Gruppe in eine Rechnung einfuegen (in sort_order-Reihenfolge)
+app.post('/api/invoices/:id/insert-group', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const invoiceId = Number(req.params.id);
+  const groupId = Number(req.body && req.body.group_id);
+  if (!groupId) return res.status(400).json({ error: 'group_id ist Pflicht' });
+  const invStatus = (queryOne('SELECT status FROM invoices WHERE id = ?', [invoiceId]) || {}).status;
+  if (!invStatus) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
+  if (invStatus !== 'Entwurf') return res.status(403).json({ error: 'Rechnung ist nicht im Entwurf-Status.' });
+  const groupExists = queryOne('SELECT id FROM invoice_position_groups WHERE id = ?', [groupId]);
+  if (!groupExists) return res.status(404).json({ error: 'Gruppe nicht gefunden' });
+  const templates = queryAll(
+    'SELECT description, quantity, unit_price, vat_rate FROM invoice_position_templates WHERE group_id = ? ORDER BY sort_order ASC, id ASC',
+    [groupId]
+  );
+  if (!templates.length) return res.json({ inserted: 0, message: 'Gruppe enthaelt keine Vorlagen' });
+  const lastPos = queryOne('SELECT MAX(position) as maxPos FROM invoice_items WHERE invoice_id = ?', [invoiceId]);
+  let pos = (lastPos && lastPos.maxPos ? lastPos.maxPos : 0);
+  templates.forEach(tpl => {
+    pos += 1;
+    const qty = Number(tpl.quantity) || 1;
+    const price = Number(tpl.unit_price) || 0;
+    const rate = Number(tpl.vat_rate) || 0.19;
+    const totalNet = Math.round(qty * price * 100) / 100;
+    const totalGross = Math.round(totalNet * (1 + rate) * 100) / 100;
+    execute(
+      'INSERT INTO invoice_items (invoice_id, position, description, quantity, unit_price, total_net, total_gross, vat_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [invoiceId, pos, tpl.description, qty, price, totalNet, totalGross, rate]
+    );
+  });
+  recalcInvoiceTotals(invoiceId);
+  res.json({ inserted: templates.length, message: templates.length + ' Position(en) eingefuegt' });
 });
 
 // Invoice Items
