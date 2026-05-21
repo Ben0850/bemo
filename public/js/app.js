@@ -8583,7 +8583,29 @@ async function refreshCreditItems(creditId) {
 // ===== Login =====
 async function initLogin() {
   const usernameEl = document.getElementById('login-username');
-  if (usernameEl) usernameEl.focus();
+  const passwordEl = document.getElementById('login-password');
+  const rememberWrap = document.getElementById('login-remember-wrap');
+  const rememberEl = document.getElementById('login-remember');
+
+  // Nur in der Desktop-App (Electron) bieten wir den eigenen Passwortmanager an;
+  // im Browser uebernimmt das der Browser selbst.
+  const hasCredentialAPI = window.electronAPI && typeof window.electronAPI.loadCredentials === 'function';
+  if (hasCredentialAPI && rememberWrap) {
+    rememberWrap.style.display = '';
+    try {
+      const res = await window.electronAPI.loadCredentials();
+      if (res && res.success && res.credentials) {
+        if (usernameEl) usernameEl.value = res.credentials.username || '';
+        if (passwordEl) passwordEl.value = res.credentials.password || '';
+        if (rememberEl) rememberEl.checked = true;
+      }
+    } catch (e) { /* nichts gespeichert oder Keychain nicht erreichbar */ }
+  }
+
+  // Fokus zuerst auf leeres Feld setzen
+  if (usernameEl && !usernameEl.value) usernameEl.focus();
+  else if (passwordEl && !passwordEl.value) passwordEl.focus();
+  else if (usernameEl) usernameEl.focus();
 }
 
 async function doLogin(e) {
@@ -8591,6 +8613,8 @@ async function doLogin(e) {
   const username = document.getElementById('login-username').value.trim();
   const password = document.getElementById('login-password').value;
   const errorEl = document.getElementById('login-error');
+  const rememberEl = document.getElementById('login-remember');
+  const remember = !!(rememberEl && rememberEl.checked);
 
   if (!username) {
     errorEl.textContent = 'Bitte Benutzername eingeben';
@@ -8601,6 +8625,13 @@ async function doLogin(e) {
   try {
     const user = await api('/api/login', { method: 'POST', body: { username, password } });
     loggedInUser = user;
+    // Anmeldedaten in der Desktop-App optional verschluesselt speichern (OS-Keychain)
+    if (window.electronAPI && typeof window.electronAPI.saveCredentials === 'function') {
+      try {
+        if (remember) await window.electronAPI.saveCredentials(username, password);
+        else await window.electronAPI.clearCredentials();
+      } catch (e) { /* Speichern fehlgeschlagen — nicht-blockierend */ }
+    }
     if (user.needs_password) {
       showForcePasswordScreen();
       return;

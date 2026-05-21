@@ -22,6 +22,12 @@
           <label>Passwort</label>
           <input type="password" id="login-password" placeholder="Passwort eingeben" autocomplete="current-password">
         </div>
+        <div id="login-remember-wrap" style="display:none;margin-bottom:12px;font-size:13px;color:#555;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="login-remember" style="margin:0;cursor:pointer;">
+            <span>Anmeldedaten merken</span>
+          </label>
+        </div>
         <div id="login-error" style="color:#e74c3c;font-size:13px;margin-bottom:12px;display:none;"></div>
         <button type="submit" class="btn btn-primary" style="width:100%;">Anmelden</button>
       </form>
