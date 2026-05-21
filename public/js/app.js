@@ -18996,7 +18996,10 @@ function renderInvoicePositionTemplatesTable() {
 async function moveInvoicePositionTemplate(id, direction) {
   try {
     await api(`/api/invoice-position-templates/${id}/move`, { method: 'POST', body: { direction } });
-    _invoicePositionTemplatesCache = await api('/api/invoice-position-templates');
+    // WICHTIG: Cache nur fuer die aktuell offene Gruppe neu laden — sonst springen
+    // Vorlagen aus anderen Gruppen in die Ansicht.
+    const groupParam = _settingsInvoicingGroupId ? '?group_id=' + _settingsInvoicingGroupId : '';
+    _invoicePositionTemplatesCache = await api('/api/invoice-position-templates' + groupParam);
     renderInvoicePositionTemplatesTable();
   } catch (err) {
     showToast('Fehler: ' + err.message, 'error');

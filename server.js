@@ -1067,11 +1067,13 @@ app.post('/api/invoice-position-templates/:id/move', (req, res) => {
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const id = Number(req.params.id);
   const direction = req.body && req.body.direction === 'down' ? 'down' : 'up';
-  const current = queryOne('SELECT id, sort_order FROM invoice_position_templates WHERE id = ?', [id]);
+  const current = queryOne('SELECT id, group_id, sort_order FROM invoice_position_templates WHERE id = ?', [id]);
   if (!current) return res.status(404).json({ error: 'Vorlage nicht gefunden' });
+  // WICHTIG: Nachbar NUR innerhalb derselben Gruppe suchen — sonst koennten sort_orders
+  // gruppenuebergreifend kollidieren und Vorlagen "wandern" in andere Gruppen.
   const neighbor = direction === 'up'
-    ? queryOne('SELECT id, sort_order FROM invoice_position_templates WHERE sort_order < ? ORDER BY sort_order DESC LIMIT 1', [current.sort_order])
-    : queryOne('SELECT id, sort_order FROM invoice_position_templates WHERE sort_order > ? ORDER BY sort_order ASC LIMIT 1', [current.sort_order]);
+    ? queryOne('SELECT id, sort_order FROM invoice_position_templates WHERE group_id = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1', [current.group_id, current.sort_order])
+    : queryOne('SELECT id, sort_order FROM invoice_position_templates WHERE group_id = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1', [current.group_id, current.sort_order]);
   if (!neighbor) return res.json({ message: 'Bereits am Rand' });
   execute('UPDATE invoice_position_templates SET sort_order = ? WHERE id = ?', [neighbor.sort_order, current.id]);
   execute('UPDATE invoice_position_templates SET sort_order = ? WHERE id = ?', [current.sort_order, neighbor.id]);
