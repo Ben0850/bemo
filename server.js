@@ -4641,6 +4641,15 @@ app.delete('/api/akten/:id', (req, res) => {
   if (permission !== 'Admin') {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
+  // SICHERHEIT: Loeschen erfordert zwingend einen expliziten "doppelt bestaetigt"-Marker
+  // im Request-Header. Damit verhindert der Server, dass ein veralteter/gecachter Client mit
+  // nur einer Bestaetigung loescht — die zweite (rote) Bestaetigung ist serverseitig erzwungen.
+  const confirmHeader = req.headers['x-confirm-delete'];
+  if (confirmHeader !== 'double-confirmed-irreversible') {
+    return res.status(400).json({
+      error: 'Loeschen erfordert doppelte Bestaetigung. Bitte App neu laden und Vorgang erneut starten.'
+    });
+  }
   const akteId = Number(req.params.id);
   const existing = queryOne('SELECT id FROM akten WHERE id = ?', [akteId]);
   if (!existing) return res.status(404).json({ error: 'Not found' });

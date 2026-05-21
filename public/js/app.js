@@ -67,8 +67,8 @@ async function loadStations() {
 // ===== API Helper =====
 async function api(url, options = {}) {
   const config = {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   };
   if (loggedInUser) {
     config.headers['X-User-Permission'] = loggedInUser.permission_level || 'Benutzer';
@@ -14810,7 +14810,11 @@ async function deleteAkte(akteId) {
   console.log('[deleteAkte] zweiter Dialog ok2 =', ok2);
   if (!ok2) return;
   try {
-    await api(`/api/akten/${akteId}`, { method: 'DELETE' });
+    // Server erfordert diesen Header — ohne ihn wird das Loeschen abgelehnt (defense in depth)
+    await api(`/api/akten/${akteId}`, {
+      method: 'DELETE',
+      headers: { 'X-Confirm-Delete': 'double-confirmed-irreversible' }
+    });
     showToast('Akte gelöscht');
     navigate('akten');
   } catch (err) {
