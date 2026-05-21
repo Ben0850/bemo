@@ -2905,31 +2905,22 @@ app.put('/api/suggestions/:id/read', (req, res) => {
 // ===== FLEET VEHICLES (Fuhrpark) =====
 
 app.get('/api/fleet-vehicles', (req, res) => {
-  const permission = req.headers['x-user-permission'];
-  const userId = req.headers['x-user-id'];
   const kmSub = `(SELECT km_stand FROM fleet_mileage WHERE fleet_vehicle_id = fv.id ORDER BY record_date DESC, id DESC LIMIT 1)`;
   const maintDateSub = `(SELECT next_maintenance_date FROM fleet_maintenance WHERE fleet_vehicle_id = fv.id AND next_maintenance_date != '' ORDER BY maintenance_date DESC, id DESC LIMIT 1)`;
   const maintKmSub = `(SELECT next_maintenance_km FROM fleet_maintenance WHERE fleet_vehicle_id = fv.id AND next_maintenance_km > 0 ORDER BY maintenance_date DESC, id DESC LIMIT 1)`;
   const custSub = `CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name ELSE c.first_name || ' ' || c.last_name END`;
-  if (permission === 'Admin' || permission === 'Verwaltung') {
-    res.json(queryAll(`SELECT fv.*, s.name as staff_name, ${custSub} as assigned_customer_name, ${kmSub} as latest_km, ${maintDateSub} as next_maintenance_date, ${maintKmSub} as next_maintenance_km FROM fleet_vehicles fv LEFT JOIN staff s ON fv.assigned_staff_id = s.id LEFT JOIN customers c ON fv.assigned_customer_id = c.id ORDER BY fv.rental_type, fv.manufacturer, fv.model`));
-  } else {
-    res.json(queryAll(`SELECT fv.*, s.name as staff_name, ${custSub} as assigned_customer_name, ${kmSub} as latest_km, ${maintDateSub} as next_maintenance_date, ${maintKmSub} as next_maintenance_km FROM fleet_vehicles fv LEFT JOIN staff s ON fv.assigned_staff_id = s.id LEFT JOIN customers c ON fv.assigned_customer_id = c.id WHERE fv.assigned_staff_id = ? ORDER BY fv.rental_type, fv.manufacturer, fv.model`, [Number(userId)]));
-  }
+  // Alle eingeloggten Benutzergruppen sehen den vollen Fuhrpark (Read-Only durch Frontend-Gating beim Bearbeiten)
+  res.json(queryAll(`SELECT fv.*, s.name as staff_name, ${custSub} as assigned_customer_name, ${kmSub} as latest_km, ${maintDateSub} as next_maintenance_date, ${maintKmSub} as next_maintenance_km FROM fleet_vehicles fv LEFT JOIN staff s ON fv.assigned_staff_id = s.id LEFT JOIN customers c ON fv.assigned_customer_id = c.id ORDER BY fv.rental_type, fv.manufacturer, fv.model`));
 });
 
 app.get('/api/fleet-vehicles/:id', (req, res) => {
-  const permission = req.headers['x-user-permission'];
-  const userId = req.headers['x-user-id'];
   const kmSub = `(SELECT km_stand FROM fleet_mileage WHERE fleet_vehicle_id = fv.id ORDER BY record_date DESC, id DESC LIMIT 1)`;
   const maintDateSub = `(SELECT next_maintenance_date FROM fleet_maintenance WHERE fleet_vehicle_id = fv.id AND next_maintenance_date != '' ORDER BY maintenance_date DESC, id DESC LIMIT 1)`;
   const maintKmSub = `(SELECT next_maintenance_km FROM fleet_maintenance WHERE fleet_vehicle_id = fv.id AND next_maintenance_km > 0 ORDER BY maintenance_date DESC, id DESC LIMIT 1)`;
   const custSub2 = `CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name ELSE c.first_name || ' ' || c.last_name END`;
   const vehicle = queryOne(`SELECT fv.*, s.name as staff_name, ${custSub2} as assigned_customer_name, ${kmSub} as latest_km, ${maintDateSub} as next_maintenance_date, ${maintKmSub} as next_maintenance_km FROM fleet_vehicles fv LEFT JOIN staff s ON fv.assigned_staff_id = s.id LEFT JOIN customers c ON fv.assigned_customer_id = c.id WHERE fv.id = ?`, [Number(req.params.id)]);
   if (!vehicle) return res.status(404).json({ error: 'Fahrzeug nicht gefunden' });
-  if (permission !== 'Admin' && permission !== 'Verwaltung' && vehicle.assigned_staff_id !== Number(userId)) {
-    return res.status(403).json({ error: 'Kein Zugriff auf dieses Fahrzeug' });
-  }
+  // Alle eingeloggten Benutzergruppen duerfen Fahrzeug-Details lesen (Bearbeiten wird im Frontend gegated)
   const maintenance = queryAll('SELECT * FROM fleet_maintenance WHERE fleet_vehicle_id = ? ORDER BY maintenance_date DESC, id DESC', [Number(req.params.id)]);
   const mileage = queryAll('SELECT fm.*, s.name as staff_name FROM fleet_mileage fm LEFT JOIN staff s ON fm.recorded_by_staff_id = s.id WHERE fm.fleet_vehicle_id = ? ORDER BY fm.record_date DESC, fm.id DESC', [Number(req.params.id)]);
   const damages = queryAll('SELECT * FROM fleet_damages WHERE fleet_vehicle_id = ? ORDER BY damage_date DESC, id DESC', [Number(req.params.id)]);
