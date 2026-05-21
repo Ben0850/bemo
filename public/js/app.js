@@ -7583,7 +7583,7 @@ function renderInvoiceItemsTable(items, invoiceId, canEdit) {
   items.forEach(item => {
     html += `<tr id="inv-item-row-${item.id}">
       <td>${item.position}</td>
-      <td>${escapeHtml(item.description)}</td>
+      <td style="white-space:pre-wrap;">${escapeHtml(item.description)}</td>
       <td>${Number(item.quantity) % 1 === 0 ? Number(item.quantity) : Number(item.quantity).toFixed(2)}</td>
       <td>${Number(item.unit_price).toFixed(2)} &euro;</td>
       <td>${Number(item.total_net).toFixed(2)} &euro;</td>
@@ -8431,7 +8431,7 @@ function renderCreditItemsTable(items, creditId, canEdit) {
   items.forEach(item => {
     html += `<tr id="cn-item-row-${item.id}">
       <td>${item.position}</td>
-      <td>${escapeHtml(item.description)}</td>
+      <td style="white-space:pre-wrap;">${escapeHtml(item.description)}</td>
       <td>${Number(item.quantity) % 1 === 0 ? Number(item.quantity) : Number(item.quantity).toFixed(2)}</td>
       <td>${Number(item.unit_price).toFixed(2)} &euro;</td>
       <td>${Number(item.total_net).toFixed(2)} &euro;</td>
@@ -18978,7 +18978,7 @@ function renderInvoicePositionTemplatesTable() {
               <button class="btn btn-sm btn-secondary" onclick="moveInvoicePositionTemplate(${t.id}, 'up')" ${idx === 0 ? 'disabled style="opacity:0.3;"' : ''} title="Nach oben">&#9650;</button>
               <button class="btn btn-sm btn-secondary" onclick="moveInvoicePositionTemplate(${t.id}, 'down')" ${idx === data.length - 1 ? 'disabled style="opacity:0.3;"' : ''} title="Nach unten">&#9660;</button>
             </td>
-            <td><strong>${escapeHtml(t.description || '')}</strong></td>
+            <td style="white-space:pre-wrap;"><strong>${escapeHtml(t.description || '')}</strong></td>
             <td style="text-align:right;">${Number(t.quantity || 1).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</td>
             <td style="text-align:right;white-space:nowrap;">${Number(t.unit_price || 0).toFixed(2)}&nbsp;&euro;</td>
             <td style="text-align:right;">${(Number(t.vat_rate || 0.19) * 100).toFixed(0)}&nbsp;%</td>
