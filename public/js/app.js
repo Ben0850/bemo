@@ -14815,26 +14815,38 @@ async function deleteAkte(akteId) {
 }
 
 // Kleines rotes Bestaetigungs-Popup mittig im Bild — fuer den finalen Loesch-Schritt.
+// Wichtig: Erstellung verzoegert um 80ms, damit ein bubbelnder Klick aus dem vorigen Dialog
+// nicht sofort auf den Backdrop dieses Overlays trifft und es wieder schliesst.
 function showRedConfirm(message) {
   return new Promise(resolve => {
-    const existing = document.getElementById('red-confirm-overlay');
-    if (existing) existing.remove();
-    const overlay = document.createElement('div');
-    overlay.id = 'red-confirm-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:30000;display:flex;align-items:center;justify-content:center;';
-    overlay.innerHTML = `
-      <div style="background:#dc2626;color:#fff;border-radius:10px;padding:22px 26px;max-width:340px;width:85%;text-align:center;box-shadow:0 14px 40px rgba(220,38,38,0.55);border:2px solid #b91c1c;">
-        <div style="font-size:18px;font-weight:700;margin-bottom:18px;">${escapeHtml(message)}</div>
-        <div style="display:flex;gap:10px;justify-content:center;">
-          <button type="button" id="red-confirm-no" style="background:#fff;color:#dc2626;border:none;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;">Abbrechen</button>
-          <button type="button" id="red-confirm-yes" style="background:#7f1d1d;color:#fff;border:1px solid #fff;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;">Ja, löschen</button>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
-    const cleanup = (val) => { overlay.remove(); resolve(val); };
-    overlay.querySelector('#red-confirm-no').addEventListener('click', e => { e.stopPropagation(); cleanup(false); });
-    overlay.querySelector('#red-confirm-yes').addEventListener('click', e => { e.stopPropagation(); cleanup(true); });
-    overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(false); });
+    setTimeout(() => {
+      const existing = document.getElementById('red-confirm-overlay');
+      if (existing) existing.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'red-confirm-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:30000;display:flex;align-items:center;justify-content:center;';
+      overlay.innerHTML = `
+        <div style="background:#dc2626;color:#fff;border-radius:10px;padding:22px 26px;max-width:340px;width:85%;text-align:center;box-shadow:0 14px 40px rgba(220,38,38,0.55);border:2px solid #b91c1c;">
+          <div style="font-size:18px;font-weight:700;margin-bottom:18px;">${escapeHtml(message)}</div>
+          <div style="display:flex;gap:10px;justify-content:center;">
+            <button type="button" id="red-confirm-no" style="background:#fff;color:#dc2626;border:none;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;">Abbrechen</button>
+            <button type="button" id="red-confirm-yes" style="background:#7f1d1d;color:#fff;border:1px solid #fff;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;">Ja, löschen</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const cleanup = (val) => { try { overlay.remove(); } catch(_){} resolve(val); };
+      const btnNo = overlay.querySelector('#red-confirm-no');
+      const btnYes = overlay.querySelector('#red-confirm-yes');
+      btnNo.addEventListener('click', e => { e.stopPropagation(); cleanup(false); });
+      btnYes.addEventListener('click', e => { e.stopPropagation(); cleanup(true); });
+      // Backdrop-Klick erst nach 250ms aktiv — schuetzt vor versehentlichem Schliessen
+      // direkt nach dem Oeffnen (z.B. nachfolgende Maus-Events vom vorherigen Dialog).
+      const opened = Date.now();
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay && Date.now() - opened > 250) cleanup(false);
+      });
+      btnNo.focus();
+    }, 80);
   });
 }
 
