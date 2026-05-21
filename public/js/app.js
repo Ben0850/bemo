@@ -14796,14 +14796,18 @@ function renderAktenTable() {
 
 // === Akte loeschen (Admin only) — zweistufige Bestaetigung, S3 wird NIEMALS angefasst ===
 async function deleteAkte(akteId) {
+  console.log('[deleteAkte] start, akteId =', akteId, 'isAdmin =', isAdmin());
   if (!isAdmin()) return;
   const ok1 = await showConfirm(
     'Akte löschen?',
     'Soll diese Akte wirklich unwiderruflich und nicht wiederherrstellbar gelöscht werden?',
     { danger: true, yesLabel: 'Ja', noLabel: 'Abbrechen' }
   );
+  console.log('[deleteAkte] erster Dialog ok1 =', ok1);
   if (!ok1) return;
+  console.log('[deleteAkte] rufe showRedConfirm auf...');
   const ok2 = await showRedConfirm('Wirklich sicher?');
+  console.log('[deleteAkte] zweiter Dialog ok2 =', ok2);
   if (!ok2) return;
   try {
     await api(`/api/akten/${akteId}`, { method: 'DELETE' });
@@ -14820,32 +14824,38 @@ async function deleteAkte(akteId) {
 function showRedConfirm(message) {
   return new Promise(resolve => {
     setTimeout(() => {
-      const existing = document.getElementById('red-confirm-overlay');
-      if (existing) existing.remove();
-      const overlay = document.createElement('div');
-      overlay.id = 'red-confirm-overlay';
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:30000;display:flex;align-items:center;justify-content:center;';
-      overlay.innerHTML = `
-        <div style="background:#dc2626;color:#fff;border-radius:10px;padding:22px 26px;max-width:340px;width:85%;text-align:center;box-shadow:0 14px 40px rgba(220,38,38,0.55);border:2px solid #b91c1c;">
-          <div style="font-size:18px;font-weight:700;margin-bottom:18px;">${escapeHtml(message)}</div>
-          <div style="display:flex;gap:10px;justify-content:center;">
-            <button type="button" id="red-confirm-no" style="background:#fff;color:#dc2626;border:none;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;">Abbrechen</button>
-            <button type="button" id="red-confirm-yes" style="background:#7f1d1d;color:#fff;border:1px solid #fff;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;">Ja, löschen</button>
-          </div>
-        </div>`;
-      document.body.appendChild(overlay);
-      const cleanup = (val) => { try { overlay.remove(); } catch(_){} resolve(val); };
-      const btnNo = overlay.querySelector('#red-confirm-no');
-      const btnYes = overlay.querySelector('#red-confirm-yes');
-      btnNo.addEventListener('click', e => { e.stopPropagation(); cleanup(false); });
-      btnYes.addEventListener('click', e => { e.stopPropagation(); cleanup(true); });
-      // Backdrop-Klick erst nach 250ms aktiv — schuetzt vor versehentlichem Schliessen
-      // direkt nach dem Oeffnen (z.B. nachfolgende Maus-Events vom vorherigen Dialog).
-      const opened = Date.now();
-      overlay.addEventListener('click', e => {
-        if (e.target === overlay && Date.now() - opened > 250) cleanup(false);
-      });
-      btnNo.focus();
+      try {
+        const existing = document.getElementById('red-confirm-overlay');
+        if (existing) existing.remove();
+        const overlay = document.createElement('div');
+        overlay.id = 'red-confirm-overlay';
+        // explizite Koordinaten statt 'inset:0' fuer maximale Browser-Kompatibilitaet
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;background:rgba(0,0,0,0.55);z-index:2147483647;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = `
+          <div style="background:#dc2626;color:#fff;border-radius:10px;padding:22px 26px;max-width:340px;width:85%;text-align:center;box-shadow:0 14px 40px rgba(220,38,38,0.55);border:2px solid #b91c1c;">
+            <div style="font-size:18px;font-weight:700;margin-bottom:18px;">${escapeHtml(message)}</div>
+            <div style="display:flex;gap:10px;justify-content:center;">
+              <button type="button" id="red-confirm-no" style="background:#fff;color:#dc2626;border:none;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;">Abbrechen</button>
+              <button type="button" id="red-confirm-yes" style="background:#7f1d1d;color:#fff;border:1px solid #fff;padding:8px 18px;border-radius:6px;font-weight:600;cursor:pointer;font-size:14px;">Ja, löschen</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        console.log('[showRedConfirm] overlay angehaengt:', overlay, 'visible rect:', overlay.getBoundingClientRect());
+        const cleanup = (val) => { try { overlay.remove(); } catch(_){} resolve(val); };
+        const btnNo = overlay.querySelector('#red-confirm-no');
+        const btnYes = overlay.querySelector('#red-confirm-yes');
+        btnNo.addEventListener('click', e => { e.stopPropagation(); cleanup(false); });
+        btnYes.addEventListener('click', e => { e.stopPropagation(); cleanup(true); });
+        const opened = Date.now();
+        overlay.addEventListener('click', e => {
+          if (e.target === overlay && Date.now() - opened > 250) cleanup(false);
+        });
+        btnNo.focus();
+      } catch (err) {
+        // Fallback: nativer confirm wenn rotes Popup nicht aufgebaut werden kann
+        console.error('[showRedConfirm] Fehler — Fallback auf nativen confirm:', err);
+        resolve(window.confirm(message));
+      }
     }, 80);
   });
 }
