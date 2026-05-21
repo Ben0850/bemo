@@ -17250,24 +17250,9 @@ async function saveAkte(e, editId) {
   }
 }
 
-async function deleteAkte(id, name) {
-  // Wichtig: Akte-L\u00f6schung l\u00e4sst den S3-Ordner zur Akte UNANGETASTET \u2014 Dokumente bleiben erhalten.
-  // Aktennummer wird ebenfalls nicht freigegeben (Backend nutzt persistente Sequenz).
-  const ok = await showConfirm(
-    'Akte l\u00f6schen?',
-    'Soll die Akte \u201e' + name + '" inklusive aller Inhalte (Beteiligte, Post, Telefonate, Rechnungs-Verkn\u00fcpfungen, Eintr\u00e4ge) wirklich gel\u00f6scht werden?\n\nHinweis: Der S3-Ordner mit Dokumenten bleibt erhalten.',
-    { danger: true, yesLabel: 'Ja, l\u00f6schen' }
-  );
-  if (!ok) return;
-  try {
-    await withBusy('Akte wird gel\u00f6scht...', () => api('/api/akten/' + id, { method: 'DELETE' }));
-    currentAkteId = null;
-    showToast('Akte gel\u00f6scht');
-    navigate('akten');
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-}
+// (alte Ein-Klick-deleteAkte entfernt \u2014 siehe neue zweistufige Version oben.
+//  Aufrufe aus dem Akten-Listen-Kontextmenue werden vom neuen deleteAkte verarbeitet,
+//  zusaetzliche Aufruf-Parameter wie der Aktenname werden ignoriert.)
 
 // Rechtsklick-Kontextmen\u00fc auf einer Aktenzeile in der Aktenliste
 function akteRowContextMenu(e, id, aktennummer) {
