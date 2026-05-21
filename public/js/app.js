@@ -18840,17 +18840,12 @@ function renderInvoicePositionGroupsTable() {
     <div class="table-wrapper">
       <table>
         <thead><tr>
-          <th style="width:80px;text-align:center;">Reihenfolge</th>
           <th>Name</th>
           <th style="width:120px;text-align:right;">Positionen</th>
           <th style="width:280px;">Aktionen</th>
         </tr></thead>
         <tbody>
-          ${data.map((g, idx) => `<tr style="cursor:pointer;" onclick="openInvoicePositionGroup(${g.id})">
-            <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
-              <button class="btn btn-sm btn-secondary" onclick="moveInvoicePositionGroup(${g.id}, 'up')" ${idx === 0 ? 'disabled style="opacity:0.3;"' : ''} title="Nach oben">&#9650;</button>
-              <button class="btn btn-sm btn-secondary" onclick="moveInvoicePositionGroup(${g.id}, 'down')" ${idx === data.length - 1 ? 'disabled style="opacity:0.3;"' : ''} title="Nach unten">&#9660;</button>
-            </td>
+          ${data.map(g => `<tr style="cursor:pointer;" onclick="openInvoicePositionGroup(${g.id})">
             <td><strong>${escapeHtml(g.name || '')}</strong></td>
             <td style="text-align:right;">${Number(g.template_count || 0)}</td>
             <td onclick="event.stopPropagation();"><div style="display:flex;gap:6px;">
