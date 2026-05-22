@@ -128,6 +128,8 @@ function openModal(title, bodyHtml, extraClass) {
 function closeModal() {
   document.getElementById('modal-overlay').classList.remove('active');
   document.getElementById('modal').className = 'modal';
+  // Beteiligten-Auto-Add Flag immer zuruecksetzen — saveCustomer hat sich vorher einen lokalen Snapshot gezogen
+  _addNewCustomerAsBeteiligterTo = null;
   // Sofort aktualisieren wenn auf Zeiterfassungsseite
   if (currentPage === 'time-tracking') renderTimeTracking();
 }
@@ -956,6 +958,8 @@ function toggleCustomerTypeFields(type) {
 
 async function saveCustomer(e, id) {
   e.preventDefault();
+  // Snapshot der Flag — verhindert dass spaeteres closeModal() sie wegnimmt
+  const targetAkteForBeteiligter = !id ? _addNewCustomerAsBeteiligterTo : null;
   const form = e.target;
   const customerType = form.customer_type.value;
   const isCompany = customerType === 'Firmenkunde' || customerType === 'Werkstatt';
@@ -985,14 +989,43 @@ async function saveCustomer(e, id) {
   };
 
   try {
+    let newCustomerId = null;
     if (id) {
       await api(`/api/customers/${id}`, { method: 'PUT', body: data });
       showToast('Kunde aktualisiert');
     } else {
-      await api('/api/customers', { method: 'POST', body: data });
+      const r = await api('/api/customers', { method: 'POST', body: data });
+      newCustomerId = r && r.id;
       showToast('Kunde angelegt');
     }
     closeModal();
+    // Wenn der neue Kunde aus dem Beteiligten-Popover heraus angelegt wurde —
+    // direkt als Beteiligter "Kunde" in die Akte eintragen.
+    if (newCustomerId && targetAkteForBeteiligter) {
+      const akteId = targetAkteForBeteiligter;
+      _addNewCustomerAsBeteiligterTo = null;
+      try {
+        const isCompany = data.customer_type === 'Firmenkunde' || data.customer_type === 'Werkstatt';
+        const displayName = isCompany ? data.company_name : (data.last_name + ', ' + data.first_name);
+        await api(`/api/akten/${akteId}/beteiligte`, {
+          method: 'POST',
+          body: {
+            type: 'kunde',
+            entity_id: newCustomerId,
+            name: displayName,
+            adresse: [data.street, [data.zip, data.city].filter(Boolean).join(' ')].filter(Boolean).join(', '),
+            telefon: data.phone || '',
+            email: data.email || ''
+          }
+        });
+        showToast('Kunde als Beteiligter hinzugefuegt');
+      } catch (e) {
+        showToast('Kunde angelegt, aber nicht als Beteiligter verknuepft: ' + (e.message || e), 'error');
+      }
+      // Akte neu laden — der neue Kunde ist jetzt sichtbar
+      renderAkteDetail(akteId);
+      return;
+    }
     if (currentPage === 'customer-detail') {
       renderCustomerDetail(id);
     } else if (currentPage === 'invoice-detail' && _currentInvoiceId) {
@@ -15136,6 +15169,19 @@ async function saveBeteiligteOrder() {
 // === Beteiligte Popover ===
 let _betSelectedEntity = null; // { id, name } of selected search result
 
+// Wenn aus dem Beteiligten-Popover heraus ein Kunde angelegt wird,
+// merken wir uns die Akte — saveCustomer fuegt den neuen Kunden dann
+// automatisch als "Kunde"-Beteiligter dieser Akte hinzu.
+let _addNewCustomerAsBeteiligterTo = null;
+
+function openNewCustomerFromBeteiligte() {
+  if (!currentAkteId) { showToast('Keine Akte aktiv', 'error'); return; }
+  _addNewCustomerAsBeteiligterTo = currentAkteId;
+  // Popover schliessen, damit die Kunden-Maske oben drauf nicht verdeckt wird
+  closeBeteiligtePopover();
+  openCustomerForm();
+}
+
 function openBeteiligtePopover() {
   document.getElementById('bet-popover-overlay').classList.add('active');
   document.getElementById('bet-type-select').value = '';
@@ -15156,6 +15202,10 @@ function onBetTypeChange() {
   if (sel) { sel.style.display = 'none'; sel.innerHTML = ''; }
   const wrapper = document.getElementById('bet-search-input-wrapper');
   if (wrapper) wrapper.style.display = '';
+
+  // "Neuer Kunde"-Button nur bei type=kunde sichtbar
+  const newCustEl = document.getElementById('bet-new-customer-area');
+  if (newCustEl) newCustEl.style.display = (type === 'kunde') ? '' : 'none';
 
   if (type === 'sonstige') {
     document.getElementById('bet-search-area').style.display = 'none';
@@ -15780,6 +15830,11 @@ async function renderAkteDetail(id) {
                 <div class="bet-search-results" id="bet-search-results"></div>
               </div>
               <div class="form-group" id="bet-selected-display" style="display:none;"></div>
+              <!-- "oder neuen Kunden anlegen" — nur wenn type=kunde ausgewaehlt -->
+              <div id="bet-new-customer-area" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);text-align:center;">
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">oder neuen Kunden anlegen</div>
+                <button type="button" class="btn btn-secondary" onclick="openNewCustomerFromBeteiligte()">+ Neuer Kunde</button>
+              </div>
             </div>
 
             <!-- Sonstige Beteiligter manual fields -->
