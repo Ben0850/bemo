@@ -4175,6 +4175,11 @@ app.get('/api/files/msg-preview', async (req, res) => {
     const buffer = Buffer.concat(chunks);
     const reader = new MsgReader(buffer);
     const msg = reader.getFileData();
+    // Backfill: attachment_count in akten_post nachtragen, falls noch nicht korrekt
+    try {
+      const attCount = (msg.attachments || []).length;
+      execute('UPDATE akten_post SET attachment_count = ? WHERE s3_key = ? AND attachment_count != ?', [attCount, key, attCount]);
+    } catch (_) {}
     // Outlook speichert fuer interne Empfaenger einen Exchange Legacy DN
     // (z.B. "/o=ExchangeLabs/ou=Exchange Administrative Group..."). Das ist keine
     // echte SMTP-Adresse — fuer die Anzeige rausfiltern und nur "echte" Adressen
@@ -4222,6 +4227,11 @@ app.get('/api/files/eml-preview', async (req, res) => {
     for await (const chunk of response.Body) { chunks.push(chunk); }
     const buffer = Buffer.concat(chunks);
     const mail = await simpleParser(buffer);
+    // Backfill: attachment_count in akten_post nachtragen, falls noch nicht korrekt
+    try {
+      const attCount = (mail.attachments || []).length;
+      execute('UPDATE akten_post SET attachment_count = ? WHERE s3_key = ? AND attachment_count != ?', [attCount, key, attCount]);
+    } catch (_) {}
     const formatAddr = (addr) => {
       if (!addr) return '';
       if (addr.value && Array.isArray(addr.value)) {
@@ -4583,6 +4593,31 @@ app.get('/api/akten/:id/post', (req, res) => {
   ));
 });
 
+// Hilfsfunktion: Anhang-Anzahl aus einer .msg-/.eml-Datei in S3 ermitteln.
+// Best effort — bei Fehlern wird 0 zurueckgegeben und das Feld bleibt unveraendert.
+async function detectMailAttachmentCount(s3Key, filename) {
+  const ext = (String(filename || '').split('.').pop() || '').toLowerCase();
+  if ((ext !== 'msg' && ext !== 'eml') || !s3Key) return null;
+  try {
+    const response = await getS3Client().send(new GetObjectCommand({ Bucket: getS3Bucket(), Key: s3Key }));
+    const chunks = [];
+    for await (const chunk of response.Body) chunks.push(chunk);
+    const buffer = Buffer.concat(chunks);
+    if (ext === 'msg') {
+      const MsgReader = require('@kenjiuno/msgreader').default || require('@kenjiuno/msgreader');
+      const reader = new MsgReader(buffer);
+      const msg = reader.getFileData();
+      return (msg.attachments || []).length;
+    }
+    const { simpleParser } = require('mailparser');
+    const mail = await simpleParser(buffer);
+    return (mail.attachments || []).length;
+  } catch (e) {
+    console.error('detectMailAttachmentCount Fehler:', e.message);
+    return null;
+  }
+}
+
 app.post('/api/akten/:id/post', (req, res) => {
   const userId = Number(req.headers['x-user-id']);
   const { post_date, participant, subject, s3_key, filename, attachment_count, direction } = req.body;
@@ -4593,6 +4628,12 @@ app.post('/api/akten/:id/post', (req, res) => {
     'INSERT INTO akten_post (akte_id, post_date, sender, recipient, subject, s3_key, filename, uploaded_by, attachment_count, direction, participant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [Number(req.params.id), post_date || new Date().toISOString().split('T')[0], '', '', subject || '', s3_key || '', filename, userId, Number(attachment_count) || 0, dir, part]
   );
+  // Async: Anhaenge aus der hochgeladenen Mail extrahieren und in DB nachtragen
+  detectMailAttachmentCount(s3_key, filename).then(count => {
+    if (count !== null) {
+      execute('UPDATE akten_post SET attachment_count = ? WHERE id = ?', [count, result.lastId]);
+    }
+  });
   res.json({ id: result.lastId, message: 'Post eingetragen' });
 });
 
