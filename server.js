@@ -4175,11 +4175,31 @@ app.get('/api/files/msg-preview', async (req, res) => {
     const buffer = Buffer.concat(chunks);
     const reader = new MsgReader(buffer);
     const msg = reader.getFileData();
+    // Outlook speichert fuer interne Empfaenger einen Exchange Legacy DN
+    // (z.B. "/o=ExchangeLabs/ou=Exchange Administrative Group..."). Das ist keine
+    // echte SMTP-Adresse — fuer die Anzeige rausfiltern und nur "echte" Adressen
+    // (mit @) oder nur den Namen zeigen.
+    const isRealSmtp = (s) => typeof s === 'string' && /@/.test(s) && !s.startsWith('/');
+    const formatRecipient = (r) => {
+      const name = (r.name || '').trim();
+      const smtp = isRealSmtp(r.smtpAddress) ? r.smtpAddress
+                 : isRealSmtp(r.email) ? r.email
+                 : '';
+      if (name && smtp) return name + ' <' + smtp + '>';
+      if (name) return name;
+      if (smtp) return smtp;
+      return '';
+    };
+    const senderSmtp = isRealSmtp(msg.senderEmail) ? msg.senderEmail : '';
+    const senderName = (msg.senderName || '').trim();
+    const fromDisplay = senderName && senderSmtp ? (senderName + ' <' + senderSmtp + '>')
+                      : senderName ? senderName
+                      : senderSmtp;
     res.json({
       subject: msg.subject || '',
-      from: msg.senderName || msg.senderEmail || '',
-      senderEmail: msg.senderEmail || '',
-      to: msg.recipients ? msg.recipients.map(r => r.name + (r.email ? ' <' + r.email + '>' : '')).join(', ') : '',
+      from: fromDisplay,
+      senderEmail: senderSmtp,
+      to: msg.recipients ? msg.recipients.map(formatRecipient).filter(Boolean).join(', ') : '',
       date: msg.messageDeliveryTime || msg.clientSubmitTime || '',
       body: msg.body || '',
       bodyHtml: msg.bodyHtml || msg.compressedRtf ? (msg.bodyHtml || '') : '',
