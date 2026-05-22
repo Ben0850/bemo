@@ -7521,7 +7521,8 @@ async function openInvoicePaymentForm(invoiceId, direction, editPaymentId) {
   const defaultDate    = existing ? existing.payment_date     : today;
   const defaultAmount  = existing ? Number(existing.amount).toFixed(2) : '';
   const defaultBankId  = existing ? (existing.bank_account_id || '') : (banks.find(b => b.is_default)?.id || '');
-  const defaultMethod  = existing ? existing.payment_method   : 'Überweisung';
+  // Bei neuen Zahlungen MUSS der User die Zahlungsart aktiv waehlen — kein stiller Default
+  const defaultMethod  = existing ? (existing.payment_method || '') : '';
   const defaultNotes   = existing ? existing.notes            : '';
   const defaultRef     = existing ? existing.reference        : '';
 
@@ -7538,9 +7539,10 @@ async function openInvoicePaymentForm(invoiceId, direction, editPaymentId) {
   `;
 
   const PAYMENT_METHODS = ['Überweisung', 'Bar', 'Kartenzahlung', 'Lastschrift', 'SEPA', 'Sonstige'];
-  const methodOptions = PAYMENT_METHODS.map(m =>
-    `<option value="${m}" ${m === defaultMethod ? 'selected' : ''}>${m}</option>`
-  ).join('');
+  const methodOptions = `<option value="" ${!defaultMethod ? 'selected' : ''}>Bitte auswählen</option>`
+    + PAYMENT_METHODS.map(m =>
+        `<option value="${m}" ${m === defaultMethod ? 'selected' : ''}>${m}</option>`
+      ).join('');
 
   openModal(`${dirLabel} ${titleAction}`, `
     <form id="invoice-payment-form" onsubmit="saveInvoicePayment(event, ${invoiceId}, ${editPaymentId || 'null'})">
@@ -7567,8 +7569,8 @@ async function openInvoicePaymentForm(invoiceId, direction, editPaymentId) {
         <small style="color:var(--text-muted);">Leer lassen / "Bar" wählen für Kasse-Buchungen.</small>
       </div>
       <div class="form-group">
-        <label>Zahlungsart</label>
-        <select id="pay-method">${methodOptions}</select>
+        <label>Zahlungsart <span style="color:var(--danger);">*</span></label>
+        <select id="pay-method" required>${methodOptions}</select>
       </div>
       <div class="form-group">
         <label>Verwendungszweck / Referenz</label>
@@ -7604,6 +7606,7 @@ async function saveInvoicePayment(event, invoiceId, editPaymentId) {
   if (!payment_date)                       { showToast('Datum ist Pflichtfeld', 'error'); return; }
   if (!['in','out'].includes(direction))   { showToast('Richtung ungueltig', 'error'); return; }
   if (!amount || amount <= 0)              { showToast('Betrag muss > 0 sein', 'error'); return; }
+  if (!payment_method)                     { showToast('Bitte Zahlungsart auswählen', 'error'); document.getElementById('pay-method')?.focus(); return; }
 
   const body = { direction, amount, payment_date, payment_method, bank_account_id, reference, notes };
 

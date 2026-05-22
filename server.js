@@ -2100,6 +2100,9 @@ app.post('/api/invoices/:id/payments', (req, res) => {
   if (!payment_date || !/^\d{4}-\d{2}-\d{2}$/.test(payment_date)) {
     return res.status(400).json({ error: 'payment_date muss im Format YYYY-MM-DD sein' });
   }
+  if (!payment_method || !String(payment_method).trim()) {
+    return res.status(400).json({ error: 'Zahlungsart ist Pflichtfeld' });
+  }
 
   // booked_by automatisch aus Header (nicht aus Body)
   const bookedBy = req.headers['x-user-name'] || '';
@@ -2152,6 +2155,10 @@ app.put('/api/payments/:id', (req, res) => {
   }
   if (payment_date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(payment_date)) {
     return res.status(400).json({ error: 'payment_date muss im Format YYYY-MM-DD sein' });
+  }
+  // Wenn payment_method explizit auf leeren Wert gesetzt werden soll, ablehnen
+  if (payment_method !== undefined && !String(payment_method || '').trim()) {
+    return res.status(400).json({ error: 'Zahlungsart ist Pflichtfeld' });
   }
 
   // PAY-API-03: booked_by und created_at sind UNVERÄNDERLICH — werden hier NICHT in UPDATE-SQL aufgenommen
