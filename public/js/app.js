@@ -15558,6 +15558,17 @@ async function renderAkteDetail(id) {
             <button class="btn-bet-detail" onclick="openAnwaltAktenzeichenForm(${b.id}, ${JSON.stringify(az).replace(/"/g, '&quot;')})">${escapeHtml(azBtnLabel)}</button>
           </div>`;
         }
+        // Fallback fuer Versicherung ohne verknuepfte Stammdaten — Versicherungsnummer + Schadennummer trotzdem
+        if (b.type === 'versicherung') {
+          const vn = b.versicherungsnummer || '';
+          const sn = b.schadennummer || '';
+          const vnLabel = vn ? ('Versicherungsnr.: ' + vn) : '+ Versicherungsnummer';
+          const snLabel = sn ? ('Schadennr.: ' + sn) : '+ Schadennummer';
+          panelContent += `<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn-bet-detail" onclick="openVersicherungsnummerForm(${b.id}, ${JSON.stringify(vn).replace(/"/g, '&quot;')})">${escapeHtml(vnLabel)}</button>
+            <button class="btn-bet-detail" onclick="openSchadennummerForm(${b.id}, ${JSON.stringify(sn).replace(/"/g, '&quot;')})">${escapeHtml(snLabel)}</button>
+          </div>`;
+        }
       }
 
       betPanels += `<div class="beteiligte-panel" data-bet="${tabKey}" style="display:${isFirst ? 'block' : 'none'};">${panelContent}</div>`;
