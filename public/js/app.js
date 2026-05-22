@@ -8200,6 +8200,7 @@ async function renderCreditNotes() {
               </tr>
             </thead>
             <tbody id="credit-notes-tbody"></tbody>
+            <tfoot id="credit-notes-tfoot"></tfoot>
           </table>
         </div>
       </div>
@@ -8240,7 +8241,26 @@ function applyCreditFilters() {
   });
 
   const tbody = document.getElementById('credit-notes-tbody');
+  const tfoot = document.getElementById('credit-notes-tfoot');
   if (!tbody) return;
+
+  // Summen-Footer ueber alle aktuell sichtbaren (gefilterten) Gutschriften
+  const sumNet = filtered.reduce((s, cn) => s + (Number(cn.total_net) || 0), 0);
+  const sumGross = filtered.reduce((s, cn) => s + (Number(cn.total_gross) || 0), 0);
+  if (tfoot) {
+    if (filtered.length === 0) {
+      tfoot.innerHTML = '';
+    } else {
+      const fmt = n => Number(n).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      tfoot.innerHTML = `
+        <tr style="font-weight:600;background:var(--bg-subtle,#f9fafb);border-top:2px solid var(--border);">
+          <td colspan="4" style="text-align:right;padding:10px 12px;">Summe (${filtered.length} Gutschrift${filtered.length !== 1 ? 'en' : ''}):</td>
+          <td style="white-space:nowrap;padding:10px 12px;">${fmt(sumNet)}&nbsp;&euro;</td>
+          <td style="white-space:nowrap;padding:10px 12px;">${fmt(sumGross)}&nbsp;&euro;</td>
+          <td colspan="2"></td>
+        </tr>`;
+    }
+  }
 
   if (filtered.length === 0) {
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">Keine Gutschriften gefunden.</td></tr>`;
