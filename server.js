@@ -3414,10 +3414,13 @@ app.put('/api/rentals/:id', (req, res) => {
     mietart: b.mietart !== undefined ? (b.mietart || '') : existing.mietart,
     status: b.status !== undefined ? (b.status || 'Reservierung') : existing.status,
     notes: b.notes !== undefined ? (b.notes || '') : existing.notes,
+    versicherung: b.versicherung !== undefined ? (b.versicherung || '') : (existing.versicherung || ''),
   };
+  // Defensiv: Spalte versicherung nachziehen falls Migration noch nicht durch (unwahrscheinlich, aber sicher)
+  ensureColumn('rentals', 'versicherung', "TEXT DEFAULT ''");
   execute(
-    'UPDATE rentals SET vehicle_id=?, customer_name=?, start_date=?, end_date=?, start_time=?, end_time=?, km_start=?, km_end=?, mietart=?, status=?, notes=? WHERE id=?',
-    [merged.vehicle_id, merged.customer_name, merged.start_date, merged.end_date, merged.start_time, merged.end_time, merged.km_start, merged.km_end, merged.mietart, merged.status, merged.notes, Number(req.params.id)]
+    'UPDATE rentals SET vehicle_id=?, customer_name=?, start_date=?, end_date=?, start_time=?, end_time=?, km_start=?, km_end=?, mietart=?, status=?, notes=?, versicherung=? WHERE id=?',
+    [merged.vehicle_id, merged.customer_name, merged.start_date, merged.end_date, merged.start_time, merged.end_time, merged.km_start, merged.km_end, merged.mietart, merged.status, merged.notes, merged.versicherung, Number(req.params.id)]
   );
   res.json({ message: 'Vermietung aktualisiert' });
 });

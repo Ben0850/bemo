@@ -637,6 +637,7 @@ async function getDb() {
   try { db.run("ALTER TABLE rentals ADD COLUMN end_time TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE rentals ADD COLUMN km_start TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE rentals ADD COLUMN km_end TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE rentals ADD COLUMN versicherung TEXT DEFAULT ''"); } catch(e) {}
 
   // Overtime deductions table
   db.run(`

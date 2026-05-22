@@ -13987,6 +13987,7 @@ async function openRentalDataForm() {
             </select>
           </div>
         </div>
+        <div class="form-group"><label>Versicherung</label><input type="text" id="rd-versicherung" value="${escapeHtml(r.versicherung || '')}" placeholder="z.B. AXA, HUK-Coburg, …"></div>
         <div style="display:flex;gap:10px;margin-top:16px;">
           <button type="submit" class="btn btn-primary">Speichern</button>
           <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
@@ -14011,6 +14012,7 @@ async function saveRentalData(e) {
       km_end: document.getElementById('rd-km-end').value,
       mietart: document.getElementById('rd-mietart').value,
       status: document.getElementById('rd-status').value,
+      versicherung: document.getElementById('rd-versicherung').value.trim(),
     }});
     closeModal();
     showToast('Daten gespeichert');
@@ -14118,7 +14120,8 @@ async function renderRentalDetail(id) {
       ${cell('Uhrzeit Ende', fmt(r.end_time))}
       ${cell('km-Stand Ende', fmt(r.km_end))}
       ${cell('Mietdauer', fmt(dauer))}
-      ${cell('Mietart', fmt(r.mietart))}`;
+      ${cell('Mietart', fmt(r.mietart))}
+      ${cell('Versicherung', fmt(r.versicherung))}`;
 
     const backLinkHtml = _rentalReturnToAkteId
       ? `<a class="back-link" onclick="navigate('akte-detail', ${_rentalReturnToAkteId})">&larr; Zur\u00fcck zur Akte</a>`
