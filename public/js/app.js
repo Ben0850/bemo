@@ -15809,6 +15809,32 @@ async function renderAkteDetail(id) {
 }
 
 // === Akten-Post (Korrespondenz) ===
+// Datei-Format als kleines Symbol/Badge fuer die Post-Liste
+function postFormatBadge(filename) {
+  const ext = (String(filename).split('.').pop() || '').toLowerCase();
+  const map = {
+    pdf:   { icon: '📕', label: 'PDF',   color: '#dc2626' },
+    msg:   { icon: '✉',       label: 'Mail',  color: '#2563eb' },
+    eml:   { icon: '✉',       label: 'Mail',  color: '#2563eb' },
+    doc:   { icon: '📝', label: 'Word',  color: '#2563eb' },
+    docx:  { icon: '📝', label: 'Word',  color: '#2563eb' },
+    xls:   { icon: '📊', label: 'Excel', color: '#059669' },
+    xlsx:  { icon: '📊', label: 'Excel', color: '#059669' },
+    ppt:   { icon: '📈', label: 'PPT',   color: '#d97706' },
+    pptx:  { icon: '📈', label: 'PPT',   color: '#d97706' },
+    jpg:   { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
+    jpeg:  { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
+    png:   { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
+    gif:   { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
+    webp:  { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
+    svg:   { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
+    txt:   { icon: '📄', label: 'Text',  color: '#6b7280' },
+    zip:   { icon: '🗄', label: 'ZIP',   color: '#6b7280' }
+  };
+  const entry = map[ext] || { icon: '📎', label: ext.toUpperCase() || 'Datei', color: '#6b7280' };
+  return '<span title="' + escapeHtml(entry.label + (ext ? ' (.' + ext + ')' : '')) + '" style="display:inline-block;font-size:18px;line-height:1;color:' + entry.color + ';">' + entry.icon + '</span>';
+}
+
 async function loadPostList(akteId) {
   const listEl = document.getElementById('post-list');
   if (!listEl) return;
@@ -15819,9 +15845,9 @@ async function loadPostList(akteId) {
       listEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);"><div style="font-size:32px;margin-bottom:8px;">&#128231;</div><div style="font-size:13px;">Noch keine Post vorhanden</div></div>';
       return;
     }
-    const grid = 'display:grid;grid-template-columns:40px 80px 36px 2fr 1fr;gap:0 10px;align-items:center;padding:8px 12px;font-size:13px;';
+    const grid = 'display:grid;grid-template-columns:40px 80px 36px 2fr 50px 1fr;gap:0 10px;align-items:center;padding:8px 12px;font-size:13px;';
     let html = '<div style="' + grid + 'position:sticky;top:0;background:var(--bg);border-bottom:2px solid var(--border);z-index:1;font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:0.3px;">'
-      + '<div>Nr.</div><div>Datum</div><div style="text-align:center;" title="Richtung">↕</div><div>Beteiligter</div><div>Eingetragen von</div></div>';
+      + '<div>Nr.</div><div>Datum</div><div style="text-align:center;" title="Richtung">↕</div><div>Beteiligter</div><div style="text-align:center;">Format</div><div>Eingetragen von</div></div>';
     posts.forEach(p => {
       const b64k = btoa(unescape(encodeURIComponent(p.s3_key)));
       const b64n = btoa(unescape(encodeURIComponent(p.filename)));
@@ -15830,11 +15856,13 @@ async function loadPostList(akteId) {
         ? '<span title="Ausgehend" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:700;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;box-shadow:0 1px 3px rgba(217,119,6,0.4);letter-spacing:0;">A</span>'
         : '<span title="Eingehend" style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:11px;font-weight:700;background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:#fff;box-shadow:0 1px 3px rgba(29,78,216,0.4);letter-spacing:0;">E</span>';
       const participantDisplay = p.participant || p.sender || p.recipient || '-';
+      const formatBadge = postFormatBadge(p.filename || '');
       html += '<div class="s3-row" style="' + grid + 'cursor:pointer;border-bottom:1px solid var(--border);" onclick="postItemClick(' + p.id + ',\'' + b64k + '\',\'' + b64n + '\')" oncontextmenu="event.preventDefault();postContextMenu(event,' + p.id + ',\'' + b64k + '\',' + p.akte_id + ')">'
         + '<div style="font-weight:600;">' + p.id + '</div>'
         + '<div>' + formatDate(p.post_date) + '</div>'
         + '<div style="text-align:center;">' + dirBadge + '</div>'
         + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(participantDisplay) + '</div>'
+        + '<div style="text-align:center;">' + formatBadge + '</div>'
         + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">' + escapeHtml(p.uploader_name || '-') + '</div>'
         + '</div>';
     });
