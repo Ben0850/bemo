@@ -7187,10 +7187,10 @@ async function renderInvoiceDetail(id) {
               : `<div class="form-control-static">${escapeHtml(inv.payment_method || 'Überweisung')}</div>`}
           </div>
           <div class="form-group">
-            <label>Rechnungsart</label>
+            <label>Rechnungsart <span style="color:var(--danger);">*</span></label>
             ${canEditContent
-              ? `<select id="inv-edit-rechnungsart" onchange="saveInvoiceHeader(${id})">
-                   <option value="" ${!inv.rechnungsart?'selected':''}>—</option>
+              ? `<select id="inv-edit-rechnungsart" required onchange="saveInvoiceHeader(${id})" style="${!inv.rechnungsart ? 'border-color:var(--danger);' : ''}">
+                   <option value="" ${!inv.rechnungsart?'selected':''}>— bitte wählen —</option>
                    ${ ['Unfallersatz','Langzeitmiete','Sonstiges'].map(a =>
                        `<option value="${a}" ${inv.rechnungsart===a?'selected':''}>${a}</option>`
                      ).join('') }
@@ -7853,12 +7853,19 @@ async function saveInvoiceHeader(invoiceId) {
   if (!canEditInvoice()) { showToast('Keine Berechtigung', 'error'); return; }
   const serviceDate = document.getElementById('inv-edit-service-date')?.value || '';
   if (!serviceDate) { showToast('Leistungsdatum ist Pflichtfeld', 'error'); return; }
+  const rechnungsartEl = document.getElementById('inv-edit-rechnungsart');
+  const rechnungsart = rechnungsartEl ? rechnungsartEl.value : '';
+  if (rechnungsartEl && !rechnungsart) {
+    showToast('Rechnungsart ist Pflichtfeld', 'error');
+    rechnungsartEl.focus();
+    return;
+  }
   const data = {
     status: document.getElementById('inv-edit-status').value,
     service_date: serviceDate,
     payment_method: document.getElementById('inv-edit-payment-method').value,
     notes: document.getElementById('inv-edit-notes').value.trim(),
-    rechnungsart: (document.getElementById('inv-edit-rechnungsart')?.value || ''),
+    rechnungsart: rechnungsart,
   };
   try {
     await api(`/api/invoices/${invoiceId}`, { method: 'PUT', body: data });

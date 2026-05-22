@@ -1888,6 +1888,11 @@ app.put('/api/invoices/:id', (req, res) => {
   const coreSet = isSet(due_date) || isSet(status) || isSet(service_date) || isSet(payment_method) || isSet(notes) || isSet(rechnungsart);
   const extrasSet = isSet(abgerechnete_fahrzeuggruppe) || isSet(kundenfahrzeuggruppe) || isSet(rental_id);
 
+  // Pflichtfeld-Check: Wenn rechnungsart explizit auf einen leeren Wert gesetzt werden soll, ablehnen.
+  if (isSet(rechnungsart) && !String(rechnungsart || '').trim()) {
+    return res.status(400).json({ error: 'Rechnungsart ist Pflichtfeld' });
+  }
+
   // Vermittler-only Update
   if (isSet(vermittler_id) && !coreSet && !isSet(intro_text) && !extrasSet) {
     execute('UPDATE invoices SET vermittler_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?', [vermittler_id || null, id]);
