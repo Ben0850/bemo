@@ -3914,9 +3914,26 @@ app.get('/api/files/list', async (req, res) => {
 // Get download URL (pre-signed, 1h valid)
 app.get('/api/files/download', async (req, res) => {
   try {
-    const { key } = req.query;
+    const { key, disposition, filename } = req.query;
     if (!key) return res.status(400).json({ error: 'key ist Pflichtfeld' });
-    const url = await getSignedUrl(getS3Client(), new GetObjectCommand({ Bucket: getS3Bucket(), Key: key }), { expiresIn: 3600 });
+    // disposition=inline + ResponseContentType erzwingen, damit Browser die Datei im
+    // Tab anzeigt statt herunterzuladen (sofern das Format inline-faehig ist, z.B. PDF/Bild).
+    const params = { Bucket: getS3Bucket(), Key: key };
+    if (disposition === 'inline') {
+      const baseName = String(filename || key.split('/').pop() || 'datei').replace(/"/g, '');
+      params.ResponseContentDisposition = 'inline; filename="' + baseName + '"';
+      const ext = (baseName.split('.').pop() || '').toLowerCase();
+      const ctMap = {
+        pdf: 'application/pdf',
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+        txt: 'text/plain; charset=utf-8',
+        html: 'text/html', htm: 'text/html',
+        xml: 'application/xml', json: 'application/json',
+        msg: 'application/vnd.ms-outlook', eml: 'message/rfc822'
+      };
+      if (ctMap[ext]) params.ResponseContentType = ctMap[ext];
+    }
+    const url = await getSignedUrl(getS3Client(), new GetObjectCommand(params), { expiresIn: 3600 });
     res.json({ url });
   } catch (err) {
     console.error('S3 Download Error:', err.message);

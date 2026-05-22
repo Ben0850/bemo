@@ -15938,17 +15938,25 @@ function postItemClick(postId, b64Key, b64Name) {
   }
 }
 
-// Mail-Anhang oeffnen: in Electron mit nativer App, im Browser in neuem Tab.
+// Mail-Anhang oeffnen: in Electron mit nativer App, im Browser im neuen Tab (inline-Anzeige).
 async function openMailAttachment(b64S3Key, filename) {
   let s3Key;
   try { s3Key = decodeURIComponent(escape(atob(b64S3Key))); } catch (e) { showToast('Ungueltiger Anhang-Pfad', 'error'); return; }
+  const isElectron = window.electronAPI && typeof window.electronAPI.openFileNative === 'function';
   try {
-    const r = await api('/api/files/download?key=' + encodeURIComponent(s3Key));
-    if (!r || !r.url) throw new Error('Kein Download-Link');
-    if (window.electronAPI && typeof window.electronAPI.openFileNative === 'function') {
+    if (isElectron) {
+      // Desktop-App: native Datei-Behandlung (Standard-URL, kein inline)
+      const r = await api('/api/files/download?key=' + encodeURIComponent(s3Key));
+      if (!r || !r.url) throw new Error('Kein Download-Link');
       await window.electronAPI.openFileNative(r.url, s3Key, filename);
     } else {
-      window.open(r.url, '_blank');
+      // Browser: inline-disposition erzwingen, damit Datei im Tab angezeigt statt geladen wird.
+      // PDFs, Bilder, Text, HTML werden inline gerendert. Andere Formate (docx, xlsx) muss
+      // der Browser zwangslaeufig downloaden — da fehlt ihm der Renderer.
+      const r = await api('/api/files/download?key=' + encodeURIComponent(s3Key)
+        + '&disposition=inline&filename=' + encodeURIComponent(filename || ''));
+      if (!r || !r.url) throw new Error('Kein Download-Link');
+      window.open(r.url, '_blank', 'noopener');
     }
   } catch (err) {
     showToast('Anhang konnte nicht geoeffnet werden: ' + (err.message || err), 'error');
