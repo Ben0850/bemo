@@ -15891,6 +15891,13 @@ function postItemClick(postId, b64Key, b64Name) {
   document.querySelectorAll('#post-list .s3-row').forEach(r => r.style.background = '');
   event.currentTarget.style.background = 'var(--primary-light)';
 
+  // Panel-Layout zuruecksetzen — verhindert dass eine vorherige Email-Vorschau
+  // (display:block) das Zentrieren der Bild-/PDF-Vorschau bricht.
+  panel.style.display = 'flex';
+  panel.style.alignItems = 'center';
+  panel.style.justifyContent = 'center';
+  panel.style.padding = '16px';
+
   if (['jpg','jpeg','png','gif','webp','svg'].includes(ext)) {
     panel.style.padding = '8px';
     api('/api/files/download?key=' + encodeURIComponent(key)).then(r => { panel.innerHTML = '<img src="' + r.url + '" style="max-width:100%;max-height:100%;object-fit:contain;display:block;margin:auto;">'; });
@@ -15901,22 +15908,89 @@ function postItemClick(postId, b64Key, b64Name) {
     panel.style.padding = '0';
     panel.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:16px;font-size:13px;">Laden...</div>';
     renderOfficePreview(key, ext, panel);
-  } else if (ext === 'msg') {
-    panel.style.padding = '16px';
-    api('/api/files/msg-preview?key=' + encodeURIComponent(key)).then(msg => {
-      const fmtDate = msg.date ? formatDateTime(msg.date) : '';
-      panel.innerHTML = '<div style="width:100%;text-align:left;overflow:auto;">'
-        + '<div style="display:grid;grid-template-columns:80px 1fr;gap:6px 12px;font-size:13px;margin-bottom:12px;">'
-        + '<div style="color:var(--text-muted);font-weight:600;">Betreff</div><div style="font-weight:600;">' + escapeHtml(msg.subject || '') + '</div>'
-        + '<div style="color:var(--text-muted);font-weight:600;">Von</div><div>' + escapeHtml(msg.from || '') + '</div>'
-        + '<div style="color:var(--text-muted);font-weight:600;">An</div><div>' + escapeHtml(msg.to || '') + '</div>'
-        + (fmtDate ? '<div style="color:var(--text-muted);font-weight:600;">Datum</div><div>' + escapeHtml(fmtDate) + '</div>' : '')
-        + '</div><div style="background:var(--bg);border-radius:6px;padding:12px;font-size:13px;white-space:pre-wrap;word-break:break-word;">' + escapeHtml(msg.body || '') + '</div></div>';
-    }).catch(() => { panel.innerHTML = '<div style="color:var(--text-muted);text-align:center;">Vorschau nicht möglich</div>'; });
+  } else if (ext === 'msg' || ext === 'eml') {
+    renderEmailPreview(panel, key, ext);
   } else {
     panel.style.padding = '16px';
     panel.innerHTML = '<div style="text-align:center;color:var(--text-muted);"><div style="font-size:48px;margin-bottom:12px;">&#128196;</div><div style="font-size:13px;">' + escapeHtml(name) + '</div><div style="font-size:12px;margin-top:4px;">Keine Vorschau verfügbar</div></div>';
   }
+}
+
+// Einheitliche Email-Vorschau fuer .msg und .eml.
+// - Header (Betreff/Von/An/CC/Datum/Anhaenge) oben fix sichtbar
+// - Body in einem Sandboxed-iframe (srcdoc), damit Mail-HTML/CSS NICHT die App kaputt macht
+// - iframe-Hoehe nimmt verbleibenden Platz, eigener Scrollbalken
+// - Anhaenge werden als Text-Liste angezeigt (kein Oeffnen)
+function renderEmailPreview(panel, key, ext) {
+  // Center-Layout vom Placeholder zuruecksetzen, sonst werden lange Mails oben/unten abgeschnitten
+  panel.style.padding = '0';
+  panel.style.display = 'block';
+  panel.style.alignItems = '';
+  panel.style.justifyContent = '';
+  panel.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:13px;">Vorschau wird geladen…</div>';
+
+  const endpoint = ext === 'eml' ? 'eml-preview' : 'msg-preview';
+  api('/api/files/' + endpoint + '?key=' + encodeURIComponent(key))
+    .then(msg => {
+      const fmtDate = msg.date ? formatDateTime(msg.date) : '';
+      const fmtBytes = (n) => {
+        const num = Number(n) || 0;
+        if (num <= 0) return '';
+        if (num < 1024) return num + ' B';
+        if (num < 1024 * 1024) return (num / 1024).toFixed(1) + ' KB';
+        return (num / 1024 / 1024).toFixed(1) + ' MB';
+      };
+      const metaRow = (label, val) => val
+        ? '<div style="display:contents;"><div style="color:var(--text-muted);font-weight:600;white-space:nowrap;">' + label + '</div><div style="word-break:break-word;">' + escapeHtml(val) + '</div></div>'
+        : '';
+      const attBlock = (msg.attachments && msg.attachments.length)
+        ? '<div style="margin-top:8px;padding:8px 10px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;">'
+          + '<div style="font-weight:600;margin-bottom:4px;color:#92400e;">&#128206; '
+          + msg.attachments.length + ' Anhang' + (msg.attachments.length !== 1 ? 'e' : '')
+          + '</div>'
+          + '<ul style="margin:0;padding-left:18px;color:#78350f;">'
+          + msg.attachments.map(a => '<li>' + escapeHtml(a.name || 'Anhang')
+              + (a.size ? ' <span style="color:var(--text-muted);">(' + fmtBytes(a.size) + ')</span>' : '')
+              + '</li>').join('')
+          + '</ul></div>'
+        : '';
+
+      // Body: HTML bevorzugt, Plaintext als Fallback. HTML wird in sandboxed iframe gerendert,
+      // damit Mail-Styles nicht die App-Layout beeintraechtigen.
+      const hasHtml = msg.bodyHtml && String(msg.bodyHtml).trim();
+      let bodyHtml;
+      if (hasHtml) {
+        const safeHtml = String(msg.bodyHtml)
+          // Externe Verfolgungs-Bilder/Skripte minimal absichern: blockiere on-Attribute via sandbox
+          // (sandbox ist die eigentliche Absicherung; hier nur eine kosmetische Saeuberung).
+          .replace(/<script[\s\S]*?<\/script>/gi, '');
+        bodyHtml = '<iframe sandbox="allow-same-origin" srcdoc="' + safeHtml.replace(/"/g, '&quot;') + '" style="flex:1;width:100%;border:none;background:#fff;"></iframe>';
+      } else {
+        bodyHtml = '<div style="flex:1;overflow:auto;background:#fff;padding:12px 14px;font-size:13px;white-space:pre-wrap;word-break:break-word;line-height:1.5;font-family:Consolas,Monaco,monospace;">'
+          + escapeHtml(msg.body || '(kein Text)')
+          + '</div>';
+      }
+
+      panel.innerHTML = ''
+        + '<div style="display:flex;flex-direction:column;height:100%;width:100%;background:#fff;">'
+          + '<div style="padding:12px 14px;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0;max-height:40%;overflow-y:auto;">'
+            + '<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;">'
+              + metaRow('Betreff', msg.subject || '(ohne Betreff)')
+              + metaRow('Von', msg.from)
+              + metaRow('An', msg.to)
+              + metaRow('CC', msg.cc)
+              + metaRow('Datum', fmtDate)
+            + '</div>'
+            + attBlock
+          + '</div>'
+          + bodyHtml
+        + '</div>';
+    })
+    .catch(err => {
+      panel.innerHTML = '<div style="padding:24px;color:var(--danger);text-align:center;font-size:13px;">'
+        + 'Vorschau fehlgeschlagen: ' + escapeHtml((err && err.message) || 'unbekannter Fehler')
+        + '</div>';
+    });
 }
 
 const POST_ALLOWED_EXT = ['pdf', 'msg', 'eml'];

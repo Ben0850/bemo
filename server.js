@@ -4182,11 +4182,50 @@ app.get('/api/files/msg-preview', async (req, res) => {
       to: msg.recipients ? msg.recipients.map(r => r.name + (r.email ? ' <' + r.email + '>' : '')).join(', ') : '',
       date: msg.messageDeliveryTime || msg.clientSubmitTime || '',
       body: msg.body || '',
+      bodyHtml: msg.bodyHtml || msg.compressedRtf ? (msg.bodyHtml || '') : '',
       attachments: msg.attachments ? msg.attachments.map(a => ({ name: a.fileName || a.name || 'Anhang', size: a.contentLength || 0 })) : []
     });
   } catch (err) {
     console.error('MSG Parse Error:', err.message);
     res.status(500).json({ error: 'MSG-Vorschau fehlgeschlagen: ' + err.message });
+  }
+});
+
+// EML preview (RFC 822 / MIME format) via mailparser
+app.get('/api/files/eml-preview', async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) return res.status(400).json({ error: 'key ist Pflichtfeld' });
+    const { simpleParser } = require('mailparser');
+    const response = await getS3Client().send(new GetObjectCommand({ Bucket: getS3Bucket(), Key: key }));
+    const chunks = [];
+    for await (const chunk of response.Body) { chunks.push(chunk); }
+    const buffer = Buffer.concat(chunks);
+    const mail = await simpleParser(buffer);
+    const formatAddr = (addr) => {
+      if (!addr) return '';
+      if (addr.value && Array.isArray(addr.value)) {
+        return addr.value.map(a => (a.name ? a.name + ' <' + a.address + '>' : a.address)).join(', ');
+      }
+      return addr.text || '';
+    };
+    res.json({
+      subject: mail.subject || '',
+      from: formatAddr(mail.from),
+      to: formatAddr(mail.to),
+      cc: formatAddr(mail.cc),
+      date: mail.date ? mail.date.toISOString() : '',
+      body: mail.text || '',
+      bodyHtml: mail.html || '',
+      attachments: (mail.attachments || []).map(a => ({
+        name: a.filename || 'Anhang',
+        size: a.size || (a.content ? a.content.length : 0),
+        contentType: a.contentType || ''
+      }))
+    });
+  } catch (err) {
+    console.error('EML Parse Error:', err.message);
+    res.status(500).json({ error: 'EML-Vorschau fehlgeschlagen: ' + err.message });
   }
 });
 
