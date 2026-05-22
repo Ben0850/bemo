@@ -869,6 +869,8 @@ async function getDb() {
   try { db.run("ALTER TABLE akten_beteiligte ADD COLUMN art TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE akten_beteiligte ADD COLUMN sort_order INTEGER DEFAULT 0"); } catch(e) {}
   try { db.run("ALTER TABLE akten_beteiligte ADD COLUMN aktenzeichen TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE akten_beteiligte ADD COLUMN versicherungsnummer TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE akten_beteiligte ADD COLUMN schadennummer TEXT DEFAULT ''"); } catch(e) {}
 
   // Fleet vehicle damages
   db.run(`

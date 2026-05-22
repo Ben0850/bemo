@@ -15507,13 +15507,21 @@ async function renderAkteDetail(id) {
         <button class="btn-bet-detail" onclick="showBeteiligterDetail('vermittler', ${b.entity_id})">Details anzeigen</button>`;
       } else if (b.type === 'versicherung' && b.entity) {
         const ins = b.entity;
+        const vn = b.versicherungsnummer || '';
+        const sn = b.schadennummer || '';
+        const vnLabel = vn ? ('Versicherungsnr.: ' + vn) : '+ Versicherungsnummer';
+        const snLabel = sn ? ('Schadennr.: ' + sn) : '+ Schadennummer';
         panelContent = `<div class="bet-contact-grid">
           ${cell('Name', fmt(ins.name))}
           ${cell('Telefon', fmtPhone(ins.telefon1 || ins.telefon || ins.phone))}
           ${cell('E-Mail', fmtMail(ins.email))}
           ${cell('Ansprechpartner', fmt(ins.ansprechpartner || ins.contact_person))}
         </div>
-        <button class="btn-bet-detail" onclick="showBeteiligterDetail('versicherung', ${b.entity_id})">Details anzeigen</button>`;
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-bet-detail" onclick="showBeteiligterDetail('versicherung', ${b.entity_id})">Details anzeigen</button>
+          <button class="btn-bet-detail" onclick="openVersicherungsnummerForm(${b.id}, ${JSON.stringify(vn).replace(/"/g, '&quot;')})">${escapeHtml(vnLabel)}</button>
+          <button class="btn-bet-detail" onclick="openSchadennummerForm(${b.id}, ${JSON.stringify(sn).replace(/"/g, '&quot;')})">${escapeHtml(snLabel)}</button>
+        </div>`;
       } else if (b.type === 'anwalt' && b.entity) {
         const l = b.entity;
         const az = b.aktenzeichen || '';
@@ -16914,6 +16922,76 @@ async function saveAnwaltAktenzeichen(e, betId) {
     if (typeof switchBeteiligteTab === 'function') {
       switchBeteiligteTab('bet_' + betId);
     }
+  } catch (err) {
+    showToast('Fehler: ' + (err.message || err), 'error');
+  }
+}
+
+// Versicherungsnummer der Versicherung in dieser Akte pflegen (NICHT in den Stammdaten)
+function openVersicherungsnummerForm(betId, currentValue) {
+  const cur = currentValue || '';
+  openModal('Versicherungsnummer', `
+    <form onsubmit="saveVersicherungsnummer(event, ${betId})">
+      <div class="form-group">
+        <label>Versicherungsnummer <small style="color:var(--text-muted);font-weight:normal;">(akten-bezogen)</small></label>
+        <input type="text" id="ins-vn-input" value="${escapeHtml(cur)}" placeholder="z.B. ABC-123456" autofocus>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">Speichern</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `);
+}
+
+async function saveVersicherungsnummer(e, betId) {
+  e.preventDefault();
+  if (!currentAkteId) return;
+  const versicherungsnummer = document.getElementById('ins-vn-input').value.trim();
+  try {
+    await api(`/api/akten/${currentAkteId}/beteiligte/${betId}/versicherungsnummer`, {
+      method: 'PUT',
+      body: { versicherungsnummer }
+    });
+    showToast('Versicherungsnummer gespeichert');
+    closeModal();
+    await renderAkteDetail(currentAkteId);
+    if (typeof switchBeteiligteTab === 'function') switchBeteiligteTab('bet_' + betId);
+  } catch (err) {
+    showToast('Fehler: ' + (err.message || err), 'error');
+  }
+}
+
+// Schadennummer der Versicherung in dieser Akte pflegen
+function openSchadennummerForm(betId, currentValue) {
+  const cur = currentValue || '';
+  openModal('Schadennummer', `
+    <form onsubmit="saveSchadennummer(event, ${betId})">
+      <div class="form-group">
+        <label>Schadennummer <small style="color:var(--text-muted);font-weight:normal;">(akten-bezogen)</small></label>
+        <input type="text" id="ins-sn-input" value="${escapeHtml(cur)}" placeholder="z.B. SCH-2026-0042" autofocus>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">Speichern</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `);
+}
+
+async function saveSchadennummer(e, betId) {
+  e.preventDefault();
+  if (!currentAkteId) return;
+  const schadennummer = document.getElementById('ins-sn-input').value.trim();
+  try {
+    await api(`/api/akten/${currentAkteId}/beteiligte/${betId}/schadennummer`, {
+      method: 'PUT',
+      body: { schadennummer }
+    });
+    showToast('Schadennummer gespeichert');
+    closeModal();
+    await renderAkteDetail(currentAkteId);
+    if (typeof switchBeteiligteTab === 'function') switchBeteiligteTab('bet_' + betId);
   } catch (err) {
     showToast('Fehler: ' + (err.message || err), 'error');
   }

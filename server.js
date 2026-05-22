@@ -4622,6 +4622,34 @@ app.put('/api/akten/:id/beteiligte/:betId/aktenzeichen', (req, res) => {
   res.json({ success: true });
 });
 
+// Versicherungsnummer / Schadennummer eines Versicherung-Beteiligten setzen — akten-bezogen,
+// NICHT in den Stammdaten gespeichert. Fuer alle Benutzergruppen offen.
+app.put('/api/akten/:id/beteiligte/:betId/versicherungsnummer', (req, res) => {
+  const akteId = Number(req.params.id);
+  const betId = Number(req.params.betId);
+  const { versicherungsnummer } = req.body || {};
+  const existing = queryOne('SELECT id FROM akten_beteiligte WHERE id = ? AND akte_id = ?', [betId, akteId]);
+  if (!existing) return res.status(404).json({ error: 'Beteiligter nicht gefunden' });
+  execute(
+    'UPDATE akten_beteiligte SET versicherungsnummer = ? WHERE id = ? AND akte_id = ?',
+    [String(versicherungsnummer || '').trim(), betId, akteId]
+  );
+  res.json({ success: true });
+});
+
+app.put('/api/akten/:id/beteiligte/:betId/schadennummer', (req, res) => {
+  const akteId = Number(req.params.id);
+  const betId = Number(req.params.betId);
+  const { schadennummer } = req.body || {};
+  const existing = queryOne('SELECT id FROM akten_beteiligte WHERE id = ? AND akte_id = ?', [betId, akteId]);
+  if (!existing) return res.status(404).json({ error: 'Beteiligter nicht gefunden' });
+  execute(
+    'UPDATE akten_beteiligte SET schadennummer = ? WHERE id = ? AND akte_id = ?',
+    [String(schadennummer || '').trim(), betId, akteId]
+  );
+  res.json({ success: true });
+});
+
 app.delete('/api/akten/:id/beteiligte/:betId', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
