@@ -15834,9 +15834,9 @@ async function loadPostList(akteId) {
       listEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);"><div style="font-size:32px;margin-bottom:8px;">&#128231;</div><div style="font-size:13px;">Noch keine Post vorhanden</div></div>';
       return;
     }
-    const grid = 'display:grid;grid-template-columns:40px 80px 36px 2fr 50px 1fr;gap:0 10px;align-items:center;padding:8px 12px;font-size:13px;';
+    const grid = 'display:grid;grid-template-columns:40px 80px 36px 2fr 50px 36px 1fr;gap:0 10px;align-items:center;padding:8px 12px;font-size:13px;';
     let html = '<div style="' + grid + 'position:sticky;top:0;background:var(--bg);border-bottom:2px solid var(--border);z-index:1;font-size:12px;font-weight:600;color:var(--text-muted);letter-spacing:0.3px;">'
-      + '<div>Nr.</div><div>Datum</div><div style="text-align:center;" title="Richtung">↕</div><div>Beteiligter</div><div style="text-align:center;">Format</div><div>Eingetragen von</div></div>';
+      + '<div>Nr.</div><div>Datum</div><div style="text-align:center;" title="Richtung">↕</div><div>Beteiligter</div><div style="text-align:center;">Format</div><div style="text-align:center;" title="Anhang">&#128206;</div><div>Eingetragen von</div></div>';
     posts.forEach(p => {
       const b64k = btoa(unescape(encodeURIComponent(p.s3_key)));
       const b64n = btoa(unescape(encodeURIComponent(p.filename)));
@@ -15848,17 +15848,15 @@ async function loadPostList(akteId) {
       const formatBadge = postFormatBadge(p.filename || '');
       const attCount = Number(p.attachment_count) || 0;
       const attIcon = attCount > 0
-        ? '<span title="' + attCount + ' Anhang' + (attCount !== 1 ? 'e' : '') + '" style="flex-shrink:0;color:#6b7280;font-size:14px;line-height:1;">📎</span>'
+        ? '<span title="' + attCount + ' Anhang' + (attCount !== 1 ? 'e' : '') + '" style="color:#6b7280;font-size:14px;line-height:1;">📎</span>'
         : '';
       html += '<div class="s3-row" style="' + grid + 'cursor:pointer;border-bottom:1px solid var(--border);" onclick="postItemClick(' + p.id + ',\'' + b64k + '\',\'' + b64n + '\')" oncontextmenu="event.preventDefault();postContextMenu(event,' + p.id + ',\'' + b64k + '\',' + p.akte_id + ')">'
         + '<div style="font-weight:600;">' + p.id + '</div>'
         + '<div>' + formatDate(p.post_date) + '</div>'
         + '<div style="text-align:center;">' + dirBadge + '</div>'
-        + '<div style="display:flex;align-items:center;gap:6px;min-width:0;">'
-          + attIcon
-          + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">' + escapeHtml(participantDisplay) + '</span>'
-        + '</div>'
+        + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(participantDisplay) + '</div>'
         + '<div style="text-align:center;">' + formatBadge + '</div>'
+        + '<div style="text-align:center;">' + attIcon + '</div>'
         + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">' + escapeHtml(p.uploader_name || '-') + '</div>'
         + '</div>';
     });
