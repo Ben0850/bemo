@@ -15433,6 +15433,7 @@ async function renderAkteDetail(id) {
         const l = b.entity;
         const az = b.aktenzeichen || '';
         const azBtnLabel = az ? ('Aktenzeichen: ' + az) : '+ Aktenzeichen';
+        // Aktenzeichen-Button ist fuer ALLE eingeloggten Benutzer (inkl. "Benutzer") bearbeitbar
         panelContent = `<div class="bet-contact-grid">
           ${cell('Name', fmt(l.name))}
           ${cell('Kanzlei', fmt(l.kanzlei))}
@@ -15441,7 +15442,7 @@ async function renderAkteDetail(id) {
         </div>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn-bet-detail" onclick="showBeteiligterDetail('anwalt', ${b.entity_id})">Details anzeigen</button>
-          ${canEdit ? `<button class="btn-bet-detail" onclick="openAnwaltAktenzeichenForm(${b.id}, ${JSON.stringify(az).replace(/"/g, '&quot;')})">${escapeHtml(azBtnLabel)}</button>` : (az ? `<span style="font-size:13px;color:var(--text-muted);align-self:center;">Aktenzeichen: ${escapeHtml(az)}</span>` : '')}
+          <button class="btn-bet-detail" onclick="openAnwaltAktenzeichenForm(${b.id}, ${JSON.stringify(az).replace(/"/g, '&quot;')})">${escapeHtml(azBtnLabel)}</button>
         </div>`;
       } else if (b.type === 'sonstige') {
         panelContent = `<div class="bet-contact-grid">
@@ -15453,6 +15454,14 @@ async function renderAkteDetail(id) {
         </div>`;
       } else {
         panelContent = `<div class="bet-contact-grid">${cell('Name', fmt(b.name || 'Unbekannt'))}</div>`;
+        // Fallback fuer Anwalt ohne verknuepfte Stammdaten — Aktenzeichen-Button trotzdem anbieten
+        if (b.type === 'anwalt') {
+          const az = b.aktenzeichen || '';
+          const azBtnLabel = az ? ('Aktenzeichen: ' + az) : '+ Aktenzeichen';
+          panelContent += `<div style="margin-top:10px;">
+            <button class="btn-bet-detail" onclick="openAnwaltAktenzeichenForm(${b.id}, ${JSON.stringify(az).replace(/"/g, '&quot;')})">${escapeHtml(azBtnLabel)}</button>
+          </div>`;
+        }
       }
 
       betPanels += `<div class="beteiligte-panel" data-bet="${tabKey}" style="display:${isFirst ? 'block' : 'none'};">${panelContent}</div>`;

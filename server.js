@@ -4488,12 +4488,9 @@ app.post('/api/akten/:id/beteiligte', (req, res) => {
 });
 
 // Aktenzeichen eines Beteiligten setzen/aktualisieren (z.B. Anwalts-Aktenzeichen
-// fuer diese spezifische Akte — wird NICHT in den Stammdaten gespeichert)
+// fuer diese spezifische Akte — wird NICHT in den Stammdaten gespeichert).
+// Bewusst fuer ALLE eingeloggten Benutzergruppen freigeben (auch "Benutzer").
 app.put('/api/akten/:id/beteiligte/:betId/aktenzeichen', (req, res) => {
-  const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
-    return res.status(403).json({ error: 'Keine Berechtigung' });
-  }
   const akteId = Number(req.params.id);
   const betId = Number(req.params.betId);
   const { aktenzeichen } = req.body || {};
