@@ -4320,6 +4320,7 @@ app.get('/api/akten', (req, res) => {
       (SELECT GROUP_CONCAT(aktenzeichen, ',') FROM akten_beteiligte WHERE akte_id = a.id AND type = 'anwalt' AND aktenzeichen != '') as anwalt_aktenzeichen,
       (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type = 'versicherung' ORDER BY sort_order ASC LIMIT 1) as bet_versicherung,
       (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type IN ('vermittler','werkstatt') ORDER BY sort_order ASC LIMIT 1) as bet_vermittler,
+      (SELECT entity_id FROM akten_beteiligte WHERE akte_id = a.id AND type IN ('vermittler','werkstatt') ORDER BY sort_order ASC LIMIT 1) as bet_vermittler_entity_id,
       fv.license_plate as rental_license_plate,
       fv.manufacturer as rental_manufacturer,
       fv.model as rental_model,

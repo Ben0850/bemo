@@ -14828,7 +14828,14 @@ function renderAktenTable() {
     if (fAnwalt && !(a.bet_anwalt || a.anwalt || '').toLowerCase().includes(fAnwalt)) return false;
     if (fAnwaltAz && !(a.anwalt_aktenzeichen || '').toLowerCase().includes(fAnwaltAz)) return false;
     if (fVersicherung && !(a.bet_versicherung || (a.versicherung_id ? (_aktenInsuranceMap[a.versicherung_id] || '') : '')).toLowerCase().includes(fVersicherung)) return false;
-    if (fVermittler && !(a.bet_vermittler || (a.vermittler_id ? (_aktenVermittlerMap[a.vermittler_id] || '') : (a.vermittler || ''))).toLowerCase().includes(fVermittler)) return false;
+    if (fVermittler) {
+      const vermittlerSearchPool = [
+        a.bet_vermittler || '',
+        (a.bet_vermittler_entity_id && _aktenVermittlerMap[a.bet_vermittler_entity_id]) || '',
+        a.vermittler_id ? (_aktenVermittlerMap[a.vermittler_id] || '') : (a.vermittler || '')
+      ].join(' ').toLowerCase();
+      if (!vermittlerSearchPool.includes(fVermittler)) return false;
+    }
     if (fRechnungsnr && !(a.invoice_numbers || '').toLowerCase().includes(fRechnungsnr)) return false;
     if (fStatus && a.status !== fStatus) return false;
     if (fDateFrom || fDateTo) {
@@ -14889,7 +14896,11 @@ function renderAktenTable() {
             const kunde = kundeRaw.replace(/\s-\s\d{4,5}\s+.+$/, '');
             const anwalt = a.bet_anwalt || a.anwalt || '';
             const versicherung = a.bet_versicherung || (a.versicherung_id ? (_aktenInsuranceMap[a.versicherung_id] || '') : '');
-            const vermittler = a.bet_vermittler || (a.vermittler_id ? (_aktenVermittlerMap[a.vermittler_id] || '') : (a.vermittler || ''));
+            // Stammdaten-Firmenname hat Vorrang vor dem in akten_beteiligte gespeicherten Label
+            // (das war historisch teilweise der Ansprechpartner statt der Firmenname).
+            const vermittler = (a.bet_vermittler_entity_id && _aktenVermittlerMap[a.bet_vermittler_entity_id])
+              || a.bet_vermittler
+              || (a.vermittler_id ? (_aktenVermittlerMap[a.vermittler_id] || '') : (a.vermittler || ''));
             const fahrzeug = a.rental_license_plate
               ? [a.rental_license_plate, a.rental_manufacturer, a.rental_model].filter(Boolean).join(' ')
               : '';
@@ -15234,8 +15245,9 @@ async function doBetSearch() {
     } else if (type === 'vermittler' || type === 'werkstatt') {
       const list = await api('/api/vermittler');
       const lc = term.toLowerCase();
+      // Firmenname (v.name) ist primaer; Ansprechpartner + Ort als sub-Text fuer Suche/Anzeige
       items = list.filter(v => (v.name || '').toLowerCase().includes(lc) || (v.ansprechpartner || '').toLowerCase().includes(lc) || (v.ort || '').toLowerCase().includes(lc))
-        .slice(0, 15).map(v => ({ id: v.id, label: v.ansprechpartner || v.name || '', sub: v.ort || '' }));
+        .slice(0, 15).map(v => ({ id: v.id, label: v.name || v.ansprechpartner || '', sub: [v.ansprechpartner, v.ort].filter(Boolean).join(' · ') }));
     } else if (type === 'versicherung') {
       const list = await api('/api/insurances');
       const lc = term.toLowerCase();
@@ -15373,7 +15385,8 @@ async function renderAkteDetail(id) {
         const c = b.entity;
         tabName = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? c.company_name : `${c.first_name || ''} ${c.last_name || ''}`;
       } else if ((b.type === 'vermittler' || b.type === 'werkstatt') && b.entity) {
-        tabName = b.entity.ansprechpartner || b.entity.name || b.name;
+        // Firmenname (b.entity.name) zuerst, NICHT der Ansprechpartner
+        tabName = b.entity.name || b.entity.ansprechpartner || b.name;
       } else if (b.type === 'versicherung' && b.entity) {
         tabName = b.entity.name || b.name;
       } else if (b.type === 'anwalt' && b.entity) {
@@ -15405,7 +15418,8 @@ async function renderAkteDetail(id) {
       } else if (b.type === 'vermittler' && b.entity) {
         const v = b.entity;
         panelContent = `<div class="bet-contact-grid">
-          ${cell('Name', fmt(v.ansprechpartner || v.name))}
+          ${cell('Name', fmt(v.name))}
+          ${cell('Ansprechpartner', fmt(v.ansprechpartner))}
           ${cell('Telefon', fmtPhone(v.telefon))}
           ${cell('E-Mail', fmtMail(v.email))}
           ${cell('Ort', fmt(v.ort))}
@@ -15414,7 +15428,8 @@ async function renderAkteDetail(id) {
       } else if (b.type === 'werkstatt' && b.entity) {
         const w = b.entity;
         panelContent = `<div class="bet-contact-grid">
-          ${cell('Name', fmt(w.ansprechpartner || w.name))}
+          ${cell('Name', fmt(w.name))}
+          ${cell('Ansprechpartner', fmt(w.ansprechpartner))}
           ${cell('Telefon', fmtPhone(w.telefon))}
           ${cell('E-Mail', fmtMail(w.email))}
           ${cell('Ort', fmt(w.ort))}
