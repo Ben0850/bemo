@@ -6634,6 +6634,7 @@ async function renderInvoices() {
                 <th>Datum</th>
                 <th>Kundenname</th>
                 <th>Zahlart</th>
+                <th>Rechnungsart</th>
                 <th>Netto</th>
                 <th>Brutto</th>
                 <th>Status</th>
@@ -6645,6 +6646,14 @@ async function renderInvoices() {
                 <td><input type="text" id="inv-filter-date"     placeholder="z.B. 03.2026" value="${defaultDateFilter}" oninput="applyInvoiceFilters()" class="filter-input"></td>
                 <td><input type="text" id="inv-filter-customer" placeholder="Suchen..." oninput="applyInvoiceFilters()" class="filter-input"></td>
                 <td><input type="text" id="inv-filter-zahlart"  placeholder="Suchen..." oninput="applyInvoiceFilters()" class="filter-input"></td>
+                <td>
+                  <select id="inv-filter-rechnungsart" onchange="applyInvoiceFilters()" class="filter-input">
+                    <option value="">Alle</option>
+                    <option value="Unfallersatz">Unfallersatz</option>
+                    <option value="Langzeitmiete">Langzeitmiete</option>
+                    <option value="Sonstiges">Sonstiges</option>
+                  </select>
+                </td>
                 <td></td>
                 <td></td>
                 <td>
@@ -6682,6 +6691,7 @@ function applyInvoiceFilters() {
   const dateStr       = (document.getElementById('inv-filter-date')?.value          || '').trim();
   const customer      = (document.getElementById('inv-filter-customer')?.value      || '').trim().toLowerCase();
   const zahlart       = (document.getElementById('inv-filter-zahlart')?.value       || '').trim().toLowerCase();
+  const rechnungsart  = (document.getElementById('inv-filter-rechnungsart')?.value  || '');
   const status        = (document.getElementById('inv-filter-status')?.value        || '');
   const paymentStatus = (document.getElementById('inv-filter-payment-status')?.value || '');
 
@@ -6709,6 +6719,7 @@ function applyInvoiceFilters() {
     if (!matchesDate(inv.invoice_date))                                       return false;
     if (customer && !(inv.customer_name || '').toLowerCase().includes(customer)) return false;
     if (zahlart  && !(inv.payment_method || '').toLowerCase().includes(zahlart)) return false;
+    if (rechnungsart && (inv.rechnungsart || '') !== rechnungsart)           return false;
     if (status   && inv.status !== status)                                   return false;
     if (paymentStatus && inv.payment_status !== paymentStatus)               return false;
     return true;
@@ -6728,7 +6739,7 @@ function applyInvoiceFilters() {
       const fmt = n => Number(n).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       tfoot.innerHTML = `
         <tr style="font-weight:600;background:var(--bg-subtle,#f9fafb);border-top:2px solid var(--border);">
-          <td colspan="4" style="text-align:right;padding:10px 12px;">Summe (${filtered.length} Rechnung${filtered.length !== 1 ? 'en' : ''}):</td>
+          <td colspan="5" style="text-align:right;padding:10px 12px;">Summe (${filtered.length} Rechnung${filtered.length !== 1 ? 'en' : ''}):</td>
           <td style="white-space:nowrap;padding:10px 12px;">${fmt(sumNet)}&nbsp;&euro;</td>
           <td style="white-space:nowrap;padding:10px 12px;">${fmt(sumGross)}&nbsp;&euro;</td>
           <td colspan="3"></td>
@@ -6737,7 +6748,7 @@ function applyInvoiceFilters() {
   }
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px;">Keine Rechnungen gefunden.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:24px;">Keine Rechnungen gefunden.</td></tr>`;
     return;
   }
 
@@ -6747,6 +6758,7 @@ function applyInvoiceFilters() {
       <td>${formatDate(inv.invoice_date)}</td>
       <td>${escapeHtml(inv.customer_name || '')}</td>
       <td>${escapeHtml(inv.payment_method || '')}</td>
+      <td>${escapeHtml(inv.rechnungsart || '')}</td>
       <td style="white-space:nowrap;">${Number(inv.total_net).toFixed(2)}&nbsp;&euro;</td>
       <td style="white-space:nowrap;">${Number(inv.total_gross).toFixed(2)}&nbsp;&euro;</td>
       <td>${getInvoiceStatusBadge(inv.status)}</td>
