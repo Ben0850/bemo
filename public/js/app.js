@@ -14670,7 +14670,7 @@ let _aktenData = [];
 let _aktenInsuranceMap = {};
 let _aktenVermittlerMap = {};
 let _aktenSort = { field: 'id', dir: 'desc' };
-let _aktenFilterState = { nr: '', kunde: '', anwalt: '', versicherung: '', vermittler: '', rechnungsnr: '', status: '', dateFrom: '', dateTo: '' };
+let _aktenFilterState = { nr: '', kunde: '', anwalt: '', anwaltAz: '', versicherung: '', vermittler: '', rechnungsnr: '', status: '', dateFrom: '', dateTo: '' };
 
 async function renderAkten() {
   const main = document.getElementById('main-content');
@@ -14686,6 +14686,7 @@ async function renderAkten() {
         <div class="form-group" style="margin:0;"><label style="font-size:11px;">Aktennr.</label><input type="text" id="akten-f-nr" placeholder="Aktennr." oninput="filterAkten()" style="font-size:13px;padding:6px 8px;"></div>
         <div class="form-group" style="margin:0;"><label style="font-size:11px;">Kunde</label><input type="text" id="akten-f-kunde" placeholder="Kunde" oninput="filterAkten()" style="font-size:13px;padding:6px 8px;"></div>
         <div class="form-group" style="margin:0;"><label style="font-size:11px;">Anwalt</label><input type="text" id="akten-f-anwalt" placeholder="Anwalt" oninput="filterAkten()" style="font-size:13px;padding:6px 8px;"></div>
+        <div class="form-group" style="margin:0;"><label style="font-size:11px;">Anwalt Aktenzeichen</label><input type="text" id="akten-f-anwalt-az" placeholder="Aktenzeichen" oninput="filterAkten()" style="font-size:13px;padding:6px 8px;"></div>
         <div class="form-group" style="margin:0;"><label style="font-size:11px;">Versicherung</label><input type="text" id="akten-f-versicherung" placeholder="Versicherung" oninput="filterAkten()" style="font-size:13px;padding:6px 8px;"></div>
         <div class="form-group" style="margin:0;"><label style="font-size:11px;">Vermittler</label><input type="text" id="akten-f-vermittler" placeholder="Vermittler" oninput="filterAkten()" style="font-size:13px;padding:6px 8px;"></div>
         <div class="form-group" style="margin:0;"><label style="font-size:11px;">Rechnungsnr.</label><input type="text" id="akten-f-rechnungsnr" placeholder="Rechnungsnr." oninput="filterAkten()" style="font-size:13px;padding:6px 8px;"></div>
@@ -14698,7 +14699,7 @@ async function renderAkten() {
     </div>
   `;
   // Restore persisted filter state
-  const _fIds = { nr: 'akten-f-nr', kunde: 'akten-f-kunde', anwalt: 'akten-f-anwalt', versicherung: 'akten-f-versicherung', vermittler: 'akten-f-vermittler', rechnungsnr: 'akten-f-rechnungsnr', status: 'akten-f-status', dateFrom: 'akten-f-date-from', dateTo: 'akten-f-date-to' };
+  const _fIds = { nr: 'akten-f-nr', kunde: 'akten-f-kunde', anwalt: 'akten-f-anwalt', anwaltAz: 'akten-f-anwalt-az', versicherung: 'akten-f-versicherung', vermittler: 'akten-f-vermittler', rechnungsnr: 'akten-f-rechnungsnr', status: 'akten-f-status', dateFrom: 'akten-f-date-from', dateTo: 'akten-f-date-to' };
   Object.entries(_fIds).forEach(([k, id]) => { const el = document.getElementById(id); if (el) el.value = _aktenFilterState[k] || ''; });
   try {
     const [akten, insurances, vermittlerList] = await Promise.all([
@@ -14718,8 +14719,8 @@ async function renderAkten() {
 }
 
 function clearAktenFilter() {
-  _aktenFilterState = { nr: '', kunde: '', anwalt: '', versicherung: '', vermittler: '', rechnungsnr: '', status: '', dateFrom: '', dateTo: '' };
-  ['akten-f-nr','akten-f-kunde','akten-f-anwalt','akten-f-versicherung','akten-f-vermittler','akten-f-rechnungsnr','akten-f-status','akten-f-date-from','akten-f-date-to'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  _aktenFilterState = { nr: '', kunde: '', anwalt: '', anwaltAz: '', versicherung: '', vermittler: '', rechnungsnr: '', status: '', dateFrom: '', dateTo: '' };
+  ['akten-f-nr','akten-f-kunde','akten-f-anwalt','akten-f-anwalt-az','akten-f-versicherung','akten-f-vermittler','akten-f-rechnungsnr','akten-f-status','akten-f-date-from','akten-f-date-to'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   filterAkten();
 }
 
@@ -14812,18 +14813,20 @@ function renderAktenTable() {
   const fNr = (document.getElementById('akten-f-nr')?.value || '').toLowerCase().trim();
   const fKunde = (document.getElementById('akten-f-kunde')?.value || '').toLowerCase().trim();
   const fAnwalt = (document.getElementById('akten-f-anwalt')?.value || '').toLowerCase().trim();
+  const fAnwaltAz = (document.getElementById('akten-f-anwalt-az')?.value || '').toLowerCase().trim();
   const fVersicherung = (document.getElementById('akten-f-versicherung')?.value || '').toLowerCase().trim();
   const fVermittler = (document.getElementById('akten-f-vermittler')?.value || '').toLowerCase().trim();
   const fRechnungsnr = (document.getElementById('akten-f-rechnungsnr')?.value || '').toLowerCase().trim();
   const fStatus = document.getElementById('akten-f-status')?.value || '';
   const fDateFrom = document.getElementById('akten-f-date-from')?.value || '';
   const fDateTo = document.getElementById('akten-f-date-to')?.value || '';
-  _aktenFilterState = { nr: fNr, kunde: fKunde, anwalt: fAnwalt, versicherung: fVersicherung, vermittler: fVermittler, rechnungsnr: fRechnungsnr, status: fStatus, dateFrom: fDateFrom, dateTo: fDateTo };
+  _aktenFilterState = { nr: fNr, kunde: fKunde, anwalt: fAnwalt, anwaltAz: fAnwaltAz, versicherung: fVersicherung, vermittler: fVermittler, rechnungsnr: fRechnungsnr, status: fStatus, dateFrom: fDateFrom, dateTo: fDateTo };
 
   data = data.filter(a => {
     if (fNr && !(a.aktennummer || '').toLowerCase().includes(fNr)) return false;
     if (fKunde && !(a.bet_kunde || a.customer_name || a.kunde || '').toLowerCase().includes(fKunde)) return false;
     if (fAnwalt && !(a.bet_anwalt || a.anwalt || '').toLowerCase().includes(fAnwalt)) return false;
+    if (fAnwaltAz && !(a.anwalt_aktenzeichen || '').toLowerCase().includes(fAnwaltAz)) return false;
     if (fVersicherung && !(a.bet_versicherung || (a.versicherung_id ? (_aktenInsuranceMap[a.versicherung_id] || '') : '')).toLowerCase().includes(fVersicherung)) return false;
     if (fVermittler && !(a.bet_vermittler || (a.vermittler_id ? (_aktenVermittlerMap[a.vermittler_id] || '') : (a.vermittler || ''))).toLowerCase().includes(fVermittler)) return false;
     if (fRechnungsnr && !(a.invoice_numbers || '').toLowerCase().includes(fRechnungsnr)) return false;
@@ -15428,13 +15431,18 @@ async function renderAkteDetail(id) {
         <button class="btn-bet-detail" onclick="showBeteiligterDetail('versicherung', ${b.entity_id})">Details anzeigen</button>`;
       } else if (b.type === 'anwalt' && b.entity) {
         const l = b.entity;
+        const az = b.aktenzeichen || '';
+        const azBtnLabel = az ? ('Aktenzeichen: ' + az) : '+ Aktenzeichen';
         panelContent = `<div class="bet-contact-grid">
           ${cell('Name', fmt(l.name))}
           ${cell('Kanzlei', fmt(l.kanzlei))}
           ${cell('Telefon', fmtPhone(l.telefon1))}
           ${cell('E-Mail', fmtMail(l.email))}
         </div>
-        <button class="btn-bet-detail" onclick="showBeteiligterDetail('anwalt', ${b.entity_id})">Details anzeigen</button>`;
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-bet-detail" onclick="showBeteiligterDetail('anwalt', ${b.entity_id})">Details anzeigen</button>
+          ${canEdit ? `<button class="btn-bet-detail" onclick="openAnwaltAktenzeichenForm(${b.id}, ${JSON.stringify(az).replace(/"/g, '&quot;')})">${escapeHtml(azBtnLabel)}</button>` : (az ? `<span style="font-size:13px;color:var(--text-muted);align-self:center;">Aktenzeichen: ${escapeHtml(az)}</span>` : '')}
+        </div>`;
       } else if (b.type === 'sonstige') {
         panelContent = `<div class="bet-contact-grid">
           ${cell('Name', fmt(b.name))}
@@ -16634,6 +16642,41 @@ async function removeBeteiligter(betId) {
   try {
     await api(`/api/akten/${currentAkteId}/beteiligte/${betId}`, { method: 'DELETE' });
     showToast('Beteiligter entfernt');
+    renderAkteDetail(currentAkteId);
+  } catch (err) {
+    showToast('Fehler: ' + (err.message || err), 'error');
+  }
+}
+
+// Anwalts-Aktenzeichen pflegen — wird in der Akte (akten_beteiligte.aktenzeichen) gespeichert,
+// NICHT in den Stammdaten des Anwalts.
+function openAnwaltAktenzeichenForm(betId, currentValue) {
+  const cur = currentValue || '';
+  openModal('Aktenzeichen des Anwalts', `
+    <form onsubmit="saveAnwaltAktenzeichen(event, ${betId})">
+      <div class="form-group">
+        <label>Aktenzeichen <small style="color:var(--text-muted);font-weight:normal;">(wie der Anwalt diese Akte bei sich führt)</small></label>
+        <input type="text" id="anw-az-input" value="${escapeHtml(cur)}" placeholder="z.B. 12/2026" autofocus>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button type="submit" class="btn btn-primary">Speichern</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `);
+}
+
+async function saveAnwaltAktenzeichen(e, betId) {
+  e.preventDefault();
+  if (!currentAkteId) return;
+  const aktenzeichen = document.getElementById('anw-az-input').value.trim();
+  try {
+    await api(`/api/akten/${currentAkteId}/beteiligte/${betId}/aktenzeichen`, {
+      method: 'PUT',
+      body: { aktenzeichen }
+    });
+    showToast('Aktenzeichen gespeichert');
+    closeModal();
     renderAkteDetail(currentAkteId);
   } catch (err) {
     showToast('Fehler: ' + (err.message || err), 'error');

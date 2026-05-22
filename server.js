@@ -4199,6 +4199,7 @@ app.get('/api/akten', (req, res) => {
            ELSE c.last_name || ', ' || c.first_name END as customer_name,
       (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type = 'kunde' ORDER BY sort_order ASC LIMIT 1) as bet_kunde,
       (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type = 'anwalt' ORDER BY sort_order ASC LIMIT 1) as bet_anwalt,
+      (SELECT GROUP_CONCAT(aktenzeichen, ',') FROM akten_beteiligte WHERE akte_id = a.id AND type = 'anwalt' AND aktenzeichen != '') as anwalt_aktenzeichen,
       (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type = 'versicherung' ORDER BY sort_order ASC LIMIT 1) as bet_versicherung,
       (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type IN ('vermittler','werkstatt') ORDER BY sort_order ASC LIMIT 1) as bet_vermittler,
       fv.license_plate as rental_license_plate,
@@ -4470,7 +4471,7 @@ app.post('/api/akten/:id/beteiligte', (req, res) => {
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
-  const { type, entity_id, name, adresse, telefon, email, art } = req.body;
+  const { type, entity_id, name, adresse, telefon, email, art, aktenzeichen } = req.body;
   if (!type) return res.status(400).json({ error: 'Typ erforderlich' });
   const akteId = Number(req.params.id);
   if (type === 'kunde') {
@@ -4480,10 +4481,29 @@ app.post('/api/akten/:id/beteiligte', (req, res) => {
   const maxOrder = queryOne('SELECT MAX(sort_order) as m FROM akten_beteiligte WHERE akte_id = ?', [akteId]);
   const nextOrder = (maxOrder && maxOrder.m !== null ? maxOrder.m : -1) + 1;
   execute(
-    'INSERT INTO akten_beteiligte (akte_id, type, entity_id, name, adresse, telefon, email, art, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [akteId, type, entity_id || null, name || '', adresse || '', telefon || '', email || '', art || '', nextOrder]
+    'INSERT INTO akten_beteiligte (akte_id, type, entity_id, name, adresse, telefon, email, art, sort_order, aktenzeichen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [akteId, type, entity_id || null, name || '', adresse || '', telefon || '', email || '', art || '', nextOrder, aktenzeichen || '']
   );
   res.status(201).json({ success: true });
+});
+
+// Aktenzeichen eines Beteiligten setzen/aktualisieren (z.B. Anwalts-Aktenzeichen
+// fuer diese spezifische Akte — wird NICHT in den Stammdaten gespeichert)
+app.put('/api/akten/:id/beteiligte/:betId/aktenzeichen', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const akteId = Number(req.params.id);
+  const betId = Number(req.params.betId);
+  const { aktenzeichen } = req.body || {};
+  const existing = queryOne('SELECT id FROM akten_beteiligte WHERE id = ? AND akte_id = ?', [betId, akteId]);
+  if (!existing) return res.status(404).json({ error: 'Beteiligter nicht gefunden' });
+  execute(
+    'UPDATE akten_beteiligte SET aktenzeichen = ? WHERE id = ? AND akte_id = ?',
+    [String(aktenzeichen || '').trim(), betId, akteId]
+  );
+  res.json({ success: true });
 });
 
 app.delete('/api/akten/:id/beteiligte/:betId', (req, res) => {
