@@ -15809,18 +15809,19 @@ async function renderAkteDetail(id) {
 }
 
 // === Akten-Post (Korrespondenz) ===
-// Datei-Format als eindeutiges Badge fuer die Post-Liste.
-// In der Post duerfen aktuell nur PDF und E-Mails (.msg/.eml) hochgeladen werden —
-// diese beiden bekommen klar erkennbare farbige Text-Badges. Andere Endungen werden
-// nur als Fallback gerendert (sollte normalerweise nicht vorkommen).
+// Datei-Format als dezentes, einheitliches Badge fuer die Post-Liste.
+// PDF und Mail haben identische Groesse + dezente Pastelltoene, klar unterscheidbar.
 function postFormatBadge(filename) {
   const ext = (String(filename).split('.').pop() || '').toLowerCase();
-  const pdfBadge = '<span title="PDF-Dokument" style="display:inline-flex;align-items:center;justify-content:center;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:800;letter-spacing:0.5px;background:#dc2626;color:#fff;box-shadow:0 1px 2px rgba(220,38,38,0.4);font-family:Arial,sans-serif;">PDF</span>';
-  const mailBadge = '<span title="E-Mail (.' + escapeHtml(ext) + ')" style="display:inline-flex;align-items:center;justify-content:center;gap:3px;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.4px;background:#2563eb;color:#fff;box-shadow:0 1px 2px rgba(37,99,235,0.4);font-family:Arial,sans-serif;"><svg width="11" height="9" viewBox="0 0 16 12" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;"><rect x="0.5" y="0.5" width="15" height="11" rx="1" stroke="currentColor" stroke-width="1"/><path d="M1 1.5L8 6.5L15 1.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>MAIL</span>';
-  if (ext === 'pdf') return pdfBadge;
-  if (ext === 'msg' || ext === 'eml') return mailBadge;
-  // Fallback fuer alles andere
-  return '<span title="' + escapeHtml(ext.toUpperCase() || 'Datei') + '" style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;background:#e5e7eb;color:#4b5563;font-family:Arial,sans-serif;">' + escapeHtml((ext || '?').toUpperCase()) + '</span>';
+  const baseStyle = 'display:inline-block;box-sizing:border-box;width:38px;padding:2px 0;border-radius:3px;font-size:10px;font-weight:600;letter-spacing:0.3px;text-align:center;font-family:Arial,sans-serif;';
+  if (ext === 'pdf') {
+    return '<span title="PDF-Dokument" style="' + baseStyle + 'background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;">PDF</span>';
+  }
+  if (ext === 'msg' || ext === 'eml') {
+    return '<span title="E-Mail (.' + escapeHtml(ext) + ')" style="' + baseStyle + 'background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;">MAIL</span>';
+  }
+  // Fallback fuer alles andere — gleiche Groesse, neutrale Farbe
+  return '<span title="' + escapeHtml(ext.toUpperCase() || 'Datei') + '" style="' + baseStyle + 'background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb;">' + escapeHtml((ext || '?').toUpperCase().slice(0, 4)) + '</span>';
 }
 
 async function loadPostList(akteId) {
