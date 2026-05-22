@@ -12418,7 +12418,7 @@ function renderRentalList(entries) {
           <th style="cursor:pointer;" onclick="sortRentalList('created_at')">Angelegt am${rentalSortIcon('created_at')}</th>
           <th>Fahrzeug</th>
           <th style="cursor:pointer;" onclick="sortRentalList('customer_name')">Kunde${rentalSortIcon('customer_name')}</th>
-          <th>Von</th><th>Bis</th><th>Tage</th><th>Mietart</th><th>Status</th><th>Akte</th><th>Aktionen</th>
+          <th>Von</th><th>Bis</th><th>Tage</th><th>Mietart</th><th>Versicherung</th><th>Status</th><th>Akte</th><th>Aktionen</th>
         </tr></thead>
         <tbody>
           ${sorted.map(e => {
@@ -12440,6 +12440,7 @@ function renderRentalList(entries) {
               <td>${formatDate(e.end_date)}</td>
               <td>${escapeHtml(tage)}</td>
               <td>${escapeHtml(e.mietart || '')}</td>
+              <td>${escapeHtml(e.versicherung || '')}</td>
               <td>${rentalStatusBadge(e.status)}</td>
               <td>${akteCell}</td>
               <td><button class="btn btn-sm btn-danger" onclick="event.stopPropagation();confirmDeleteRental(${e.id})">L\u00f6schen</button></td>
