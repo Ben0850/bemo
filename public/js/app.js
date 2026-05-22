@@ -7529,10 +7529,15 @@ async function openInvoicePaymentForm(invoiceId, direction, editPaymentId) {
   const dirLabel = direction === 'in' ? 'Zahlungseingang' : 'Zahlungsausgang';
   const titleAction = existing ? 'bearbeiten' : 'erfassen';
 
+  // Bei NEUEN Zahlungen wird "Bitte auswaehlen" vorausgewaehlt (kein stiller Bankkonto-Default).
+  // Bei BEARBEITEN: wenn vorher kein Bankkonto gesetzt war, ist "Bar / Kasse" vorausgewaehlt.
+  const isCashExisting = existing && (existing.bank_account_id === null || existing.bank_account_id === undefined || existing.bank_account_id === '');
+  const initialBankValue = existing ? (isCashExisting ? 'bar' : String(existing.bank_account_id)) : '';
   const bankOptions = `
-    <option value="">— Bar / Kasse —</option>
+    <option value="" ${initialBankValue === '' ? 'selected' : ''}>Bitte auswählen</option>
+    <option value="bar" ${initialBankValue === 'bar' ? 'selected' : ''}>— Bar / Kasse —</option>
     ${banks.map(b => `
-      <option value="${b.id}" ${String(b.id) === String(defaultBankId) ? 'selected' : ''}>
+      <option value="${b.id}" ${initialBankValue === String(b.id) ? 'selected' : ''}>
         ${escapeHtml(b.label || b.bank_name || 'Konto')} — ${escapeHtml(b.iban || '')}
       </option>
     `).join('')}
@@ -7564,9 +7569,9 @@ async function openInvoicePaymentForm(invoiceId, direction, editPaymentId) {
         <input type="number" id="pay-amount" step="0.01" min="0.01" value="${defaultAmount}" required placeholder="0.00">
       </div>
       <div class="form-group">
-        <label>Bankkonto</label>
-        <select id="pay-bank-account">${bankOptions}</select>
-        <small style="color:var(--text-muted);">Leer lassen / "Bar" wählen für Kasse-Buchungen.</small>
+        <label>Bankkonto <span style="color:var(--danger);">*</span></label>
+        <select id="pay-bank-account" required>${bankOptions}</select>
+        <small style="color:var(--text-muted);">„Bar / Kasse" wählen für Kasse-Buchungen.</small>
       </div>
       <div class="form-group">
         <label>Zahlungsart <span style="color:var(--danger);">*</span></label>
@@ -7597,7 +7602,8 @@ async function saveInvoicePayment(event, invoiceId, editPaymentId) {
   const direction    = document.getElementById('pay-direction').value;
   const amount       = parseFloat(document.getElementById('pay-amount').value);
   const bankRaw      = document.getElementById('pay-bank-account').value;
-  const bank_account_id = bankRaw ? Number(bankRaw) : null;
+  // bankRaw='' = noch nichts gewaehlt (Pflichtfeld), 'bar' = Bar/Kasse (=> null), sonst Bank-ID
+  const bank_account_id = (bankRaw === 'bar') ? null : (bankRaw ? Number(bankRaw) : null);
   const payment_method  = document.getElementById('pay-method').value;
   const reference       = document.getElementById('pay-reference').value.trim();
   const notes           = document.getElementById('pay-notes').value.trim();
@@ -7607,6 +7613,7 @@ async function saveInvoicePayment(event, invoiceId, editPaymentId) {
   if (!['in','out'].includes(direction))   { showToast('Richtung ungueltig', 'error'); return; }
   if (!amount || amount <= 0)              { showToast('Betrag muss > 0 sein', 'error'); return; }
   if (!payment_method)                     { showToast('Bitte Zahlungsart auswählen', 'error'); document.getElementById('pay-method')?.focus(); return; }
+  if (!bankRaw)                            { showToast('Bitte Bankkonto auswählen', 'error'); document.getElementById('pay-bank-account')?.focus(); return; }
 
   const body = { direction, amount, payment_date, payment_method, bank_account_id, reference, notes };
 
