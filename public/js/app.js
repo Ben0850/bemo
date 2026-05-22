@@ -16091,9 +16091,9 @@ function renderEmailPreview(panel, key, ext) {
               const sizeText = a.size ? ' (' + fmtBytes(a.size) + ')' : '';
               if (a.s3_key) {
                 const b64 = btoa(unescape(encodeURIComponent(a.s3_key)));
-                return '<button onclick="openMailAttachment(\'' + b64 + '\',\'' + safeName + '\')"'
-                  + ' style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#fff;border:1px solid #f59e0b;border-radius:4px;color:#78350f;cursor:pointer;font-size:12px;font-family:inherit;"'
-                  + ' title="Oeffnen">&#128206; ' + escapeHtml(a.name || 'Anhang')
+                return '<button ondblclick="openMailAttachment(\'' + b64 + '\',\'' + safeName + '\')"'
+                  + ' style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#fff;border:1px solid #f59e0b;border-radius:4px;color:#78350f;cursor:pointer;font-size:12px;font-family:inherit;user-select:none;"'
+                  + ' title="Doppelklick zum Oeffnen">&#128206; ' + escapeHtml(a.name || 'Anhang')
                   + '<span style="color:var(--text-muted);">' + escapeHtml(sizeText) + '</span></button>';
               }
               // Kein s3_key (z.B. Backfill noch ausstehend) — nur Text anzeigen
