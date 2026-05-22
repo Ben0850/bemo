@@ -6665,6 +6665,7 @@ async function renderInvoices() {
               </tr>
             </thead>
             <tbody id="invoices-tbody"></tbody>
+            <tfoot id="invoices-tfoot"></tfoot>
           </table>
         </div>
       </div>
@@ -6714,7 +6715,26 @@ function applyInvoiceFilters() {
   });
 
   const tbody = document.getElementById('invoices-tbody');
+  const tfoot = document.getElementById('invoices-tfoot');
   if (!tbody) return;
+
+  // Summen-Footer ueber alle aktuell angezeigten (gefilterten) Rechnungen
+  const sumNet = filtered.reduce((s, inv) => s + (Number(inv.total_net) || 0), 0);
+  const sumGross = filtered.reduce((s, inv) => s + (Number(inv.total_gross) || 0), 0);
+  if (tfoot) {
+    if (filtered.length === 0) {
+      tfoot.innerHTML = '';
+    } else {
+      const fmt = n => Number(n).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      tfoot.innerHTML = `
+        <tr style="font-weight:600;background:var(--bg-subtle,#f9fafb);border-top:2px solid var(--border);">
+          <td colspan="4" style="text-align:right;padding:10px 12px;">Summe (${filtered.length} Rechnung${filtered.length !== 1 ? 'en' : ''}):</td>
+          <td style="white-space:nowrap;padding:10px 12px;">${fmt(sumNet)}&nbsp;&euro;</td>
+          <td style="white-space:nowrap;padding:10px 12px;">${fmt(sumGross)}&nbsp;&euro;</td>
+          <td colspan="3"></td>
+        </tr>`;
+    }
+  }
 
   if (filtered.length === 0) {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px;">Keine Rechnungen gefunden.</td></tr>`;
