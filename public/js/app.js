@@ -6832,13 +6832,24 @@ async function openNewInvoiceModal() {
       <label>Leistungsdatum <span style="color:var(--danger);">*</span></label>
       <input type="date" id="inv-new-service-date" value="${today}" required>
     </div>
-    <div class="form-group">
-      <label>Zahlart</label>
-      <select id="inv-new-payment-method">
-        <option value="Überweisung" selected>Überweisung</option>
-        <option value="Bar">Bar</option>
-        <option value="Karte">Karte</option>
-      </select>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Zahlart</label>
+        <select id="inv-new-payment-method">
+          <option value="Überweisung" selected>Überweisung</option>
+          <option value="Bar">Bar</option>
+          <option value="Karte">Karte</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Rechnungsart <span style="color:var(--danger);">*</span></label>
+        <select id="inv-new-rechnungsart" required>
+          <option value="">— bitte wählen —</option>
+          <option value="Unfallersatz">Unfallersatz</option>
+          <option value="Langzeitmiete">Langzeitmiete</option>
+          <option value="Sonstiges">Sonstiges</option>
+        </select>
+      </div>
     </div>
     ${bankSelect}
     <div class="form-group">
@@ -7058,12 +7069,19 @@ async function createInvoice() {
   const serviceDate = document.getElementById('inv-new-service-date').value;
   if (!serviceDate) { showToast('Leistungsdatum ist Pflichtfeld', 'error'); return; }
   const paymentMethod = document.getElementById('inv-new-payment-method').value;
+  const rechnungsartEl = document.getElementById('inv-new-rechnungsart');
+  const rechnungsart = rechnungsartEl ? rechnungsartEl.value : '';
+  if (!rechnungsart) {
+    showToast('Bitte Rechnungsart auswählen', 'error');
+    if (rechnungsartEl) rechnungsartEl.focus();
+    return;
+  }
   const notes = document.getElementById('inv-new-notes').value.trim();
   const bankEl = document.getElementById('inv-new-bank-account');
   const bank_account_id = bankEl ? Number(bankEl.value) || null : null;
   if (bankEl && !bank_account_id) { showToast('Bitte eine Bankverbindung auswählen', 'error'); return; }
   try {
-    const result = await api('/api/invoices', { method: 'POST', body: { customer_id: newInvoiceCustomerId, vermittler_id: newInvoiceVermittlerId, invoice_date: date, due_date: due, service_date: serviceDate, payment_method: paymentMethod, notes: notes, bank_account_id } });
+    const result = await api('/api/invoices', { method: 'POST', body: { customer_id: newInvoiceCustomerId, vermittler_id: newInvoiceVermittlerId, invoice_date: date, due_date: due, service_date: serviceDate, payment_method: paymentMethod, rechnungsart, notes: notes, bank_account_id } });
     closeModal();
     showToast(`Rechnung ${result.invoice_number} erstellt`);
     navigate('invoice-detail', result.id);
@@ -7187,10 +7205,10 @@ async function renderInvoiceDetail(id) {
               : `<div class="form-control-static">${escapeHtml(inv.payment_method || 'Überweisung')}</div>`}
           </div>
           <div class="form-group">
-            <label>Rechnungsart <span style="color:var(--danger);">*</span></label>
+            <label>Rechnungsart</label>
             ${canEditContent
-              ? `<select id="inv-edit-rechnungsart" required onchange="saveInvoiceHeader(${id})" style="${!inv.rechnungsart ? 'border-color:var(--danger);' : ''}">
-                   <option value="" ${!inv.rechnungsart?'selected':''}>— bitte wählen —</option>
+              ? `<select id="inv-edit-rechnungsart" onchange="saveInvoiceHeader(${id})">
+                   <option value="" ${!inv.rechnungsart?'selected':''}>—</option>
                    ${ ['Unfallersatz','Langzeitmiete','Sonstiges'].map(a =>
                        `<option value="${a}" ${inv.rechnungsart===a?'selected':''}>${a}</option>`
                      ).join('') }
@@ -7853,19 +7871,12 @@ async function saveInvoiceHeader(invoiceId) {
   if (!canEditInvoice()) { showToast('Keine Berechtigung', 'error'); return; }
   const serviceDate = document.getElementById('inv-edit-service-date')?.value || '';
   if (!serviceDate) { showToast('Leistungsdatum ist Pflichtfeld', 'error'); return; }
-  const rechnungsartEl = document.getElementById('inv-edit-rechnungsart');
-  const rechnungsart = rechnungsartEl ? rechnungsartEl.value : '';
-  if (rechnungsartEl && !rechnungsart) {
-    showToast('Rechnungsart ist Pflichtfeld', 'error');
-    rechnungsartEl.focus();
-    return;
-  }
   const data = {
     status: document.getElementById('inv-edit-status').value,
     service_date: serviceDate,
     payment_method: document.getElementById('inv-edit-payment-method').value,
     notes: document.getElementById('inv-edit-notes').value.trim(),
-    rechnungsart: rechnungsart,
+    rechnungsart: (document.getElementById('inv-edit-rechnungsart')?.value || ''),
   };
   try {
     await api(`/api/invoices/${invoiceId}`, { method: 'PUT', body: data });

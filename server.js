@@ -1811,9 +1811,12 @@ app.post('/api/invoices', (req, res) => {
   ensureColumn('invoices', 'rental_id', "INTEGER DEFAULT NULL");
   ensureColumn('invoices', 'rechnungsart', "TEXT DEFAULT ''");
 
-  const { customer_id, invoice_date, due_date, service_date, payment_method, notes, bank_account_id, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id } = req.body;
+  const { customer_id, invoice_date, due_date, service_date, payment_method, notes, bank_account_id, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id, rechnungsart } = req.body;
   if (!customer_id || !invoice_date) {
     return res.status(400).json({ error: 'Kunde und Rechnungsdatum sind Pflichtfelder' });
+  }
+  if (!rechnungsart || !String(rechnungsart).trim()) {
+    return res.status(400).json({ error: 'Rechnungsart ist Pflichtfeld' });
   }
   // DB-03/DB-04: Nummernvergabe mit try/catch für UNIQUE-Constraint-Schutz
   let invoice_number;
@@ -1829,8 +1832,8 @@ app.post('/api/invoices', (req, res) => {
     const finalGroupCustomer = kundenfahrzeuggruppe ? Number(kundenfahrzeuggruppe) : null;
     const finalRentalId = rental_id ? Number(rental_id) : null;
     const result = execute(
-      'INSERT INTO invoices (invoice_number, customer_id, invoice_date, due_date, service_date, payment_method, notes, company_snapshot, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [invoice_number, customer_id, invoice_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot, vermittler_id || null, finalIntroText, finalGroupBilled, finalGroupCustomer, finalRentalId]
+      'INSERT INTO invoices (invoice_number, customer_id, invoice_date, due_date, service_date, payment_method, notes, company_snapshot, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id, rechnungsart) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [invoice_number, customer_id, invoice_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot, vermittler_id || null, finalIntroText, finalGroupBilled, finalGroupCustomer, finalRentalId, String(rechnungsart).trim()]
     );
     // Hinweis: Keine automatische Vorlagen-Uebernahme mehr — User waehlt im Rechnungs-Formular
     // gezielt eine Positionsgruppe per Dropdown aus.
@@ -1887,11 +1890,6 @@ app.put('/api/invoices/:id', (req, res) => {
   const isSet = v => v !== undefined;
   const coreSet = isSet(due_date) || isSet(status) || isSet(service_date) || isSet(payment_method) || isSet(notes) || isSet(rechnungsart);
   const extrasSet = isSet(abgerechnete_fahrzeuggruppe) || isSet(kundenfahrzeuggruppe) || isSet(rental_id);
-
-  // Pflichtfeld-Check: Wenn rechnungsart explizit auf einen leeren Wert gesetzt werden soll, ablehnen.
-  if (isSet(rechnungsart) && !String(rechnungsart || '').trim()) {
-    return res.status(400).json({ error: 'Rechnungsart ist Pflichtfeld' });
-  }
 
   // Vermittler-only Update
   if (isSet(vermittler_id) && !coreSet && !isSet(intro_text) && !extrasSet) {
