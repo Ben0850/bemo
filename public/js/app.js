@@ -16686,7 +16686,11 @@ async function saveAnwaltAktenzeichen(e, betId) {
     });
     showToast('Aktenzeichen gespeichert');
     closeModal();
-    renderAkteDetail(currentAkteId);
+    await renderAkteDetail(currentAkteId);
+    // Nach dem Re-render zurueck auf den Anwalts-Tab schalten (sonst springt die Ansicht auf den ersten Tab = Kunde)
+    if (typeof switchBeteiligteTab === 'function') {
+      switchBeteiligteTab('bet_' + betId);
+    }
   } catch (err) {
     showToast('Fehler: ' + (err.message || err), 'error');
   }
