@@ -15848,13 +15848,16 @@ async function loadPostList(akteId) {
       const formatBadge = postFormatBadge(p.filename || '');
       const attCount = Number(p.attachment_count) || 0;
       const attIcon = attCount > 0
-        ? ' <span title="' + attCount + ' Anhang' + (attCount !== 1 ? 'e' : '') + '" style="display:inline-block;margin-left:6px;color:#6b7280;font-size:14px;line-height:1;vertical-align:middle;">📎</span>'
+        ? '<span title="' + attCount + ' Anhang' + (attCount !== 1 ? 'e' : '') + '" style="flex-shrink:0;color:#6b7280;font-size:14px;line-height:1;">📎</span>'
         : '';
       html += '<div class="s3-row" style="' + grid + 'cursor:pointer;border-bottom:1px solid var(--border);" onclick="postItemClick(' + p.id + ',\'' + b64k + '\',\'' + b64n + '\')" oncontextmenu="event.preventDefault();postContextMenu(event,' + p.id + ',\'' + b64k + '\',' + p.akte_id + ')">'
         + '<div style="font-weight:600;">' + p.id + '</div>'
         + '<div>' + formatDate(p.post_date) + '</div>'
         + '<div style="text-align:center;">' + dirBadge + '</div>'
-        + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(participantDisplay) + attIcon + '</div>'
+        + '<div style="display:flex;align-items:center;gap:6px;min-width:0;">'
+          + attIcon
+          + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">' + escapeHtml(participantDisplay) + '</span>'
+        + '</div>'
         + '<div style="text-align:center;">' + formatBadge + '</div>'
         + '<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);">' + escapeHtml(p.uploader_name || '-') + '</div>'
         + '</div>';
