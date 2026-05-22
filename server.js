@@ -1809,6 +1809,7 @@ app.post('/api/invoices', (req, res) => {
   ensureColumn('invoices', 'abgerechnete_fahrzeuggruppe', "INTEGER DEFAULT NULL");
   ensureColumn('invoices', 'kundenfahrzeuggruppe', "INTEGER DEFAULT NULL");
   ensureColumn('invoices', 'rental_id', "INTEGER DEFAULT NULL");
+  ensureColumn('invoices', 'rechnungsart', "TEXT DEFAULT ''");
 
   const { customer_id, invoice_date, due_date, service_date, payment_method, notes, bank_account_id, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id } = req.body;
   if (!customer_id || !invoice_date) {
@@ -1851,10 +1852,11 @@ app.put('/api/invoices/:id', (req, res) => {
   ensureColumn('invoices', 'abgerechnete_fahrzeuggruppe', "INTEGER DEFAULT NULL");
   ensureColumn('invoices', 'kundenfahrzeuggruppe', "INTEGER DEFAULT NULL");
   ensureColumn('invoices', 'rental_id', "INTEGER DEFAULT NULL");
+  ensureColumn('invoices', 'rechnungsart', "TEXT DEFAULT ''");
 
   // AUTH-04: invoice_date und invoice_number sind nach Erstellung unveränderbar.
   // Sie werden hier bewusst NICHT aus req.body gelesen und NICHT im UPDATE-Statement verwendet.
-  const { due_date, status, service_date, payment_method, notes, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id } = req.body;
+  const { due_date, status, service_date, payment_method, notes, vermittler_id, intro_text, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id, rechnungsart } = req.body;
   const id = Number(req.params.id);
 
   // Lock-Logik: Wenn die Rechnung bereits Final/Mahnstufe ist, darf nur Status und Vermittler
@@ -1865,7 +1867,7 @@ app.put('/api/invoices/:id', (req, res) => {
     const contentChanged = (due_date !== undefined) || (service_date !== undefined)
       || (payment_method !== undefined) || (notes !== undefined) || (intro_text !== undefined)
       || (abgerechnete_fahrzeuggruppe !== undefined) || (kundenfahrzeuggruppe !== undefined)
-      || (rental_id !== undefined);
+      || (rental_id !== undefined) || (rechnungsart !== undefined);
     if (contentChanged) {
       return res.status(403).json({ error: 'Rechnung ist nicht im Entwurf-Status. Nur Status und Vermittler können geändert werden.' });
     }
@@ -1883,7 +1885,7 @@ app.put('/api/invoices/:id', (req, res) => {
 
   // Helper für Detection ob ein Feld im Body explizit übergeben wurde
   const isSet = v => v !== undefined;
-  const coreSet = isSet(due_date) || isSet(status) || isSet(service_date) || isSet(payment_method) || isSet(notes);
+  const coreSet = isSet(due_date) || isSet(status) || isSet(service_date) || isSet(payment_method) || isSet(notes) || isSet(rechnungsart);
   const extrasSet = isSet(abgerechnete_fahrzeuggruppe) || isSet(kundenfahrzeuggruppe) || isSet(rental_id);
 
   // Vermittler-only Update
@@ -1912,15 +1914,16 @@ app.put('/api/invoices/:id', (req, res) => {
   }
 
   // Vollständiger Update mit allen optionalen Feldern (Bestandswerte für nicht übergebene Felder)
-  const existing = queryOne('SELECT intro_text, vermittler_id, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id FROM invoices WHERE id = ?', [id]);
+  const existing = queryOne('SELECT intro_text, vermittler_id, abgerechnete_fahrzeuggruppe, kundenfahrzeuggruppe, rental_id, rechnungsart FROM invoices WHERE id = ?', [id]);
   const finalIntroText = isSet(intro_text) ? String(intro_text) : (existing ? (existing.intro_text || '') : '');
   const finalVermittlerId = isSet(vermittler_id) ? (vermittler_id || null) : (existing ? existing.vermittler_id : null);
   const finalGroupBilled = isSet(abgerechnete_fahrzeuggruppe) ? (abgerechnete_fahrzeuggruppe ? Number(abgerechnete_fahrzeuggruppe) : null) : (existing ? existing.abgerechnete_fahrzeuggruppe : null);
   const finalGroupCustomer = isSet(kundenfahrzeuggruppe) ? (kundenfahrzeuggruppe ? Number(kundenfahrzeuggruppe) : null) : (existing ? existing.kundenfahrzeuggruppe : null);
   const finalRentalId = isSet(rental_id) ? (rental_id ? Number(rental_id) : null) : (existing ? existing.rental_id : null);
+  const finalRechnungsart = isSet(rechnungsart) ? String(rechnungsart || '') : (existing ? (existing.rechnungsart || '') : '');
   execute(
-    'UPDATE invoices SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, vermittler_id=?, intro_text=?, abgerechnete_fahrzeuggruppe=?, kundenfahrzeuggruppe=?, rental_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-    [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', finalVermittlerId, finalIntroText, finalGroupBilled, finalGroupCustomer, finalRentalId, id]
+    'UPDATE invoices SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, vermittler_id=?, intro_text=?, abgerechnete_fahrzeuggruppe=?, kundenfahrzeuggruppe=?, rental_id=?, rechnungsart=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', finalVermittlerId, finalIntroText, finalGroupBilled, finalGroupCustomer, finalRentalId, finalRechnungsart, id]
   );
   res.json({ message: 'Rechnung aktualisiert' });
 });

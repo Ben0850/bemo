@@ -7163,15 +7163,28 @@ async function renderInvoiceDetail(id) {
             ? `<input type="date" id="inv-edit-service-date" value="${inv.service_date || ''}" onchange="saveInvoiceHeader(${id})">`
             : `<div class="form-control-static">${inv.service_date ? formatDate(inv.service_date) : '—'}</div>`}
         </div>
-        <div class="form-group">
-          <label>Zahlart</label>
-          ${canEditContent
-            ? `<select id="inv-edit-payment-method" onchange="saveInvoiceHeader(${id})">
-                 ${ ['Überweisung','Bar','Karte'].map(m =>
-                     `<option value="${m}" ${(inv.payment_method||'Überweisung')===m?'selected':''}>${m}</option>`
-                   ).join('') }
-               </select>`
-            : `<div class="form-control-static">${escapeHtml(inv.payment_method || 'Überweisung')}</div>`}
+        <div class="form-row">
+          <div class="form-group">
+            <label>Zahlart</label>
+            ${canEditContent
+              ? `<select id="inv-edit-payment-method" onchange="saveInvoiceHeader(${id})">
+                   ${ ['Überweisung','Bar','Karte'].map(m =>
+                       `<option value="${m}" ${(inv.payment_method||'Überweisung')===m?'selected':''}>${m}</option>`
+                     ).join('') }
+                 </select>`
+              : `<div class="form-control-static">${escapeHtml(inv.payment_method || 'Überweisung')}</div>`}
+          </div>
+          <div class="form-group">
+            <label>Rechnungsart</label>
+            ${canEditContent
+              ? `<select id="inv-edit-rechnungsart" onchange="saveInvoiceHeader(${id})">
+                   <option value="" ${!inv.rechnungsart?'selected':''}>—</option>
+                   ${ ['Unfallersatz','Langzeitmiete','Sonstiges'].map(a =>
+                       `<option value="${a}" ${inv.rechnungsart===a?'selected':''}>${a}</option>`
+                     ).join('') }
+                 </select>`
+              : `<div class="form-control-static">${escapeHtml(inv.rechnungsart || '—')}</div>`}
+          </div>
         </div>
         <div class="form-group">
           <label>Bemerkungen</label>
@@ -7833,6 +7846,7 @@ async function saveInvoiceHeader(invoiceId) {
     service_date: serviceDate,
     payment_method: document.getElementById('inv-edit-payment-method').value,
     notes: document.getElementById('inv-edit-notes').value.trim(),
+    rechnungsart: (document.getElementById('inv-edit-rechnungsart')?.value || ''),
   };
   try {
     await api(`/api/invoices/${invoiceId}`, { method: 'PUT', body: data });

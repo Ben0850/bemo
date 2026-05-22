@@ -421,6 +421,7 @@ async function getDb() {
   try { db.run("ALTER TABLE invoices ADD COLUMN payment_method TEXT DEFAULT 'Überweisung'"); } catch(e) {}
   // GoBD: Firmendaten-Snapshot bei Erstellung einfrieren
   try { db.run("ALTER TABLE invoices ADD COLUMN company_snapshot TEXT DEFAULT ''"); } catch(e) {}
+  try { db.run("ALTER TABLE invoices ADD COLUMN rechnungsart TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE invoices ADD COLUMN vermittler_id INTEGER DEFAULT NULL"); } catch(e) {}
   try { db.run("ALTER TABLE invoices ADD COLUMN intro_text TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE invoices ADD COLUMN abgerechnete_fahrzeuggruppe INTEGER DEFAULT NULL"); } catch(e) {}
