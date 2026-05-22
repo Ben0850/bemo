@@ -4196,7 +4196,11 @@ app.get('/api/akten', (req, res) => {
       (SELECT name FROM akten_beteiligte WHERE akte_id = a.id AND type IN ('vermittler','werkstatt') ORDER BY sort_order ASC LIMIT 1) as bet_vermittler,
       fv.license_plate as rental_license_plate,
       fv.manufacturer as rental_manufacturer,
-      fv.model as rental_model
+      fv.model as rental_model,
+      (SELECT GROUP_CONCAT(i.invoice_number, ',')
+         FROM akten_invoices ai
+         JOIN invoices i ON ai.invoice_id = i.id
+        WHERE ai.akte_id = a.id) as invoice_numbers
     FROM akten a
     LEFT JOIN customers c ON a.customer_id = c.id
     LEFT JOIN rentals r ON a.rental_id = r.id
