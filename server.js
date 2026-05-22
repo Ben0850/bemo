@@ -4175,10 +4175,23 @@ app.get('/api/files/msg-preview', async (req, res) => {
     const buffer = Buffer.concat(chunks);
     const reader = new MsgReader(buffer);
     const msg = reader.getFileData();
-    // Backfill: attachment_count in akten_post nachtragen, falls noch nicht korrekt
+    // Backfill: attachment_count in akten_post + extrahierte Anhaenge in S3 nachtragen
     try {
       const attCount = (msg.attachments || []).length;
       execute('UPDATE akten_post SET attachment_count = ? WHERE s3_key = ? AND attachment_count != ?', [attCount, key, attCount]);
+      const post = queryOne('SELECT id, s3_key, filename FROM akten_post WHERE s3_key = ? LIMIT 1', [key]);
+      if (post) await extractAndSaveMailAttachments(post);
+    } catch (_) {}
+    // Anhaenge aus DB nachladen (mit s3_key fuer Direkt-Zugriff im Frontend)
+    let attachmentsDb = [];
+    try {
+      const post = queryOne('SELECT id FROM akten_post WHERE s3_key = ? LIMIT 1', [key]);
+      if (post) {
+        attachmentsDb = queryAll(
+          'SELECT id, filename, s3_key, size, content_type FROM akten_post_attachments WHERE post_id = ? ORDER BY id ASC',
+          [post.id]
+        );
+      }
     } catch (_) {}
     // Outlook speichert fuer interne Empfaenger einen Exchange Legacy DN
     // (z.B. "/o=ExchangeLabs/ou=Exchange Administrative Group..."). Das ist keine
@@ -4200,6 +4213,10 @@ app.get('/api/files/msg-preview', async (req, res) => {
     const fromDisplay = senderName && senderSmtp ? (senderName + ' <' + senderSmtp + '>')
                       : senderName ? senderName
                       : senderSmtp;
+    // Bevorzugt die DB-Anhaenge (haben s3_key) — Fallback auf reines Auflisten aus der Mail
+    const attachmentsOut = attachmentsDb.length
+      ? attachmentsDb.map(a => ({ id: a.id, name: a.filename, s3_key: a.s3_key, size: a.size || 0, contentType: a.content_type || '' }))
+      : (msg.attachments || []).map(a => ({ name: a.fileName || a.name || 'Anhang', size: a.contentLength || 0 }));
     res.json({
       subject: msg.subject || '',
       from: fromDisplay,
@@ -4208,7 +4225,7 @@ app.get('/api/files/msg-preview', async (req, res) => {
       date: msg.messageDeliveryTime || msg.clientSubmitTime || '',
       body: msg.body || '',
       bodyHtml: msg.bodyHtml || msg.compressedRtf ? (msg.bodyHtml || '') : '',
-      attachments: msg.attachments ? msg.attachments.map(a => ({ name: a.fileName || a.name || 'Anhang', size: a.contentLength || 0 })) : []
+      attachments: attachmentsOut
     });
   } catch (err) {
     console.error('MSG Parse Error:', err.message);
@@ -4227,10 +4244,22 @@ app.get('/api/files/eml-preview', async (req, res) => {
     for await (const chunk of response.Body) { chunks.push(chunk); }
     const buffer = Buffer.concat(chunks);
     const mail = await simpleParser(buffer);
-    // Backfill: attachment_count in akten_post nachtragen, falls noch nicht korrekt
+    // Backfill: attachment_count + extrahierte Anhaenge in S3 nachtragen
     try {
       const attCount = (mail.attachments || []).length;
       execute('UPDATE akten_post SET attachment_count = ? WHERE s3_key = ? AND attachment_count != ?', [attCount, key, attCount]);
+      const post = queryOne('SELECT id, s3_key, filename FROM akten_post WHERE s3_key = ? LIMIT 1', [key]);
+      if (post) await extractAndSaveMailAttachments(post);
+    } catch (_) {}
+    let attachmentsDb = [];
+    try {
+      const post = queryOne('SELECT id FROM akten_post WHERE s3_key = ? LIMIT 1', [key]);
+      if (post) {
+        attachmentsDb = queryAll(
+          'SELECT id, filename, s3_key, size, content_type FROM akten_post_attachments WHERE post_id = ? ORDER BY id ASC',
+          [post.id]
+        );
+      }
     } catch (_) {}
     const formatAddr = (addr) => {
       if (!addr) return '';
@@ -4239,6 +4268,13 @@ app.get('/api/files/eml-preview', async (req, res) => {
       }
       return addr.text || '';
     };
+    const attachmentsOut = attachmentsDb.length
+      ? attachmentsDb.map(a => ({ id: a.id, name: a.filename, s3_key: a.s3_key, size: a.size || 0, contentType: a.content_type || '' }))
+      : (mail.attachments || []).map(a => ({
+          name: a.filename || 'Anhang',
+          size: a.size || (a.content ? a.content.length : 0),
+          contentType: a.contentType || ''
+        }));
     res.json({
       subject: mail.subject || '',
       from: formatAddr(mail.from),
@@ -4247,11 +4283,7 @@ app.get('/api/files/eml-preview', async (req, res) => {
       date: mail.date ? mail.date.toISOString() : '',
       body: mail.text || '',
       bodyHtml: mail.html || '',
-      attachments: (mail.attachments || []).map(a => ({
-        name: a.filename || 'Anhang',
-        size: a.size || (a.content ? a.content.length : 0),
-        contentType: a.contentType || ''
-      }))
+      attachments: attachmentsOut
     });
   } catch (err) {
     console.error('EML Parse Error:', err.message);
@@ -4587,10 +4619,23 @@ app.delete('/api/akten/:id/beteiligte/:betId', (req, res) => {
 // ===== Akteneinträge (case entries) =====
 // ===== AKTEN-POST (Korrespondenz) =====
 app.get('/api/akten/:id/post', (req, res) => {
-  res.json(queryAll(
+  const posts = queryAll(
     `SELECT p.*, s.name AS uploader_name FROM akten_post p LEFT JOIN staff s ON p.uploaded_by = s.id WHERE p.akte_id = ? ORDER BY p.post_date DESC, p.id DESC`,
     [Number(req.params.id)]
-  ));
+  );
+  // Anhaenge pro Post einbinden (in-memory join, eine Query)
+  if (posts.length) {
+    const ids = posts.map(p => p.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const atts = queryAll(
+      `SELECT id, post_id, filename, s3_key, size, content_type FROM akten_post_attachments WHERE post_id IN (${placeholders}) ORDER BY id ASC`,
+      ids
+    );
+    const byPost = {};
+    atts.forEach(a => { (byPost[a.post_id] = byPost[a.post_id] || []).push(a); });
+    posts.forEach(p => { p.attachments = byPost[p.id] || []; });
+  }
+  res.json(posts);
 });
 
 // Hilfsfunktion: Anhang-Anzahl aus einer .msg-/.eml-Datei in S3 ermitteln.
@@ -4618,6 +4663,100 @@ async function detectMailAttachmentCount(s3Key, filename) {
   }
 }
 
+// Dateiname S3-tauglich machen (keine Path-Traversal, keine problematischen Zeichen)
+function sanitizeAttachmentFilename(name) {
+  let s = String(name || 'anhang').trim();
+  s = s.replace(/[\\\/:*?"<>|]/g, '_');
+  s = s.replace(/\s+/g, '_');
+  s = s.replace(/[^\w\-._]/g, '_');
+  if (s.length > 180) {
+    const dot = s.lastIndexOf('.');
+    const ext = dot > 0 ? s.slice(dot) : '';
+    s = s.slice(0, 180 - ext.length) + ext;
+  }
+  return s || 'anhang';
+}
+
+// Anhaenge einer Mail extrahieren, nach S3 hochladen und in akten_post_attachments registrieren.
+// Idempotent: wenn fuer diesen Post schon Anhaenge in der DB liegen, wird nichts gemacht.
+async function extractAndSaveMailAttachments(post) {
+  if (!post || !post.s3_key || !post.filename) return;
+  const ext = (String(post.filename).split('.').pop() || '').toLowerCase();
+  if (ext !== 'msg' && ext !== 'eml') return;
+  const existing = queryOne('SELECT COUNT(*) AS c FROM akten_post_attachments WHERE post_id = ?', [post.id]);
+  if (existing && existing.c > 0) return; // schon erledigt
+
+  try {
+    const response = await getS3Client().send(new GetObjectCommand({ Bucket: getS3Bucket(), Key: post.s3_key }));
+    const chunks = [];
+    for await (const chunk of response.Body) chunks.push(chunk);
+    const buffer = Buffer.concat(chunks);
+
+    let attachments = [];
+    if (ext === 'msg') {
+      const MsgReader = require('@kenjiuno/msgreader').default || require('@kenjiuno/msgreader');
+      const reader = new MsgReader(buffer);
+      const msg = reader.getFileData();
+      attachments = (msg.attachments || []).map((a, idx) => {
+        try {
+          const att = reader.getAttachment(idx);
+          return {
+            filename: a.fileName || a.name || 'anhang_' + (idx + 1),
+            content: att && att.content ? Buffer.from(att.content) : null,
+            contentType: a.mimeType || 'application/octet-stream'
+          };
+        } catch (_) { return null; }
+      }).filter(Boolean);
+    } else {
+      const { simpleParser } = require('mailparser');
+      const mail = await simpleParser(buffer);
+      attachments = (mail.attachments || []).map((a, idx) => ({
+        filename: a.filename || 'anhang_' + (idx + 1),
+        content: a.content || null,
+        contentType: a.contentType || 'application/octet-stream'
+      }));
+    }
+    if (!attachments.length) return;
+
+    // Ablage: parallel zur Mail unter ".../anhaenge-<postId>/<dateiname>"
+    const parent = post.s3_key.includes('/') ? post.s3_key.slice(0, post.s3_key.lastIndexOf('/')) : '';
+    const folder = (parent ? parent + '/' : '') + 'anhaenge-' + post.id;
+    // Doppelte Dateinamen innerhalb desselben Postens nummerieren
+    const used = new Set();
+    for (const att of attachments) {
+      if (!att.content || !att.content.length) continue;
+      let safe = sanitizeAttachmentFilename(att.filename);
+      let candidate = safe;
+      let counter = 1;
+      while (used.has(candidate.toLowerCase())) {
+        const dot = safe.lastIndexOf('.');
+        candidate = dot > 0
+          ? safe.slice(0, dot) + '_' + counter + safe.slice(dot)
+          : safe + '_' + counter;
+        counter += 1;
+      }
+      used.add(candidate.toLowerCase());
+      const attKey = folder + '/' + candidate;
+      try {
+        await getS3Client().send(new PutObjectCommand({
+          Bucket: getS3Bucket(),
+          Key: attKey,
+          Body: att.content,
+          ContentType: att.contentType
+        }));
+        execute(
+          'INSERT INTO akten_post_attachments (post_id, filename, s3_key, size, content_type) VALUES (?, ?, ?, ?, ?)',
+          [post.id, att.filename, attKey, att.content.length, att.contentType]
+        );
+      } catch (e) {
+        console.error('Anhang-Upload fehlgeschlagen (' + att.filename + '):', e.message);
+      }
+    }
+  } catch (e) {
+    console.error('extractAndSaveMailAttachments Fehler:', e.message);
+  }
+}
+
 app.post('/api/akten/:id/post', (req, res) => {
   const userId = Number(req.headers['x-user-id']);
   const { post_date, participant, subject, s3_key, filename, attachment_count, direction } = req.body;
@@ -4628,12 +4767,17 @@ app.post('/api/akten/:id/post', (req, res) => {
     'INSERT INTO akten_post (akte_id, post_date, sender, recipient, subject, s3_key, filename, uploaded_by, attachment_count, direction, participant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [Number(req.params.id), post_date || new Date().toISOString().split('T')[0], '', '', subject || '', s3_key || '', filename, userId, Number(attachment_count) || 0, dir, part]
   );
-  // Async: Anhaenge aus der hochgeladenen Mail extrahieren und in DB nachtragen
-  detectMailAttachmentCount(s3_key, filename).then(count => {
-    if (count !== null) {
-      execute('UPDATE akten_post SET attachment_count = ? WHERE id = ?', [count, result.lastId]);
-    }
-  });
+  // Async: Anhaenge aus der hochgeladenen Mail extrahieren, in S3 ablegen und in DB tracken
+  (async () => {
+    try {
+      const post = queryOne('SELECT id, s3_key, filename FROM akten_post WHERE id = ?', [result.lastId]);
+      if (post) {
+        await extractAndSaveMailAttachments(post);
+        const c = queryOne('SELECT COUNT(*) AS c FROM akten_post_attachments WHERE post_id = ?', [post.id]);
+        execute('UPDATE akten_post SET attachment_count = ? WHERE id = ?', [(c && c.c) || 0, post.id]);
+      }
+    } catch (_) {}
+  })();
   res.json({ id: result.lastId, message: 'Post eingetragen' });
 });
 

@@ -15938,6 +15938,23 @@ function postItemClick(postId, b64Key, b64Name) {
   }
 }
 
+// Mail-Anhang oeffnen: in Electron mit nativer App, im Browser in neuem Tab.
+async function openMailAttachment(b64S3Key, filename) {
+  let s3Key;
+  try { s3Key = decodeURIComponent(escape(atob(b64S3Key))); } catch (e) { showToast('Ungueltiger Anhang-Pfad', 'error'); return; }
+  try {
+    const r = await api('/api/files/download?key=' + encodeURIComponent(s3Key));
+    if (!r || !r.url) throw new Error('Kein Download-Link');
+    if (window.electronAPI && typeof window.electronAPI.openFileNative === 'function') {
+      await window.electronAPI.openFileNative(r.url, s3Key, filename);
+    } else {
+      window.open(r.url, '_blank');
+    }
+  } catch (err) {
+    showToast('Anhang konnte nicht geoeffnet werden: ' + (err.message || err), 'error');
+  }
+}
+
 // Einheitliche Email-Vorschau fuer .msg und .eml.
 // - Header (Betreff/Von/An/CC/Datum/Anhaenge) oben fix sichtbar
 // - Body in einem Sandboxed-iframe (srcdoc), damit Mail-HTML/CSS NICHT die App kaputt macht
@@ -15967,14 +15984,26 @@ function renderEmailPreview(panel, key, ext) {
         : '';
       const attBlock = (msg.attachments && msg.attachments.length)
         ? '<div style="margin-top:8px;padding:8px 10px;background:#fef3c7;border-left:3px solid #f59e0b;border-radius:4px;font-size:12px;">'
-          + '<div style="font-weight:600;margin-bottom:4px;color:#92400e;">&#128206; '
+          + '<div style="font-weight:600;margin-bottom:6px;color:#92400e;">&#128206; '
           + msg.attachments.length + ' Anhang' + (msg.attachments.length !== 1 ? 'e' : '')
           + '</div>'
-          + '<ul style="margin:0;padding-left:18px;color:#78350f;">'
-          + msg.attachments.map(a => '<li>' + escapeHtml(a.name || 'Anhang')
-              + (a.size ? ' <span style="color:var(--text-muted);">(' + fmtBytes(a.size) + ')</span>' : '')
-              + '</li>').join('')
-          + '</ul></div>'
+          + '<div style="display:flex;flex-wrap:wrap;gap:6px;">'
+          + msg.attachments.map(a => {
+              const safeName = String(a.name || 'Anhang').replace(/'/g, "&#39;");
+              const sizeText = a.size ? ' (' + fmtBytes(a.size) + ')' : '';
+              if (a.s3_key) {
+                const b64 = btoa(unescape(encodeURIComponent(a.s3_key)));
+                return '<button onclick="openMailAttachment(\'' + b64 + '\',\'' + safeName + '\')"'
+                  + ' style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#fff;border:1px solid #f59e0b;border-radius:4px;color:#78350f;cursor:pointer;font-size:12px;font-family:inherit;"'
+                  + ' title="Oeffnen">&#128206; ' + escapeHtml(a.name || 'Anhang')
+                  + '<span style="color:var(--text-muted);">' + escapeHtml(sizeText) + '</span></button>';
+              }
+              // Kein s3_key (z.B. Backfill noch ausstehend) — nur Text anzeigen
+              return '<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#fff;border:1px dashed #d1d5db;border-radius:4px;color:#78350f;font-size:12px;" title="Anhang wird beim ersten Oeffnen extrahiert">&#128206; '
+                + escapeHtml(a.name || 'Anhang')
+                + '<span style="color:var(--text-muted);">' + escapeHtml(sizeText) + '</span></span>';
+            }).join('')
+          + '</div></div>'
         : '';
 
       // Body: HTML bevorzugt, Plaintext als Fallback. HTML wird in sandboxed iframe gerendert,

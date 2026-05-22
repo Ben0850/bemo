@@ -1003,6 +1003,22 @@ async function getDb() {
   `);
 
   try { db.run("ALTER TABLE akten_post ADD COLUMN attachment_count INTEGER DEFAULT 0"); } catch(e) {}
+
+  // Mail-Anhaenge: separat in S3 gespeichert (unter <korrespondenz>/anhaenge-<postId>/),
+  // hier nur Metadaten + s3_key fuer den Direkt-Zugriff.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS akten_post_attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id INTEGER NOT NULL,
+      filename TEXT NOT NULL,
+      s3_key TEXT NOT NULL,
+      size INTEGER DEFAULT 0,
+      content_type TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (post_id) REFERENCES akten_post(id) ON DELETE CASCADE
+    )
+  `);
+  try { db.run('CREATE INDEX IF NOT EXISTS idx_apa_post_id ON akten_post_attachments(post_id)'); } catch(e) {}
   try { db.run("ALTER TABLE akten_post ADD COLUMN direction TEXT DEFAULT 'eingehend'"); } catch(e) {}
   try { db.run("ALTER TABLE akten_post ADD COLUMN participant TEXT DEFAULT ''"); } catch(e) {}
   // Bestandsdaten: participant aus sender (eingehend) bzw. recipient (ausgehend) befüllen, falls leer
