@@ -15809,30 +15809,18 @@ async function renderAkteDetail(id) {
 }
 
 // === Akten-Post (Korrespondenz) ===
-// Datei-Format als kleines Symbol/Badge fuer die Post-Liste
+// Datei-Format als eindeutiges Badge fuer die Post-Liste.
+// In der Post duerfen aktuell nur PDF und E-Mails (.msg/.eml) hochgeladen werden —
+// diese beiden bekommen klar erkennbare farbige Text-Badges. Andere Endungen werden
+// nur als Fallback gerendert (sollte normalerweise nicht vorkommen).
 function postFormatBadge(filename) {
   const ext = (String(filename).split('.').pop() || '').toLowerCase();
-  const map = {
-    pdf:   { icon: '📕', label: 'PDF',   color: '#dc2626' },
-    msg:   { icon: '✉',       label: 'Mail',  color: '#2563eb' },
-    eml:   { icon: '✉',       label: 'Mail',  color: '#2563eb' },
-    doc:   { icon: '📝', label: 'Word',  color: '#2563eb' },
-    docx:  { icon: '📝', label: 'Word',  color: '#2563eb' },
-    xls:   { icon: '📊', label: 'Excel', color: '#059669' },
-    xlsx:  { icon: '📊', label: 'Excel', color: '#059669' },
-    ppt:   { icon: '📈', label: 'PPT',   color: '#d97706' },
-    pptx:  { icon: '📈', label: 'PPT',   color: '#d97706' },
-    jpg:   { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
-    jpeg:  { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
-    png:   { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
-    gif:   { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
-    webp:  { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
-    svg:   { icon: '🖼', label: 'Bild',  color: '#7c3aed' },
-    txt:   { icon: '📄', label: 'Text',  color: '#6b7280' },
-    zip:   { icon: '🗄', label: 'ZIP',   color: '#6b7280' }
-  };
-  const entry = map[ext] || { icon: '📎', label: ext.toUpperCase() || 'Datei', color: '#6b7280' };
-  return '<span title="' + escapeHtml(entry.label + (ext ? ' (.' + ext + ')' : '')) + '" style="display:inline-block;font-size:18px;line-height:1;color:' + entry.color + ';">' + entry.icon + '</span>';
+  const pdfBadge = '<span title="PDF-Dokument" style="display:inline-flex;align-items:center;justify-content:center;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:800;letter-spacing:0.5px;background:#dc2626;color:#fff;box-shadow:0 1px 2px rgba(220,38,38,0.4);font-family:Arial,sans-serif;">PDF</span>';
+  const mailBadge = '<span title="E-Mail (.' + escapeHtml(ext) + ')" style="display:inline-flex;align-items:center;justify-content:center;gap:3px;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:0.4px;background:#2563eb;color:#fff;box-shadow:0 1px 2px rgba(37,99,235,0.4);font-family:Arial,sans-serif;"><svg width="11" height="9" viewBox="0 0 16 12" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;"><rect x="0.5" y="0.5" width="15" height="11" rx="1" stroke="currentColor" stroke-width="1"/><path d="M1 1.5L8 6.5L15 1.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>MAIL</span>';
+  if (ext === 'pdf') return pdfBadge;
+  if (ext === 'msg' || ext === 'eml') return mailBadge;
+  // Fallback fuer alles andere
+  return '<span title="' + escapeHtml(ext.toUpperCase() || 'Datei') + '" style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;background:#e5e7eb;color:#4b5563;font-family:Arial,sans-serif;">' + escapeHtml((ext || '?').toUpperCase()) + '</span>';
 }
 
 async function loadPostList(akteId) {
