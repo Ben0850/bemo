@@ -764,10 +764,7 @@ async function renderDashboard() {
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
               <span class="dash-role-chip">&#9823; ${escapeHtml(loggedInUser.permission_level || 'Benutzer')}</span>
-              <div style="position:relative;">
-                <button class="dash-pw-btn" id="dash-electron-btn" onclick="toggleElectronDownloadDropdown(event)">&#128229; Download Electron App</button>
-                <div id="dash-electron-dropdown" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.18);padding:6px 0;min-width:300px;max-height:360px;overflow-y:auto;z-index:50000;"></div>
-              </div>
+              <button class="dash-pw-btn" id="dash-electron-btn" onclick="toggleElectronDownloadDropdown(event)">&#128229; Download Electron App</button>
               <button class="dash-pw-btn" onclick="openChangePasswordModal()">&#9881; Passwort</button>
             </div>
           </div>
@@ -5815,16 +5812,31 @@ function formatElectronFileSize(bytes) {
   return mb >= 1 ? mb.toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
 }
 
+function closeElectronDownloadDropdown() {
+  const existing = document.getElementById('dash-electron-dropdown-portal');
+  if (existing) existing.remove();
+}
+
 async function toggleElectronDownloadDropdown(ev) {
   if (ev) ev.stopPropagation();
-  const dd = document.getElementById('dash-electron-dropdown');
-  if (!dd) return;
-  if (dd.style.display !== 'none') {
-    dd.style.display = 'none';
+
+  // Falls Dropdown bereits offen → schließen
+  if (document.getElementById('dash-electron-dropdown-portal')) {
+    closeElectronDownloadDropdown();
     return;
   }
-  dd.style.display = 'block';
+
+  // Position relativ zum Button bestimmen — wir rendern als FIXED in body (raus aus jedem stacking context)
+  const btn = document.getElementById('dash-electron-btn');
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+
+  const dd = document.createElement('div');
+  dd.id = 'dash-electron-dropdown-portal';
+  dd.style.cssText = `position:fixed;top:${rect.bottom + 6}px;right:${window.innerWidth - rect.right}px;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.18);padding:6px 0;min-width:300px;max-height:360px;overflow-y:auto;z-index:200000;`;
   dd.innerHTML = '<div style="padding:12px 16px;color:var(--text-muted);font-size:13px;">Lade verfügbare Versionen...</div>';
+  document.body.appendChild(dd);
+
   try {
     const result = await api('/api/files/list?folder=Electron');
     const files = (result.files || []).filter(f => f.name && /\.(exe|msi|dmg|appimage|zip)$/i.test(f.name));
@@ -5853,6 +5865,7 @@ async function toggleElectronDownloadDropdown(ev) {
         ev.stopPropagation();
         const idx = parseInt(a.getAttribute('data-idx'), 10);
         const file = files[idx];
+        closeElectronDownloadDropdown();
         if (file) downloadElectronFile(file.key, file.name);
       });
     });
@@ -5930,12 +5943,12 @@ async function downloadElectronFile(key, filename) {
 
 // Klick außerhalb des Dropdowns schließt es
 document.addEventListener('click', (e) => {
-  const dd = document.getElementById('dash-electron-dropdown');
+  const dd = document.getElementById('dash-electron-dropdown-portal');
+  if (!dd) return;
   const btn = document.getElementById('dash-electron-btn');
-  if (!dd || dd.style.display === 'none') return;
   if (e.target === btn || btn?.contains(e.target)) return;
   if (dd.contains(e.target)) return;
-  dd.style.display = 'none';
+  closeElectronDownloadDropdown();
 });
 
 // ===== Change own password =====
