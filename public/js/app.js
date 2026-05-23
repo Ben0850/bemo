@@ -5856,10 +5856,69 @@ async function toggleElectronDownloadDropdown(ev) {
   }
 }
 
-function downloadElectronFile(key, filename) {
-  s3Download(key, filename);
+function showElectronInstallInstructions() {
+  return new Promise(resolve => {
+    const existing = document.getElementById('install-info-overlay');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'install-info-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100002;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:560px;width:90%;box-shadow:0 16px 48px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 6px;font-size:18px;">Installation der Bemo Desktop-App</h3>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:18px;">Bitte folge diesen Schritten:</div>
+        <ol style="margin:0 0 22px;padding-left:22px;font-size:14px;line-height:1.7;color:var(--text);">
+          <li>Im folgenden Dialog die Datei <b>auf dem Desktop</b> speichern. Der Dateiname <b>„Installationsdatei"</b> ist bereits vorgegeben — bitte so lassen.</li>
+          <li>Auf dem Desktop <b>doppelklicken</b>, um die Installation zu starten. Den Anweisungen folgen.</li>
+          <li>Nach erfolgreicher Installation die Datei <b>„Installationsdatei"</b> vom Desktop wieder <b>löschen</b>.</li>
+        </ol>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button type="button" id="install-info-cancel" class="btn btn-secondary">Abbrechen</button>
+          <button type="button" id="install-info-ok" class="btn btn-primary">Verstanden, weiter</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const finish = (val) => { try { overlay.remove(); } catch (e) {} resolve(val); };
+    overlay.querySelector('#install-info-ok').addEventListener('click', (e) => { e.stopPropagation(); finish(true); });
+    overlay.querySelector('#install-info-cancel').addEventListener('click', (e) => { e.stopPropagation(); finish(false); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) finish(false); });
+    overlay.querySelector('#install-info-ok').focus();
+  });
+}
+
+async function downloadElectronFile(key, filename) {
   const dd = document.getElementById('dash-electron-dropdown');
   if (dd) dd.style.display = 'none';
+
+  // Vor jedem Download: kurze Installationsanleitung anzeigen
+  const proceed = await showElectronInstallInstructions();
+  if (!proceed) return;
+
+  // Endung des Originals beibehalten, Dateiname auf "Installationsdatei" festlegen
+  const dotIdx = filename.lastIndexOf('.');
+  const ext = dotIdx >= 0 ? filename.substring(dotIdx) : '';
+  const saveName = 'Installationsdatei' + ext;
+
+  // In der Electron-App: nativer „Speichern unter…"-Dialog mit vorgegebenem Namen
+  if (window.electronAPI && typeof window.electronAPI.saveFileTo === 'function') {
+    try {
+      const dl = await api('/api/files/download?key=' + encodeURIComponent(key));
+      const res = await window.electronAPI.saveFileTo(dl.url, saveName);
+      if (res && res.canceled) return;
+      if (res && res.success) {
+        showToast('Datei gespeichert: ' + res.path);
+      } else {
+        showToast('Download fehlgeschlagen: ' + (res && res.error ? res.error : 'unbekannter Fehler'), 'error');
+      }
+    } catch (e) {
+      showToast('Download fehlgeschlagen: ' + e.message, 'error');
+    }
+    return;
+  }
+
+  // Im Browser: Standard-Download mit dem Namen „Installationsdatei.exe"
+  s3Download(key, saveName);
 }
 
 // Klick außerhalb des Dropdowns schließt es
