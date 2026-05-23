@@ -766,7 +766,7 @@ async function renderDashboard() {
               <span class="dash-role-chip">&#9823; ${escapeHtml(loggedInUser.permission_level || 'Benutzer')}</span>
               <div style="position:relative;">
                 <button class="dash-pw-btn" id="dash-electron-btn" onclick="toggleElectronDownloadDropdown(event)">&#128229; Download Electron App</button>
-                <div id="dash-electron-dropdown" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.18);padding:6px 0;min-width:300px;max-height:360px;overflow-y:auto;z-index:1000;"></div>
+                <div id="dash-electron-dropdown" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.18);padding:6px 0;min-width:300px;max-height:360px;overflow-y:auto;z-index:50000;"></div>
               </div>
               <button class="dash-pw-btn" onclick="openChangePasswordModal()">&#9881; Passwort</button>
             </div>
@@ -5893,6 +5893,8 @@ function showElectronInstallInstructions() {
 }
 
 async function downloadElectronFile(key, filename) {
+  console.log('[DownloadElectronFile] Click registriert. key=', key, 'filename=', filename);
+  showToast('Download wird vorbereitet…');
   const dd = document.getElementById('dash-electron-dropdown');
   if (dd) dd.style.display = 'none';
 
