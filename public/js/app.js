@@ -5906,11 +5906,6 @@ function showElectronInstallInstructions() {
 }
 
 async function downloadElectronFile(key, filename) {
-  console.log('[DownloadElectronFile] Click registriert. key=', key, 'filename=', filename);
-  showToast('Download wird vorbereitet…');
-  const dd = document.getElementById('dash-electron-dropdown');
-  if (dd) dd.style.display = 'none';
-
   // Vor jedem Download: kurze Installationsanleitung anzeigen
   const proceed = await showElectronInstallInstructions();
   if (!proceed) return;
@@ -5937,7 +5932,34 @@ async function downloadElectronFile(key, filename) {
     return;
   }
 
-  // Im Browser: Standard-Download mit dem Namen „Installationsdatei.exe"
+  // Moderner Browser (Chrome/Edge): File System Access API → nativer Speicherdialog
+  if (typeof window.showSaveFilePicker === 'function') {
+    let handle;
+    try {
+      handle = await window.showSaveFilePicker({
+        suggestedName: saveName,
+        types: [{ description: 'Installationsdatei', accept: { 'application/octet-stream': [ext || '.exe'] } }]
+      });
+    } catch (e) {
+      if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) return; // User-Abbruch
+      // Fallback bei anderem Fehler
+      s3Download(key, saveName);
+      return;
+    }
+    try {
+      showToast('Download läuft…');
+      const response = await fetch('/api/files/proxy-download?key=' + encodeURIComponent(key));
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      const writable = await handle.createWritable();
+      await response.body.pipeTo(writable);
+      showToast('Datei gespeichert: ' + handle.name);
+    } catch (e) {
+      showToast('Download fehlgeschlagen: ' + e.message, 'error');
+    }
+    return;
+  }
+
+  // Firefox/Safari/ältere Browser: Standard-Download in den Downloads-Ordner
   s3Download(key, saveName);
 }
 
