@@ -4572,6 +4572,36 @@ async function s3LoadFolder(folder) {
   }
 }
 
+// Nach erfolgreichem Upload: in der Electron-App fragen, ob die Originaldateien
+// (vom Desktop/Explorer) in den Papierkorb verschoben werden sollen.
+// Im Browser passiert nichts — file.path existiert dort nicht.
+async function maybePromptDeleteSourceFiles(fileList) {
+  if (!window.electronAPI || typeof window.electronAPI.deleteSourceFiles !== 'function') return;
+  if (!fileList || !fileList.length) return;
+  const files = Array.from(fileList);
+  const paths = files.map(f => f.path).filter(p => typeof p === 'string' && p);
+  if (!paths.length) return;
+  const names = files.map(f => f.name);
+  const preview = names.length <= 3
+    ? names.join(', ')
+    : names.slice(0, 3).join(', ') + ' und ' + (names.length - 3) + ' weitere';
+  const plural = paths.length > 1;
+  const msg = `Originaldatei${plural ? 'en' : ''} vom Computer in den Papierkorb verschieben?\n\n${preview}\n\n(Wiederherstellbar über den Windows-Papierkorb.)`;
+  if (!confirm(msg)) return;
+  try {
+    const res = await window.electronAPI.deleteSourceFiles(paths);
+    if (res && res.success) {
+      showToast((res.deleted || paths.length) + ` Originaldatei${(res.deleted || paths.length) > 1 ? 'en' : ''} in Papierkorb verschoben`);
+    } else if (res && res.deleted > 0) {
+      showToast(res.deleted + ` von ${paths.length} Originaldateien verschoben — Rest fehlgeschlagen`, 'error');
+    } else {
+      showToast('Originaldateien konnten nicht entfernt werden' + (res?.errors?.length ? ': ' + res.errors[0] : ''), 'error');
+    }
+  } catch (e) {
+    showToast('Fehler beim Entfernen: ' + e.message, 'error');
+  }
+}
+
 async function s3UploadFiles(fileList) {
   if (!fileList || fileList.length === 0) return;
 
@@ -4626,6 +4656,7 @@ async function s3UploadFiles(fileList) {
   if (fileInput) fileInput.value = '';
   await s3LoadFolder(_s3CurrentPath);
   showToast(fileList.length + ' Datei(en) hochgeladen');
+  await maybePromptDeleteSourceFiles(fileList);
 }
 
 function fileToBase64(file) {
@@ -14537,6 +14568,7 @@ async function akUploadFiles(files) {
   }
   showToast(files.length + ' Datei(en) hochgeladen');
   akLoadFolder(_akCurrentPath);
+  await maybePromptDeleteSourceFiles(files);
 }
 
 // ===== Rental Document Browser =====
@@ -15482,31 +15514,37 @@ async function renderAkteDetail(id) {
       if (b.type === 'kunde' && b.entity) {
         const c = b.entity;
         const dn = (c.customer_type === 'Firmenkunde' || c.customer_type === 'Werkstatt') ? c.company_name : `${c.first_name || ''} ${c.last_name || ''}`;
+        const plzOrt = [c.zip, c.city].filter(Boolean).join(' ');
         panelContent = `<div class="bet-contact-grid">
           ${cell('Name', fmt(dn))}
           ${cell('Telefon', fmtPhone(c.phone))}
           ${cell('E-Mail', fmtMail(c.email))}
-          ${c.city ? cell('Ort', fmt(c.city)) : ''}
+          ${cell('Straße', fmt(c.street))}
+          ${cell('PLZ / Ort', fmt(plzOrt))}
         </div>
         <button class="btn-bet-detail" onclick="showBeteiligterDetail('kunde', ${b.entity_id})">Details anzeigen</button>`;
       } else if (b.type === 'vermittler' && b.entity) {
         const v = b.entity;
+        const plzOrt = [v.plz, v.ort].filter(Boolean).join(' ');
         panelContent = `<div class="bet-contact-grid">
           ${cell('Name', fmt(v.name))}
           ${cell('Ansprechpartner', fmt(v.ansprechpartner))}
           ${cell('Telefon', fmtPhone(v.telefon))}
           ${cell('E-Mail', fmtMail(v.email))}
-          ${cell('Ort', fmt(v.ort))}
+          ${cell('Straße', fmt(v.strasse))}
+          ${cell('PLZ / Ort', fmt(plzOrt))}
         </div>
         <button class="btn-bet-detail" onclick="showBeteiligterDetail('vermittler', ${b.entity_id})">Details anzeigen</button>`;
       } else if (b.type === 'werkstatt' && b.entity) {
         const w = b.entity;
+        const plzOrt = [w.plz, w.ort].filter(Boolean).join(' ');
         panelContent = `<div class="bet-contact-grid">
           ${cell('Name', fmt(w.name))}
           ${cell('Ansprechpartner', fmt(w.ansprechpartner))}
           ${cell('Telefon', fmtPhone(w.telefon))}
           ${cell('E-Mail', fmtMail(w.email))}
-          ${cell('Ort', fmt(w.ort))}
+          ${cell('Straße', fmt(w.strasse))}
+          ${cell('PLZ / Ort', fmt(plzOrt))}
         </div>
         <button class="btn-bet-detail" onclick="showBeteiligterDetail('vermittler', ${b.entity_id})">Details anzeigen</button>`;
       } else if (b.type === 'versicherung' && b.entity) {
@@ -15515,11 +15553,14 @@ async function renderAkteDetail(id) {
         const sn = b.schadennummer || '';
         const vnLabel = vn ? ('Versicherungsnr.: ' + vn) : '+ Versicherungsnummer';
         const snLabel = sn ? ('Schadennr.: ' + sn) : '+ Schadennummer';
+        const plzOrt = [ins.plz, ins.ort].filter(Boolean).join(' ');
         panelContent = `<div class="bet-contact-grid">
           ${cell('Name', fmt(ins.name))}
+          ${cell('Ansprechpartner', fmt(ins.ansprechpartner || ins.contact_person))}
           ${cell('Telefon', fmtPhone(ins.telefon1 || ins.telefon || ins.phone))}
           ${cell('E-Mail', fmtMail(ins.email))}
-          ${cell('Ansprechpartner', fmt(ins.ansprechpartner || ins.contact_person))}
+          ${cell('Straße', fmt(ins.strasse))}
+          ${cell('PLZ / Ort', fmt(plzOrt))}
         </div>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn-bet-detail" onclick="showBeteiligterDetail('versicherung', ${b.entity_id})">Details anzeigen</button>
@@ -15530,12 +15571,15 @@ async function renderAkteDetail(id) {
         const l = b.entity;
         const az = b.aktenzeichen || '';
         const azBtnLabel = az ? ('Aktenzeichen: ' + az) : '+ Aktenzeichen';
+        const plzOrt = [l.plz, l.ort].filter(Boolean).join(' ');
         // Aktenzeichen-Button ist fuer ALLE eingeloggten Benutzer (inkl. "Benutzer") bearbeitbar
         panelContent = `<div class="bet-contact-grid">
           ${cell('Name', fmt(l.name))}
           ${cell('Kanzlei', fmt(l.kanzlei))}
           ${cell('Telefon', fmtPhone(l.telefon1))}
           ${cell('E-Mail', fmtMail(l.email))}
+          ${cell('Straße', fmt(l.strasse))}
+          ${cell('PLZ / Ort', fmt(plzOrt))}
         </div>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn-bet-detail" onclick="showBeteiligterDetail('anwalt', ${b.entity_id})">Details anzeigen</button>
@@ -16281,6 +16325,7 @@ async function openPostMetaDialog(fileLabel) {
     for (const file of _pendingPostFiles) {
       await uploadPostFile(_pendingPostAkteId, _pendingPostAktennummer, file, postDate, participant, subject, direction);
     }
+    await maybePromptDeleteSourceFiles(_pendingPostFiles);
   };
 }
 
