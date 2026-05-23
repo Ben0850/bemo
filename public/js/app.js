@@ -84,6 +84,216 @@ async function api(url, options = {}) {
   return data;
 }
 
+// ===== Globaler Upload-Manager =====
+// Modales Fenster mit Fortschritt + Abbrechen.
+// Verwendung:
+//   await uploadManager.run({ files: fileList, folder: 'Akten/123', label: 'Hochladen…' });
+// Für komplexe Flows (z.B. Korrespondenz mit DB-Entry):
+//   await uploadManager.run({ files, label, itemUploader: async (file, ctx, onProgress) => {...} });
+// Returnwert: { completed, cancelled, errors }
+// Server akzeptiert ~250 MB JSON-Payload. Base64-Overhead ~33% → 180 MB Roh-Limit pro Datei.
+const MAX_UPLOAD_SIZE = 180 * 1024 * 1024;
+
+const uploadManager = {
+  _xhr: null,
+  _cancelled: false,
+  _busy: false,
+
+  async run({ files, folder, label, itemUploader }) {
+    if (this._busy) {
+      showToast('Es läuft bereits ein Upload — bitte warten oder abbrechen.', 'error');
+      return { completed: 0, cancelled: true, errors: [] };
+    }
+    const list = Array.from(files || []);
+    if (!list.length) return { completed: 0, cancelled: false, errors: [] };
+
+    // Größenprüfung vor dem Upload — Server akzeptiert nur bis 250 MB JSON-Payload.
+    const tooLarge = list.filter(f => f.size > MAX_UPLOAD_SIZE);
+    if (tooLarge.length) {
+      const maxMB = Math.floor(MAX_UPLOAD_SIZE / (1024 * 1024));
+      const lines = tooLarge.slice(0, 5).map(f => `• ${f.name} (${(f.size / (1024 * 1024)).toFixed(1)} MB)`);
+      if (tooLarge.length > 5) lines.push(`• … und ${tooLarge.length - 5} weitere`);
+      const intro = tooLarge.length === 1
+        ? 'Die folgende Datei überschreitet die maximal erlaubte Upload-Größe'
+        : `${tooLarge.length} Dateien überschreiten die maximal erlaubte Upload-Größe`;
+      await this._showError(
+        tooLarge.length === 1 ? 'Datei zu groß' : 'Dateien zu groß',
+        `${intro} (max. ${maxMB} MB pro Datei):\n\n${lines.join('\n')}\n\nDer Upload wurde nicht gestartet.`
+      );
+      return { completed: 0, cancelled: true, errors: [], tooLarge: tooLarge.map(f => f.name) };
+    }
+
+    this._busy = true;
+    this._cancelled = false;
+    const total = list.length;
+    const errors = [];
+    let completed = 0;
+    this._show(label || `${total} Datei${total > 1 ? 'en werden' : ' wird'} hochgeladen…`, total);
+
+    try {
+      for (let i = 0; i < total; i++) {
+        if (this._cancelled) break;
+        const file = list[i];
+        this._updateFile(file.name, i + 1, total, 0);
+        const onProgress = (pct) => {
+          if (!this._cancelled) this._updateFile(file.name, i + 1, total, pct);
+        };
+        try {
+          if (itemUploader) {
+            await itemUploader(file, { index: i, total, folder }, onProgress);
+          } else {
+            await this.uploadOne({ folder, filename: file.name, file, content_type: file.type }, onProgress);
+          }
+          if (!this._cancelled) completed++;
+        } catch (e) {
+          if (this._cancelled) break;
+          errors.push({ filename: file.name, error: e.message || String(e) });
+        }
+      }
+    } finally {
+      this._hide();
+      this._busy = false;
+      this._xhr = null;
+    }
+
+    return { completed, cancelled: this._cancelled, errors };
+  },
+
+  // Wickelt einen einzelnen Datei-Upload über /api/files/upload ab.
+  uploadOne(payload, onProgress) {
+    return new Promise(async (resolve, reject) => {
+      if (this._cancelled) return resolve({ cancelled: true });
+      let base64;
+      try {
+        base64 = await this._readBase64(payload.file);
+      } catch (e) { return reject(e); }
+      if (this._cancelled) return resolve({ cancelled: true });
+
+      const xhr = new XMLHttpRequest();
+      this._xhr = xhr;
+      xhr.open('POST', '/api/files/upload');
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      if (loggedInUser) {
+        xhr.setRequestHeader('X-User-Permission', loggedInUser.permission_level || 'Benutzer');
+        xhr.setRequestHeader('X-User-Id', String(loggedInUser.id || ''));
+        xhr.setRequestHeader('X-User-Name', loggedInUser.username || '');
+      }
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+      xhr.onload = () => {
+        this._xhr = null;
+        if (xhr.status >= 200 && xhr.status < 300) {
+          if (onProgress) onProgress(100);
+          try { resolve(JSON.parse(xhr.responseText)); } catch (e) { resolve({}); }
+        } else {
+          let msg = 'HTTP ' + xhr.status;
+          try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+          reject(new Error(msg));
+        }
+      };
+      xhr.onerror = () => {
+        this._xhr = null;
+        if (this._cancelled) return resolve({ cancelled: true });
+        reject(new Error('Netzwerkfehler beim Upload'));
+      };
+      xhr.onabort = () => { this._xhr = null; resolve({ cancelled: true }); };
+      xhr.send(JSON.stringify({
+        folder: payload.folder,
+        filename: payload.filename,
+        data: base64,
+        content_type: payload.content_type || 'application/octet-stream'
+      }));
+    });
+  },
+
+  _readBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Datei nicht lesbar'));
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.readAsDataURL(file);
+    });
+  },
+
+  cancel() {
+    if (!this._busy) return;
+    this._cancelled = true;
+    if (this._xhr) {
+      try { this._xhr.abort(); } catch (e) {}
+    }
+    const btn = document.getElementById('upload-progress-cancel');
+    if (btn) { btn.disabled = true; btn.textContent = 'Abbrechen…'; }
+    const title = document.getElementById('upload-progress-title');
+    if (title) title.textContent = 'Wird abgebrochen…';
+  },
+
+  _show(label, total) {
+    let overlay = document.getElementById('upload-progress-overlay');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = 'upload-progress-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;padding:28px 32px;min-width:440px;max-width:560px;box-shadow:0 12px 40px rgba(0,0,0,0.25);">
+        <div style="font-size:16px;font-weight:600;margin-bottom:16px;" id="upload-progress-title">${escapeHtml(label)}</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:6px;" id="upload-progress-counter">Datei 1 von ${total}</div>
+        <div style="font-size:14px;font-weight:500;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="upload-progress-filename">…</div>
+        <div style="background:var(--border);height:10px;border-radius:6px;overflow:hidden;margin-bottom:8px;">
+          <div id="upload-progress-bar" style="background:var(--primary);height:100%;width:0%;transition:width 0.15s;"></div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:20px;" id="upload-progress-percent">0%</div>
+        <div style="display:flex;justify-content:flex-end;">
+          <button class="btn btn-secondary" id="upload-progress-cancel" onclick="uploadManager.cancel()">Abbrechen</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  },
+
+  _hide() {
+    const overlay = document.getElementById('upload-progress-overlay');
+    if (overlay) overlay.remove();
+  },
+
+  _updateFile(filename, current, total, percent) {
+    const c = document.getElementById('upload-progress-counter');
+    const fn = document.getElementById('upload-progress-filename');
+    const bar = document.getElementById('upload-progress-bar');
+    const p = document.getElementById('upload-progress-percent');
+    if (c) c.textContent = `Datei ${current} von ${total}`;
+    if (fn) fn.textContent = filename;
+    if (bar) bar.style.width = percent + '%';
+    if (p) p.textContent = percent + '%';
+  },
+
+  _showError(title, message) {
+    return new Promise(resolve => {
+      const existing = document.getElementById('upload-error-overlay');
+      if (existing) existing.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'upload-error-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100001;display:flex;align-items:center;justify-content:center;';
+      overlay.innerHTML = `
+        <div style="background:#fff;border-radius:12px;padding:24px 28px;max-width:520px;width:90%;box-shadow:0 16px 48px rgba(0,0,0,0.3);">
+          <h3 style="margin:0 0 12px;font-size:17px;color:var(--danger);">${escapeHtml(title)}</h3>
+          <div style="font-size:14px;color:var(--text);margin-bottom:20px;line-height:1.5;white-space:pre-line;">${escapeHtml(message)}</div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button type="button" class="btn btn-primary" id="upload-error-ok">OK</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      const ok = () => { try { overlay.remove(); } catch (e) {} resolve(); };
+      overlay.querySelector('#upload-error-ok').addEventListener('click', (e) => { e.stopPropagation(); ok(); });
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) ok(); });
+      overlay.querySelector('#upload-error-ok').focus();
+    });
+  }
+};
+
 // ===== Toast Notifications =====
 function showToast(message, type = 'success') {
   const container = document.getElementById('toast-container');
@@ -554,6 +764,10 @@ async function renderDashboard() {
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
               <span class="dash-role-chip">&#9823; ${escapeHtml(loggedInUser.permission_level || 'Benutzer')}</span>
+              <div style="position:relative;">
+                <button class="dash-pw-btn" id="dash-electron-btn" onclick="toggleElectronDownloadDropdown(event)">&#128229; Download Electron App</button>
+                <div id="dash-electron-dropdown" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,0.18);padding:6px 0;min-width:300px;max-height:360px;overflow-y:auto;z-index:1000;"></div>
+              </div>
               <button class="dash-pw-btn" onclick="openChangePasswordModal()">&#9881; Passwort</button>
             </div>
           </div>
@@ -4348,16 +4562,7 @@ async function renderTestseite() {
       <input type="file" id="s3-file-input" multiple style="display:none;" onchange="s3UploadFiles(this.files)">
     </div>
 
-    <div id="s3-upload-progress" style="display:none;margin-top:12px;">
-      <div class="card" style="padding:12px 16px;">
-        <div id="s3-upload-status" style="font-size:13px;color:var(--text-muted);"></div>
-        <div id="s3-upload-bar" style="margin-top:8px;height:4px;background:var(--border);border-radius:4px;overflow:hidden;">
-          <div id="s3-upload-bar-fill" style="height:100%;width:0%;background:var(--primary);border-radius:4px;transition:width 0.3s;"></div>
-        </div>
-      </div>
-    </div>
-
-    <div id="s3-split-container" style="display:grid;grid-template-columns:1fr 6px 1fr;margin-top:12px;height:calc(100vh - 280px);min-height:400px;">
+<div id="s3-split-container" style="display:grid;grid-template-columns:1fr 6px 1fr;margin-top:12px;height:calc(100vh - 280px);min-height:400px;">
       <div id="s3-split-left" class="card" style="padding:0;border-radius:var(--radius) 0 0 var(--radius);overflow:hidden;display:flex;flex-direction:column;min-width:0;">
         <div id="s3-breadcrumb" style="padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg);display:flex;align-items:center;gap:4px;font-size:13px;flex-wrap:wrap;flex-shrink:0;"></div>
         <div id="s3-selection-bar" style="padding:8px 16px;background:#eef2ff;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:13px;flex-shrink:0;min-height:37px;"></div>
@@ -4622,41 +4827,18 @@ async function s3UploadFiles(fileList) {
     }
   }
 
-  const progressEl = document.getElementById('s3-upload-progress');
-  const statusEl = document.getElementById('s3-upload-status');
-  const barFill = document.getElementById('s3-upload-bar-fill');
-  progressEl.style.display = '';
-  barFill.style.width = '0%';
-
-  for (let i = 0; i < fileList.length; i++) {
-    const file = fileList[i];
-    const pct = Math.round(((i) / fileList.length) * 100);
-    barFill.style.width = pct + '%';
-    statusEl.textContent = 'Lade hoch: ' + file.name + ' (' + (i + 1) + '/' + fileList.length + ')...';
-    try {
-      const base64 = await fileToBase64(file);
-      await api('/api/files/upload', {
-        method: 'POST',
-        body: {
-          folder: _s3CurrentPath,
-          filename: file.name,
-          data: base64,
-          content_type: file.type || 'application/octet-stream'
-        }
-      });
-    } catch (err) {
-      showToast('Fehler bei ' + file.name + ': ' + err.message, 'error');
-    }
-  }
-
-  barFill.style.width = '100%';
-  statusEl.textContent = fileList.length + ' Datei(en) hochgeladen.';
-  setTimeout(() => { progressEl.style.display = 'none'; }, 2000);
+  const result = await uploadManager.run({ files: fileList, folder: _s3CurrentPath, label: 'Dateien werden hochgeladen…' });
   const fileInput = document.getElementById('s3-file-input');
   if (fileInput) fileInput.value = '';
   await s3LoadFolder(_s3CurrentPath);
-  showToast(fileList.length + ' Datei(en) hochgeladen');
-  await maybePromptDeleteSourceFiles(fileList);
+  if (result.cancelled) {
+    showToast(`Upload abgebrochen — ${result.completed} von ${fileList.length} Datei(en) übertragen`, 'error');
+  } else if (result.errors.length) {
+    showToast(`${result.completed} hochgeladen, ${result.errors.length} fehlgeschlagen`, 'error');
+  } else {
+    showToast(result.completed + ' Datei(en) hochgeladen');
+    await maybePromptDeleteSourceFiles(fileList);
+  }
 }
 
 function fileToBase64(file) {
@@ -5624,6 +5806,71 @@ async function submitForcePassword() {
     errorEl.style.display = '';
   }
 }
+
+// ===== Electron-App-Download (Dashboard-Dropdown) =====
+
+function formatElectronFileSize(bytes) {
+  if (!bytes) return '';
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1 ? mb.toFixed(1) + ' MB' : Math.round(bytes / 1024) + ' KB';
+}
+
+async function toggleElectronDownloadDropdown(ev) {
+  if (ev) ev.stopPropagation();
+  const dd = document.getElementById('dash-electron-dropdown');
+  if (!dd) return;
+  if (dd.style.display !== 'none') {
+    dd.style.display = 'none';
+    return;
+  }
+  dd.style.display = 'block';
+  dd.innerHTML = '<div style="padding:12px 16px;color:var(--text-muted);font-size:13px;">Lade verfügbare Versionen...</div>';
+  try {
+    const result = await api('/api/files/list?folder=Electron');
+    const files = (result.files || []).filter(f => f.name && /\.(exe|msi|dmg|appimage|zip)$/i.test(f.name));
+    if (!files.length) {
+      dd.innerHTML = '<div style="padding:12px 16px;color:var(--text-muted);font-size:13px;">Keine Installations-Dateien im Ordner „Electron" gefunden.</div>';
+      return;
+    }
+    files.sort((a, b) => (b.modified || '').localeCompare(a.modified || ''));
+    let html = '<div style="padding:8px 16px 6px;color:var(--text-muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);">Desktop-App herunterladen</div>';
+    files.forEach(f => {
+      const size = formatElectronFileSize(f.size);
+      const keySafe = JSON.stringify(f.key).replace(/"/g, '&quot;');
+      const nameSafe = JSON.stringify(f.name).replace(/"/g, '&quot;');
+      html += `<a href="#" onclick="event.preventDefault();downloadElectronFile(${keySafe}, ${nameSafe});return false;" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;color:var(--text);text-decoration:none;font-size:13px;border-bottom:1px solid var(--border);">
+        <span style="display:flex;align-items:center;gap:8px;min-width:0;">
+          <span style="flex-shrink:0;">&#128190;</span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(f.name)}</span>
+        </span>
+        <span style="color:var(--text-muted);font-size:11px;flex-shrink:0;">${escapeHtml(size)}</span>
+      </a>`;
+    });
+    dd.innerHTML = html;
+    dd.querySelectorAll('a').forEach(a => {
+      a.addEventListener('mouseenter', () => { a.style.background = 'var(--bg)'; });
+      a.addEventListener('mouseleave', () => { a.style.background = ''; });
+    });
+  } catch (e) {
+    dd.innerHTML = '<div style="padding:12px 16px;color:var(--danger);font-size:13px;">Fehler: ' + escapeHtml(e.message || 'Unbekannt') + '</div>';
+  }
+}
+
+function downloadElectronFile(key, filename) {
+  s3Download(key, filename);
+  const dd = document.getElementById('dash-electron-dropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+// Klick außerhalb des Dropdowns schließt es
+document.addEventListener('click', (e) => {
+  const dd = document.getElementById('dash-electron-dropdown');
+  const btn = document.getElementById('dash-electron-btn');
+  if (!dd || dd.style.display === 'none') return;
+  if (e.target === btn || btn?.contains(e.target)) return;
+  if (dd.contains(e.target)) return;
+  dd.style.display = 'none';
+});
 
 // ===== Change own password =====
 
@@ -10184,21 +10431,16 @@ function fvPreview(key, filename) {
 }
 
 async function fvUploadFiles(vehicleId, files) {
-  for (const file of files) {
-    const reader = new FileReader();
-    await new Promise(resolve => {
-      reader.onload = async () => {
-        const base64 = reader.result.split(',')[1];
-        try {
-          await api('/api/files/upload', { method: 'POST', body: { folder: _fvCurrentPath, filename: file.name, data: base64, content_type: file.type } });
-        } catch (e) {}
-        resolve();
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-  showToast(files.length + ' Datei(en) hochgeladen');
+  const result = await uploadManager.run({ files, folder: _fvCurrentPath, label: 'Dateien werden hochgeladen…' });
   fvLoadFolder(_fvCurrentPath);
+  if (result.cancelled) {
+    showToast(`Upload abgebrochen — ${result.completed} von ${files.length} Datei(en) übertragen`, 'error');
+  } else if (result.errors.length) {
+    showToast(`${result.completed} hochgeladen, ${result.errors.length} fehlgeschlagen`, 'error');
+  } else {
+    showToast(result.completed + ' Datei(en) hochgeladen');
+    await maybePromptDeleteSourceFiles(files);
+  }
 }
 
 function fvCreateFolder() {
@@ -10304,19 +10546,21 @@ async function fvDeleteFolder(folderPath) {
 async function uploadMaintenanceDoc(maintId, vehicleId, files) {
   if (!files || files.length === 0) return;
   const file = files[0];
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const base64 = reader.result.split(',')[1];
-    const folder = 'Fuhrpark/' + vehicleId + '/Dokumente';
-    const filename = 'Wartung_' + maintId + '_' + file.name;
-    try {
-      await api('/api/files/upload', { method: 'POST', body: { folder, filename, data: base64, content_type: file.type } });
-      await api(`/api/fleet-maintenance/${maintId}/docs`, { method: 'POST', body: { filename: file.name, s3_key: folder + '/' + filename } });
-      showToast('Dokument hochgeladen');
-      openFleetMaintenanceForm(vehicleId, maintId);
-    } catch (err) { showToast('Fehler: ' + (err.message || err), 'error'); }
-  };
-  reader.readAsDataURL(file);
+  const folder = 'Fuhrpark/' + vehicleId + '/Dokumente';
+  const filename = 'Wartung_' + maintId + '_' + file.name;
+  const result = await uploadManager.run({
+    files: [file],
+    label: 'Wartungsdokument wird hochgeladen…',
+    itemUploader: async (f, ctx, onProgress) => {
+      await uploadManager.uploadOne({ folder, filename, file: f, content_type: f.type }, onProgress);
+      await api(`/api/fleet-maintenance/${maintId}/docs`, { method: 'POST', body: { filename: f.name, s3_key: folder + '/' + filename } });
+    }
+  });
+  if (result.cancelled) { showToast('Upload abgebrochen', 'error'); return; }
+  if (result.errors.length) { showToast('Fehler: ' + result.errors[0].error, 'error'); return; }
+  showToast('Dokument hochgeladen');
+  openFleetMaintenanceForm(vehicleId, maintId);
+  await maybePromptDeleteSourceFiles([file]);
 }
 
 async function deleteMaintenanceDoc(docId, maintId, vehicleId) {
@@ -10331,19 +10575,21 @@ async function deleteMaintenanceDoc(docId, maintId, vehicleId) {
 async function uploadInsuranceDoc(insId, vehicleId, files) {
   if (!files || files.length === 0) return;
   const file = files[0];
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const base64 = reader.result.split(',')[1];
-    const folder = 'Fuhrpark/' + vehicleId + '/Dokumente';
-    const filename = 'Versicherung_' + insId + '_' + file.name;
-    try {
-      await api('/api/files/upload', { method: 'POST', body: { folder, filename, data: base64, content_type: file.type } });
-      await api(`/api/fleet-insurance/${insId}/docs`, { method: 'POST', body: { filename: file.name, s3_key: folder + '/' + filename } });
-      showToast('Dokument hochgeladen');
-      openFleetInsuranceEdit(insId, vehicleId);
-    } catch (err) { showToast('Fehler: ' + (err.message || err), 'error'); }
-  };
-  reader.readAsDataURL(file);
+  const folder = 'Fuhrpark/' + vehicleId + '/Dokumente';
+  const filename = 'Versicherung_' + insId + '_' + file.name;
+  const result = await uploadManager.run({
+    files: [file],
+    label: 'Versicherungsdokument wird hochgeladen…',
+    itemUploader: async (f, ctx, onProgress) => {
+      await uploadManager.uploadOne({ folder, filename, file: f, content_type: f.type }, onProgress);
+      await api(`/api/fleet-insurance/${insId}/docs`, { method: 'POST', body: { filename: f.name, s3_key: folder + '/' + filename } });
+    }
+  });
+  if (result.cancelled) { showToast('Upload abgebrochen', 'error'); return; }
+  if (result.errors.length) { showToast('Fehler: ' + result.errors[0].error, 'error'); return; }
+  showToast('Dokument hochgeladen');
+  openFleetInsuranceEdit(insId, vehicleId);
+  await maybePromptDeleteSourceFiles([file]);
 }
 
 async function deleteInsuranceDoc(docId, insId, vehicleId) {
@@ -10879,22 +11125,21 @@ async function openFleetDamageEdit(damageId, vehicleId) {
 async function uploadDamageDoc(damageId, vehicleId, files) {
   if (!files || files.length === 0) return;
   const file = files[0];
-  const reader = new FileReader();
-  reader.onload = async () => {
-    const base64 = reader.result.split(',')[1];
-    const folder = 'Fuhrpark/' + vehicleId + '/Dokumente';
-    const filename = 'Schaden_' + damageId + '_' + file.name;
-    try {
-      await api('/api/files/upload', { method: 'POST', body: { folder, filename, data: base64, content_type: file.type } });
-      const s3Key = folder + '/' + filename;
-      await api(`/api/fleet-damages/${damageId}/docs`, { method: 'POST', body: { filename: file.name, s3_key: s3Key } });
-      showToast('Dokument hochgeladen');
-      openFleetDamageEdit(damageId, vehicleId);
-    } catch (err) {
-      showToast('Fehler: ' + (err.message || err), 'error');
+  const folder = 'Fuhrpark/' + vehicleId + '/Dokumente';
+  const filename = 'Schaden_' + damageId + '_' + file.name;
+  const result = await uploadManager.run({
+    files: [file],
+    label: 'Schadensdokument wird hochgeladen…',
+    itemUploader: async (f, ctx, onProgress) => {
+      await uploadManager.uploadOne({ folder, filename, file: f, content_type: f.type }, onProgress);
+      await api(`/api/fleet-damages/${damageId}/docs`, { method: 'POST', body: { filename: f.name, s3_key: folder + '/' + filename } });
     }
-  };
-  reader.readAsDataURL(file);
+  });
+  if (result.cancelled) { showToast('Upload abgebrochen', 'error'); return; }
+  if (result.errors.length) { showToast('Fehler: ' + result.errors[0].error, 'error'); return; }
+  showToast('Dokument hochgeladen');
+  openFleetDamageEdit(damageId, vehicleId);
+  await maybePromptDeleteSourceFiles([file]);
 }
 
 async function deleteDamageDoc(docId, damageId, vehicleId) {
@@ -14554,21 +14799,16 @@ async function akUploadFiles(files) {
     if (input) input.value = '';
     return;
   }
-  for (const file of files) {
-    const reader = new FileReader();
-    await new Promise(resolve => {
-      reader.onload = async () => {
-        try {
-          await api('/api/files/upload', { method: 'POST', body: { folder: _akCurrentPath, filename: file.name, data: reader.result.split(',')[1], content_type: file.type } });
-        } catch (e) {}
-        resolve();
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-  showToast(files.length + ' Datei(en) hochgeladen');
+  const result = await uploadManager.run({ files, folder: _akCurrentPath, label: 'Dateien werden hochgeladen…' });
   akLoadFolder(_akCurrentPath);
-  await maybePromptDeleteSourceFiles(files);
+  if (result.cancelled) {
+    showToast(`Upload abgebrochen — ${result.completed} von ${files.length} Datei(en) übertragen`, 'error');
+  } else if (result.errors.length) {
+    showToast(`${result.completed} hochgeladen, ${result.errors.length} fehlgeschlagen`, 'error');
+  } else {
+    showToast(result.completed + ' Datei(en) hochgeladen');
+    await maybePromptDeleteSourceFiles(files);
+  }
 }
 
 // ===== Rental Document Browser =====
@@ -14734,20 +14974,16 @@ async function rvDeleteFolder(folderPath) {
 }
 
 async function rvUploadFiles(rentalId, files) {
-  for (const file of files) {
-    const reader = new FileReader();
-    await new Promise(resolve => {
-      reader.onload = async () => {
-        try {
-          await api('/api/files/upload', { method: 'POST', body: { folder: _rvCurrentPath, filename: file.name, data: reader.result.split(',')[1], content_type: file.type } });
-        } catch (e) {}
-        resolve();
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-  showToast(files.length + ' Datei(en) hochgeladen');
+  const result = await uploadManager.run({ files, folder: _rvCurrentPath, label: 'Dateien werden hochgeladen…' });
   rvLoadFolder(_rvCurrentPath);
+  if (result.cancelled) {
+    showToast(`Upload abgebrochen — ${result.completed} von ${files.length} Datei(en) übertragen`, 'error');
+  } else if (result.errors.length) {
+    showToast(`${result.completed} hochgeladen, ${result.errors.length} fehlgeschlagen`, 'error');
+  } else {
+    showToast(result.completed + ' Datei(en) hochgeladen');
+    await maybePromptDeleteSourceFiles(files);
+  }
 }
 
 // ===== PAGE: Akten (Case Files) =====
@@ -16321,11 +16557,35 @@ async function openPostMetaDialog(fileLabel) {
     const subject = readPostFieldValue('pm-subject-select', 'pm-subject-custom');
     const postDate = document.getElementById('pm-date').value;
     const direction = (document.querySelector('input[name="pm-direction"]:checked')?.value) || 'eingehend';
+    const akteId = _pendingPostAkteId;
+    const aktennummer = _pendingPostAktennummer;
+    const folder = 'Akten/' + aktennummer + '/Korrespondenz';
+    const filesSnapshot = Array.from(_pendingPostFiles);
     overlay.remove();
-    for (const file of _pendingPostFiles) {
-      await uploadPostFile(_pendingPostAkteId, _pendingPostAktennummer, file, postDate, participant, subject, direction);
+    const result = await uploadManager.run({
+      files: filesSnapshot,
+      label: 'Korrespondenz wird hochgeladen…',
+      itemUploader: async (file, ctx, onProgress) => {
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        const dir = direction || 'eingehend';
+        const part = participant || '';
+        const dateStr = postDate || localDateStr(new Date());
+        const entry = await api(`/api/akten/${akteId}/post`, { method: 'POST', body: { post_date: dateStr, participant: part, subject: subject || '', s3_key: '', filename: file.name, direction: dir } });
+        const newFilename = entry.id + '.' + ext;
+        const s3Key = folder + '/' + newFilename;
+        await uploadManager.uploadOne({ folder, filename: newFilename, file, content_type: file.type }, onProgress);
+        await api(`/api/akten-post/${entry.id}`, { method: 'PUT', body: { post_date: dateStr, participant: part, subject: subject || '', s3_key: s3Key, filename: newFilename, direction: dir } });
+      }
+    });
+    loadPostList(akteId);
+    if (result.cancelled) {
+      showToast(`Upload abgebrochen — ${result.completed} von ${filesSnapshot.length} Datei(en) übertragen`, 'error');
+    } else if (result.errors.length) {
+      showToast(`${result.completed} hochgeladen, ${result.errors.length} fehlgeschlagen`, 'error');
+    } else {
+      showToast(result.completed + ' Datei(en) hochgeladen');
+      await maybePromptDeleteSourceFiles(filesSnapshot);
     }
-    await maybePromptDeleteSourceFiles(_pendingPostFiles);
   };
 }
 
@@ -16406,26 +16666,28 @@ async function openPostUploadForm(akteId, aktennummer) {
     const ext = (file.name.split('.').pop() || '').toLowerCase();
     if (!POST_ALLOWED_EXT.includes(ext)) { showToast('Nur PDF- und E-Mail-Dateien (.pdf, .msg, .eml) erlaubt', 'error'); return; }
     const folder = 'Akten/' + aktennummer + '/Korrespondenz';
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const postDate = document.getElementById('post-date').value;
-        const participant = readPostFieldValue('post-participant-select', 'post-participant-custom');
-        if (!participant) { showToast('Bitte Beteiligten auswählen oder eintragen', 'error'); return; }
-        const subject = readPostFieldValue('post-subject-select', 'post-subject-custom');
-        const direction = (document.querySelector('input[name="post-direction"]:checked')?.value) || 'eingehend';
-        // Create entry first to get ID
-        const entry = await api(`/api/akten/${akteId}/post`, { method: 'POST', body: { post_date: postDate, participant, subject, s3_key: '', filename: file.name, direction } });
+    const postDate = document.getElementById('post-date').value;
+    const participant = readPostFieldValue('post-participant-select', 'post-participant-custom');
+    if (!participant) { showToast('Bitte Beteiligten auswählen oder eintragen', 'error'); return; }
+    const subject = readPostFieldValue('post-subject-select', 'post-subject-custom');
+    const direction = (document.querySelector('input[name="post-direction"]:checked')?.value) || 'eingehend';
+    overlay.remove();
+    const result = await uploadManager.run({
+      files: [file],
+      label: 'Post wird hochgeladen…',
+      itemUploader: async (f, ctx, onProgress) => {
+        const entry = await api(`/api/akten/${akteId}/post`, { method: 'POST', body: { post_date: postDate, participant, subject, s3_key: '', filename: f.name, direction } });
         const newFilename = entry.id + '.' + ext;
         const s3Key = folder + '/' + newFilename;
-        await api('/api/files/upload', { method: 'POST', body: { folder, filename: newFilename, data: reader.result.split(',')[1], content_type: file.type } });
+        await uploadManager.uploadOne({ folder, filename: newFilename, file: f, content_type: f.type }, onProgress);
         await api(`/api/akten-post/${entry.id}`, { method: 'PUT', body: { post_date: postDate, participant, subject, s3_key: s3Key, filename: newFilename, direction } });
-        showToast('Post hochgeladen');
-        overlay.remove();
-        loadPostList(akteId);
-      } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
-    };
-    reader.readAsDataURL(file);
+      }
+    });
+    loadPostList(akteId);
+    if (result.cancelled) { showToast('Upload abgebrochen', 'error'); return; }
+    if (result.errors.length) { showToast('Fehler: ' + result.errors[0].error, 'error'); return; }
+    showToast('Post hochgeladen');
+    await maybePromptDeleteSourceFiles([file]);
   };
 }
 
