@@ -5834,11 +5834,9 @@ async function toggleElectronDownloadDropdown(ev) {
     }
     files.sort((a, b) => (b.modified || '').localeCompare(a.modified || ''));
     let html = '<div style="padding:8px 16px 6px;color:var(--text-muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);">Desktop-App herunterladen</div>';
-    files.forEach(f => {
+    files.forEach((f, idx) => {
       const size = formatElectronFileSize(f.size);
-      const keySafe = JSON.stringify(f.key).replace(/"/g, '&quot;');
-      const nameSafe = JSON.stringify(f.name).replace(/"/g, '&quot;');
-      html += `<a href="#" onclick="event.preventDefault();downloadElectronFile(${keySafe}, ${nameSafe});return false;" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;color:var(--text);text-decoration:none;font-size:13px;border-bottom:1px solid var(--border);">
+      html += `<a href="#" class="electron-dl-item" data-idx="${idx}" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;color:var(--text);text-decoration:none;font-size:13px;border-bottom:1px solid var(--border);cursor:pointer;">
         <span style="display:flex;align-items:center;gap:8px;min-width:0;">
           <span style="flex-shrink:0;">&#128190;</span>
           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(f.name)}</span>
@@ -5847,9 +5845,16 @@ async function toggleElectronDownloadDropdown(ev) {
       </a>`;
     });
     dd.innerHTML = html;
-    dd.querySelectorAll('a').forEach(a => {
+    dd.querySelectorAll('.electron-dl-item').forEach(a => {
       a.addEventListener('mouseenter', () => { a.style.background = 'var(--bg)'; });
       a.addEventListener('mouseleave', () => { a.style.background = ''; });
+      a.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const idx = parseInt(a.getAttribute('data-idx'), 10);
+        const file = files[idx];
+        if (file) downloadElectronFile(file.key, file.name);
+      });
     });
   } catch (e) {
     dd.innerHTML = '<div style="padding:12px 16px;color:var(--danger);font-size:13px;">Fehler: ' + escapeHtml(e.message || 'Unbekannt') + '</div>';
