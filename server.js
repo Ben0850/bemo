@@ -3958,6 +3958,9 @@ app.get('/api/files/proxy-download', async (req, res) => {
     const utf8Filename = encodeURIComponent(filename);
     res.setHeader('Content-Disposition', `attachment; filename="${asciiFilename}"; filename*=UTF-8''${utf8Filename}`);
     res.setHeader('Content-Type', response.ContentType || 'application/octet-stream');
+    if (response.ContentLength != null) {
+      res.setHeader('Content-Length', String(response.ContentLength));
+    }
     // Robuste Stream-Behandlung — AWS SDK v3 liefert je nach Runtime Node-Readable, Web-ReadableStream
     // oder Buffer-API. Wir versuchen pipe() (Node Readable), fallen sonst auf async iteration zurück.
     const body = response.Body;

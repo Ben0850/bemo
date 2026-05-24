@@ -5905,6 +5905,98 @@ function showElectronInstallInstructions() {
   });
 }
 
+const downloadProgressManager = {
+  _cancelled: false,
+
+  show(filename) {
+    this._cancelled = false;
+    const existing = document.getElementById('download-progress-overlay');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'download-progress-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100003;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;padding:28px 32px;min-width:440px;max-width:560px;box-shadow:0 12px 40px rgba(0,0,0,0.25);">
+        <div style="font-size:16px;font-weight:600;margin-bottom:16px;" id="download-progress-title">Download läuft…</div>
+        <div style="font-size:14px;font-weight:500;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="download-progress-filename">${escapeHtml(filename)}</div>
+        <div style="background:var(--border);height:10px;border-radius:6px;overflow:hidden;margin-bottom:8px;">
+          <div id="download-progress-bar" style="background:var(--primary);height:100%;width:0%;transition:width 0.15s;"></div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:20px;" id="download-progress-info">wird vorbereitet…</div>
+        <div style="display:flex;justify-content:flex-end;">
+          <button class="btn btn-secondary" id="download-progress-cancel" onclick="downloadProgressManager.cancel()">Abbrechen</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+  },
+
+  update(received, total) {
+    const bar = document.getElementById('download-progress-bar');
+    const info = document.getElementById('download-progress-info');
+    const mbRecv = (received / (1024 * 1024)).toFixed(1);
+    if (total > 0) {
+      const pct = Math.min(100, Math.round((received / total) * 100));
+      const mbTotal = (total / (1024 * 1024)).toFixed(1);
+      if (bar) bar.style.width = pct + '%';
+      if (info) info.textContent = pct + '% — ' + mbRecv + ' / ' + mbTotal + ' MB';
+    } else {
+      if (info) info.textContent = mbRecv + ' MB geladen…';
+    }
+  },
+
+  cancel() {
+    this._cancelled = true;
+    const btn = document.getElementById('download-progress-cancel');
+    if (btn) { btn.disabled = true; btn.textContent = 'Wird abgebrochen…'; }
+    const title = document.getElementById('download-progress-title');
+    if (title) title.textContent = 'Wird abgebrochen…';
+  },
+
+  isCancelled() {
+    return this._cancelled;
+  },
+
+  hide() {
+    const o = document.getElementById('download-progress-overlay');
+    if (o) o.remove();
+  }
+};
+
+async function streamDownloadWithProgress(handle, key, displayName) {
+  downloadProgressManager.show(displayName);
+  let writable;
+  let reader;
+  try {
+    const response = await fetch('/api/files/proxy-download?key=' + encodeURIComponent(key));
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const total = parseInt(response.headers.get('Content-Length') || '0', 10);
+    writable = await handle.createWritable();
+    reader = response.body.getReader();
+    let received = 0;
+    while (true) {
+      if (downloadProgressManager.isCancelled()) {
+        try { await reader.cancel(); } catch (e) {}
+        try { await writable.abort(); } catch (e) {}
+        showToast('Download abgebrochen', 'error');
+        return;
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      await writable.write(value);
+      received += value.length;
+      downloadProgressManager.update(received, total);
+    }
+    await writable.close();
+    showToast('Datei gespeichert: ' + handle.name);
+  } catch (e) {
+    try { if (writable) await writable.abort(); } catch (_) {}
+    showToast('Download fehlgeschlagen: ' + e.message, 'error');
+  } finally {
+    downloadProgressManager.hide();
+  }
+}
+
 async function downloadElectronFile(key, filename) {
   // Vor jedem Download: kurze Installationsanleitung anzeigen
   const proceed = await showElectronInstallInstructions();
@@ -5946,16 +6038,7 @@ async function downloadElectronFile(key, filename) {
       s3Download(key, saveName);
       return;
     }
-    try {
-      showToast('Download läuft…');
-      const response = await fetch('/api/files/proxy-download?key=' + encodeURIComponent(key));
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const writable = await handle.createWritable();
-      await response.body.pipeTo(writable);
-      showToast('Datei gespeichert: ' + handle.name);
-    } catch (e) {
-      showToast('Download fehlgeschlagen: ' + e.message, 'error');
-    }
+    await streamDownloadWithProgress(handle, key, saveName);
     return;
   }
 
