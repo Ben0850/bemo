@@ -3961,6 +3961,9 @@ app.get('/api/files/proxy-download', async (req, res) => {
     if (response.ContentLength != null) {
       res.setHeader('Content-Length', String(response.ContentLength));
     }
+    // nginx-Buffering fuer grosse Downloads ausschalten — sonst puffert nginx erst alles auf Disk,
+    // bevor es haeppchenweise zum Client durchgereicht wird (verursacht "ersten 80% schnell, Rest langsam"-Muster).
+    res.setHeader('X-Accel-Buffering', 'no');
     // Robuste Stream-Behandlung — AWS SDK v3 liefert je nach Runtime Node-Readable, Web-ReadableStream
     // oder Buffer-API. Wir versuchen pipe() (Node Readable), fallen sonst auf async iteration zurück.
     const body = response.Body;

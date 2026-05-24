@@ -5983,10 +5983,14 @@ async function streamDownloadWithProgress(handle, key, displayName) {
       }
       const { done, value } = await reader.read();
       if (done) break;
-      await writable.write(value);
       received += value.length;
       downloadProgressManager.update(received, total);
+      await writable.write(value);
     }
+    // Schreibe-Buffer der File System Access API wird erst hier auf Disk geflusht.
+    // Bei grossen Dateien dauert das einen Moment — UI sagt's an.
+    const info = document.getElementById('download-progress-info');
+    if (info) info.textContent = 'Datei wird auf Festplatte geschrieben…';
     await writable.close();
     showToast('Datei gespeichert: ' + handle.name);
   } catch (e) {
