@@ -5887,8 +5887,8 @@ function showElectronInstallInstructions() {
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:18px;">Bitte folge diesen Schritten:</div>
         <ol style="margin:0 0 22px;padding-left:22px;font-size:14px;line-height:1.7;color:var(--text);">
           <li>Im folgenden Dialog die Datei <b>auf dem Desktop</b> speichern. Der Dateiname <b>„Installationsdatei"</b> ist bereits vorgegeben — bitte so lassen.</li>
-          <li>Auf dem Desktop <b>doppelklicken</b>, um die Installation zu starten. Den Anweisungen folgen.</li>
-          <li>Nach erfolgreicher Installation die Datei <b>„Installationsdatei"</b> vom Desktop wieder <b>löschen</b>.</li>
+          <li>Auf dem Desktop <b>doppelklicken</b>, um die Installation zu starten — sie läuft automatisch ohne weitere Eingabe.</li>
+          <li>Fertig: Auf dem Desktop liegt eine <b>Verknüpfung „Bemo Verwaltung"</b>, die Installationsdatei wird automatisch entfernt.</li>
         </ol>
         <div style="display:flex;gap:10px;justify-content:flex-end;">
           <button type="button" id="install-info-cancel" class="btn btn-secondary">Abbrechen</button>
