@@ -2578,6 +2578,11 @@ app.put('/api/credit-notes/:id', (req, res) => {
   if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
+  const existing = queryOne('SELECT status FROM credit_notes WHERE id = ?', [Number(req.params.id)]);
+  if (!existing) return res.status(404).json({ error: 'Gutschrift nicht gefunden' });
+  if (existing.status === 'Final') {
+    return res.status(403).json({ error: 'Finalisierte Gutschrift kann nicht mehr geändert werden' });
+  }
   const { due_date, status, service_date, payment_method, notes } = req.body;
   execute(
     'UPDATE credit_notes SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
@@ -2605,6 +2610,9 @@ app.post('/api/credit-notes/:id/items', (req, res) => {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   const creditId = Number(req.params.id);
+  const parent = queryOne('SELECT status FROM credit_notes WHERE id = ?', [creditId]);
+  if (!parent) return res.status(404).json({ error: 'Gutschrift nicht gefunden' });
+  if (parent.status === 'Final') return res.status(403).json({ error: 'Finalisierte Gutschrift kann nicht mehr geändert werden' });
   const { description, quantity, unit_price, vat_rate } = req.body;
   if (!description) return res.status(400).json({ error: 'Bezeichnung ist Pflichtfeld' });
   const qty = Number(quantity) || 1;
@@ -2627,6 +2635,9 @@ app.put('/api/credit-note-items/:id', (req, res) => {
   if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
+  const parentRow = queryOne('SELECT cn.status FROM credit_notes cn JOIN credit_note_items i ON i.credit_note_id = cn.id WHERE i.id = ?', [Number(req.params.id)]);
+  if (!parentRow) return res.status(404).json({ error: 'Position nicht gefunden' });
+  if (parentRow.status === 'Final') return res.status(403).json({ error: 'Finalisierte Gutschrift kann nicht mehr geändert werden' });
   const { description, quantity, unit_price, vat_rate } = req.body;
   const qty = Number(quantity) || 1;
   const price = Number(unit_price) || 0;
@@ -2646,8 +2657,11 @@ app.delete('/api/credit-note-items/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const item = queryOne('SELECT credit_note_id FROM credit_note_items WHERE id = ?', [Number(req.params.id)]);
+  if (!item) return res.status(404).json({ error: 'Position nicht gefunden' });
+  const parent = queryOne('SELECT status FROM credit_notes WHERE id = ?', [item.credit_note_id]);
+  if (parent && parent.status === 'Final') return res.status(403).json({ error: 'Finalisierte Gutschrift kann nicht mehr geändert werden' });
   execute('DELETE FROM credit_note_items WHERE id = ?', [Number(req.params.id)]);
-  if (item) recalcCreditTotals(item.credit_note_id);
+  recalcCreditTotals(item.credit_note_id);
   res.json({ message: 'Position gelöscht' });
 });
 

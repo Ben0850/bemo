@@ -676,12 +676,14 @@ async function renderDashboard() {
     const currentMonth = today.slice(0, 7);
     const year = new Date().getFullYear();
 
-    const [timeStatus, rentals, fleet, rebatesDue, vermittlerList] = await Promise.all([
+    const canSeeRebates = isAdmin() || isVerwaltung() || isBuchhaltung();
+    const [timeStatus, rentals, fleet, rebatesDue, vermittlerList, customerRebatesDue] = await Promise.all([
       api('/api/time/status').catch(() => ({ stamped_in: false, on_pause: false, current_entry: null })),
       api(`/api/rentals?year=${year}`).catch(() => []),
       api('/api/fleet-vehicles').catch(() => []),
       api('/api/vermittler-rebates/due').catch(() => []),
-      api('/api/vermittler').catch(() => [])
+      api('/api/vermittler').catch(() => []),
+      canSeeRebates ? api('/api/rebates/due').catch(() => []) : Promise.resolve([])
     ]);
 
     const firstName = (loggedInUser.name || '').split(' ')[0];
@@ -806,7 +808,7 @@ async function renderDashboard() {
           </div>
           <div class="dash-card">
             <div class="dash-card-header">
-              <h3>F\u00e4llige R\u00fcckverg\u00fctungen</h3>
+              <h3>F\u00e4llige R\u00fcckverg\u00fctungen \u2014 Vermittler</h3>
               <span class="badge ${rebatesDue.length > 0 ? 'badge-red' : 'badge-green'}">${rebatesDue.length > 0 ? rebatesDue.length : 'OK'}</span>
             </div>
             ${rebatesDue.length > 0
@@ -821,6 +823,22 @@ async function renderDashboard() {
               }).join('')}</tbody></table></div>`
               : '<div style="padding:16px;color:var(--text-muted);text-align:center;">Keine f\u00e4lligen R\u00fcckverg\u00fctungen</div>'}
           </div>
+          ${canSeeRebates ? `<div class="dash-card">
+            <div class="dash-card-header">
+              <h3>F\u00e4llige R\u00fcckverg\u00fctungen \u2014 Firmenkunden</h3>
+              <span class="badge ${customerRebatesDue.length > 0 ? 'badge-red' : 'badge-green'}">${customerRebatesDue.length > 0 ? customerRebatesDue.length : 'OK'}</span>
+            </div>
+            ${customerRebatesDue.length > 0
+              ? `<div class="table-wrapper"><table><thead><tr><th>Kunde</th><th>F\u00e4llig seit</th><th>Vereinbarung</th></tr></thead><tbody>${customerRebatesDue.map(r => {
+                const name = (r.customer_type === 'Firmenkunde' || r.customer_type === 'Werkstatt') ? (r.company_name || '') : ((r.last_name || '') + ', ' + (r.first_name || ''));
+                return `<tr style="cursor:pointer;" onclick="navigate('customer-detail', ${r.customer_id})">
+                  <td style="font-weight:600;">${escapeHtml(name)}</td>
+                  <td><span class="badge badge-red">${formatDate(r.next_due_date)}</span></td>
+                  <td>${escapeHtml(r.rebate_text || '-')}</td>
+                </tr>`;
+              }).join('')}</tbody></table></div>`
+              : '<div style="padding:16px;color:var(--text-muted);text-align:center;">Keine f\u00e4lligen R\u00fcckverg\u00fctungen</div>'}
+          </div>` : ''}
         </div>
       </div>
     `;
@@ -1579,7 +1597,6 @@ async function openCreditForm(customerId, editId) {
           <select id="cf-type" onchange="toggleCreditTypeFields()" required>
             <option value="">-- Auswählen --</option>
             <option value="Gutschrift" ${credit.credit_type === 'Gutschrift' ? 'selected' : ''}>Gutschrift</option>
-            <option value="Freiprüfung" ${credit.credit_type === 'Freiprüfung' ? 'selected' : ''}>Freiprüfung</option>
             <option value="Sonstige Rückvergütung" ${credit.credit_type === 'Sonstige Rückvergütung' ? 'selected' : ''}>Sonstige Rückvergütung</option>
           </select>
         </div>
@@ -1930,7 +1947,7 @@ async function createCreditNoteFromRebate() {
     const totalNet = items.reduce((s, i) => s + i.total_net, 0);
     const totalGross = items.reduce((s, i) => s + i.total_gross, 0);
     const totalVat = totalGross - totalNet;
-    await api(`/api/credit-notes/${result.id}`, { method: 'PUT', body: { credit_date: date, status: 'Abgeschlossen', total_net: totalNet, total_gross: totalGross, total_vat: totalVat, payment_method: paymentMethod, notes } });
+    await api(`/api/credit-notes/${result.id}`, { method: 'PUT', body: { credit_date: date, status: 'Final', total_net: totalNet, total_gross: totalGross, total_vat: totalVat, payment_method: paymentMethod, notes } });
 
     document.getElementById('cn-from-rebate-overlay').remove();
     showToast(`Gutschrift ${result.credit_number} erstellt (${items.length} Position${items.length > 1 ? 'en' : ''})`);
@@ -1979,7 +1996,9 @@ async function renderCustomerDetail(id) {
 
       <div class="page-header">
         <h2>${customerDisplayName(customer)}${customer.customer_type !== 'Privatkunde' ? ` <span class="badge badge-blue">${escapeHtml(customer.customer_type)}</span>` : ''}</h2>
-        <div>
+        <div style="display:flex;gap:8px;">
+          ${(customer.customer_type === 'Firmenkunde' || customer.customer_type === 'Werkstatt') && (isAdmin() || isVerwaltung() || isBuchhaltung())
+            ? `<button class="btn btn-secondary" onclick="openCustomerManagement(${id})">Verwaltung</button>` : ''}
           <button class="btn btn-secondary" onclick="openCustomerForm(${id})">Bearbeiten</button>
         </div>
       </div>
@@ -8612,11 +8631,22 @@ async function refreshInvoiceItems(invoiceId) {
 }
 
 // ===== Gutschriften (Credit Notes) =====
-const CREDIT_STATUSES = ['Entwurf', 'Offen', 'Bezahlt'];
+const CREDIT_STATUSES = ['Entwurf', 'Final'];
 
 function getCreditStatusBadge(status) {
-  const map = { 'Entwurf': 'gray', 'Offen': 'blue', 'Bezahlt': 'green' };
+  const map = {
+    'Entwurf': 'gray',
+    'Final':   'blue',
+    // Legacy-Werte aus aelteren Datensaetzen
+    'Offen':   'blue',
+    'Bezahlt': 'green',
+  };
   return `<span class="badge badge-${map[status] || 'gray'}">${escapeHtml(status)}</span>`;
+}
+
+// Sperr-Helper: Gutschrift im Final-Status ist komplett gesperrt — Status, Inhalte, Positionen.
+function isCreditNoteLocked(cn) {
+  return !!(cn && cn.status && cn.status !== 'Entwurf');
 }
 
 let _allCreditNotes = [];
@@ -8734,7 +8764,7 @@ function applyCreditFilters() {
   }
 
   tbody.innerHTML = filtered.map(cn => `
-    <tr class="clickable" ondblclick="navigate('credit-detail', ${cn.id})">
+    <tr class="clickable" style="cursor:pointer;" onclick="navigate('credit-detail', ${cn.id})">
       <td><strong>${escapeHtml(cn.credit_number)}</strong></td>
       <td>${formatDate(cn.credit_date)}</td>
       <td>${escapeHtml(cn.customer_name || '')}</td>
@@ -8743,7 +8773,6 @@ function applyCreditFilters() {
       <td style="white-space:nowrap;">${Number(cn.total_gross).toFixed(2)}&nbsp;&euro;</td>
       <td>${getCreditStatusBadge(cn.status)}</td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); navigate('credit-detail', ${cn.id})">Öffnen</button>
         <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); window.open('/api/credit-notes/${cn.id}/pdf','_blank')">PDF</button>
       </td>
     </tr>
@@ -8935,6 +8964,11 @@ async function renderCreditNoteDetail(id) {
   try {
     const cn = await api(`/api/credit-notes/${id}`);
     const canEdit = canEditInvoice();
+    // Lock-Logik: Sobald die Gutschrift auf "Final" gesetzt ist, sind ALLE Felder gesperrt —
+    // inkl. Status (kein Zurueck auf Entwurf), Zahlart, Bemerkungen, Positionen. Backend lehnt
+    // jede PUT/POST/DELETE auf finalisierte GS mit 403 ab.
+    const locked = isCreditNoteLocked(cn);
+    const canEditContent = canEdit && !locked;
     const customerName = (cn.customer_type === 'Firmenkunde' || cn.customer_type === 'Werkstatt')
       ? escapeHtml(cn.company_name)
       : escapeHtml(cn.last_name) + ', ' + escapeHtml(cn.first_name);
@@ -8945,9 +8979,13 @@ async function renderCreditNoteDetail(id) {
         <h2>Gutschrift ${escapeHtml(cn.credit_number)}</h2>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-primary" onclick="window.open('/api/credit-notes/${id}/pdf','_blank')">PDF anzeigen</button>
-          ${isFinance() ? `<button class="btn btn-danger" onclick="deleteCreditNote(${id})">Löschen</button>` : ''}
+          ${isFinance() && !locked ? `<button class="btn btn-danger" onclick="deleteCreditNote(${id})">Löschen</button>` : ''}
         </div>
       </div>
+
+      ${locked ? `<div style="background:#fef3c7;border:1px solid #f59e0b;color:#92400e;padding:10px 14px;border-radius:8px;margin-bottom:16px;font-size:13px;">
+        <strong>Gutschrift abgeschlossen.</strong> Diese Gutschrift wurde finalisiert und kann nicht mehr geändert werden.
+      </div>` : ''}
 
       <div class="card">
         <div class="card-header"><h3>Kundendaten</h3></div>
@@ -8973,7 +9011,7 @@ async function renderCreditNoteDetail(id) {
         </div>
         <div class="form-group">
           <label>Status</label>
-          ${canEdit
+          ${canEditContent
             ? `<select id="cn-edit-status" onchange="saveCreditHeader(${id})">
                  ${CREDIT_STATUSES.map(s => `<option value="${s}" ${s === cn.status ? 'selected' : ''}>${s}</option>`).join('')}
                </select>`
@@ -8981,7 +9019,7 @@ async function renderCreditNoteDetail(id) {
         </div>
         <div class="form-group">
           <label>Zahlart</label>
-          ${canEdit
+          ${canEditContent
             ? `<select id="cn-edit-payment-method" onchange="saveCreditHeader(${id})">
                  ${ ['Überweisung','Bar'].map(m =>
                      `<option value="${m}" ${(cn.payment_method||'Überweisung')===m?'selected':''}>${m}</option>`
@@ -8991,7 +9029,7 @@ async function renderCreditNoteDetail(id) {
         </div>
         <div class="form-group">
           <label>Bemerkungen</label>
-          ${canEdit
+          ${canEditContent
             ? `<textarea id="cn-edit-notes" rows="2" onchange="saveCreditHeader(${id})">${escapeHtml(cn.notes || '')}</textarea>`
             : `<div class="form-control-static" style="min-height:60px;">${escapeHtml(cn.notes || '—')}</div>`}
         </div>
@@ -9000,10 +9038,10 @@ async function renderCreditNoteDetail(id) {
       <div class="card">
         <div class="card-header">
           <h3>Positionen</h3>
-          ${canEdit ? `<button class="btn btn-sm btn-primary" onclick="addCreditItemRow(${id})">+ Position</button>` : ''}
+          ${canEditContent ? `<button class="btn btn-sm btn-primary" onclick="addCreditItemRow(${id})">+ Position</button>` : ''}
         </div>
         <div id="credit-items-list">
-          ${renderCreditItemsTable(cn.items, id, canEdit)}
+          ${renderCreditItemsTable(cn.items, id, canEditContent)}
         </div>
         <div class="invoice-summary" id="credit-summary">
           ${renderCreditSummary(cn)}
@@ -14152,7 +14190,7 @@ async function createVermittlerCreditNote() {
     const totalNet = items.reduce((s, i) => s + i.total_net, 0);
     const totalGross = items.reduce((s, i) => s + i.total_gross, 0);
     const totalVat = totalGross - totalNet;
-    await api(`/api/credit-notes/${result.id}`, { method: 'PUT', body: { credit_date: date, status: 'Abgeschlossen', total_net: totalNet, total_gross: totalGross, total_vat: totalVat, payment_method: paymentMethod, notes } });
+    await api(`/api/credit-notes/${result.id}`, { method: 'PUT', body: { credit_date: date, status: 'Final', total_net: totalNet, total_gross: totalGross, total_vat: totalVat, payment_method: paymentMethod, notes } });
     document.getElementById('vcn-from-rebate-overlay').remove();
     showToast(`Gutschrift ${result.credit_number} erstellt (${items.length} Position${items.length > 1 ? 'en' : ''})`);
     const vcfNumber = document.getElementById('vcf-number');
