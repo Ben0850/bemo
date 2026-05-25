@@ -507,6 +507,7 @@ function navigate(page, data) {
     case 'lawyers': renderLawyers(); break;
     case 'vermittler': renderVermittler(); break;
     case 'dekra-drs': renderDekraDrs(); break;
+    case 'price-list': renderPriceList(); break;
     case 'email-vorlagen': renderEmailVorlagen(); break;
     case 'akten': renderAkten(); break;
     case 'akte-detail': renderAkteDetail(data); break;
@@ -7615,6 +7616,8 @@ async function renderInvoiceDetail(id) {
   _currentInvoiceId = id;
   const main = document.getElementById('main-content');
   try {
+    // Preisliste in den Cache laden — fuer die Live-Anzeige unter der Fahrzeuggruppe-Auswahl
+    await loadPriceListCache();
     const inv = await api(`/api/invoices/${id}`);
     const canEdit = canEditInvoice();
     // Lock-Logik: Sobald die Rechnung nicht mehr im 'Entwurf' ist (also Final, Mahnstufe 1, Mahnstufe 2),
@@ -7765,13 +7768,13 @@ async function renderInvoiceDetail(id) {
       <div class="card" id="inv-extras-card" style="${_invoiceExtrasVisible(inv) ? '' : 'display:none;'}">
         <div class="card-header"><h3>Zusatzinfos</h3></div>
         <div style="padding:0 16px 16px 16px;">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:6px;">
             <div class="form-group">
               <label>Abgerechnete Fahrzeuggruppe</label>
               ${canEditContent
-                ? `<select id="inv-edit-group-billed" onchange="saveInvoiceExtras(${id})">
+                ? `<select id="inv-edit-group-billed" onchange="saveInvoiceExtras(${id});updateInvoicePriceListRow();">
                      <option value="">—</option>
-                     ${[1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${Number(inv.abgerechnete_fahrzeuggruppe)===n?'selected':''}>${n}</option>`).join('')}
+                     ${[1,2,3,4,5,6,7,8,9,10,11,12].map(n => `<option value="${n}" ${Number(inv.abgerechnete_fahrzeuggruppe)===n?'selected':''}>${n}</option>`).join('')}
                    </select>`
                 : `<div class="form-control-static">${inv.abgerechnete_fahrzeuggruppe || '—'}</div>`}
             </div>
@@ -7780,11 +7783,12 @@ async function renderInvoiceDetail(id) {
               ${canEditContent
                 ? `<select id="inv-edit-group-customer" onchange="saveInvoiceExtras(${id})">
                      <option value="">—</option>
-                     ${[1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${Number(inv.kundenfahrzeuggruppe)===n?'selected':''}>${n}</option>`).join('')}
+                     ${[1,2,3,4,5,6,7,8,9,10,11,12].map(n => `<option value="${n}" ${Number(inv.kundenfahrzeuggruppe)===n?'selected':''}>${n}</option>`).join('')}
                    </select>`
                 : `<div class="form-control-static">${inv.kundenfahrzeuggruppe || '—'}</div>`}
             </div>
           </div>
+          <div id="inv-pricelist-row" style="margin-bottom:14px;">${renderInvoicePriceListRow(inv.abgerechnete_fahrzeuggruppe)}</div>
 
           <div class="form-group" style="margin-bottom:8px;">
             <label style="display:flex;justify-content:space-between;align-items:center;">
@@ -10026,7 +10030,7 @@ async function openFleetVehicleForm(id) {
           <label>Fahrzeuggruppe</label>
           <select name="vehicle_group">
             <option value="">-- Auswählen --</option>
-            ${[1,2,3,4,5,6,7,8].map(g => `<option value="Gruppe ${g}" ${vehicle.vehicle_group === 'Gruppe ' + g ? 'selected' : ''}>Gruppe ${g}</option>`).join('')}
+            ${[1,2,3,4,5,6,7,8,9,10,11,12].map(g => `<option value="Gruppe ${g}" ${vehicle.vehicle_group === 'Gruppe ' + g ? 'selected' : ''}>Gruppe ${g}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
@@ -12881,6 +12885,14 @@ function rentalStatusBadge(status) {
 }
 
 let _rentalListSort = { field: 'id', dir: 'desc' };
+let _rentalListCache = [];
+// Filter-State bleibt erhalten ueber Re-Renders (z.B. Sortier-Klick oder Jahreswechsel).
+// Default: Status "__active__" blendet abgeschlossene Mieten aus, wie vom User gewuenscht.
+let _rentalFilters = {
+  id: '', created: '', vehicle: '', customer: '',
+  fromStart: '', toEnd: '', mietart: '', versicherung: '',
+  status: '__active__', akte: ''
+};
 
 function sortRentalList(field) {
   if (_rentalListSort.field === field) {
@@ -12888,8 +12900,31 @@ function sortRentalList(field) {
   } else {
     _rentalListSort = { field, dir: 'desc' };
   }
+  // Vor dem Re-Render aktuelle Filter-Inputs in den State sichern,
+  // damit die Werte beim Neu-Rendern wieder gesetzt werden.
+  _captureRentalFiltersFromDOM();
   renderVermietung();
 }
+
+function _captureRentalFiltersFromDOM() {
+  const g = id => document.getElementById(id)?.value;
+  // Sentinel: rf-vehicle (eines der nicht entfernten Filter) muss existieren,
+  // damit wir wissen dass die Filter-Row im DOM ist.
+  if (g('rf-vehicle') == null) return;
+  _rentalFilters = {
+    id:           '',
+    created:      '',
+    vehicle:      g('rf-vehicle') ?? '',
+    customer:     g('rf-customer') ?? '',
+    fromStart:    g('rf-from-start') ?? '',
+    toEnd:        g('rf-to-end') ?? '',
+    mietart:      g('rf-mietart') ?? '',
+    versicherung: '',
+    status:       g('rf-status') ?? '__active__',
+    akte:         g('rf-akte') ?? ''
+  };
+}
+
 
 function rentalSortIcon(field) {
   if (_rentalListSort.field !== field) return '';
@@ -12898,9 +12933,120 @@ function rentalSortIcon(field) {
 
 function renderRentalList(entries) {
   if (!entries.length) return '';
+  _rentalListCache = entries;
 
-  // Sort
-  const sorted = [...entries].sort((a, b) => {
+  // Distincte Mietart-Werte aus den Daten ableiten \u2014 fuer das Filter-Dropdown
+  const mietartValues = [...new Set(entries.map(r => r.mietart).filter(Boolean))].sort();
+
+  const f = _rentalFilters;
+  const sel = (val, current) => val === current ? ' selected' : '';
+
+  // Tabelle einfach rendern; Tbody wird im naechsten Tick durch applyRentalFilters gefuellt
+  setTimeout(() => { try { applyRentalFilters(); } catch (e) {} }, 0);
+
+  return `
+    <div class="card" style="margin-top:20px;">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <h3>Vermietungen ${rentalCurrentYear}</h3>
+        <span id="rental-list-count" style="font-size:13px;color:var(--text-muted);"></span>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="cursor:pointer;" onclick="sortRentalList('id')">Nr.${rentalSortIcon('id')}</th>
+            <th style="cursor:pointer;" onclick="sortRentalList('created_at')">Angelegt am${rentalSortIcon('created_at')}</th>
+            <th>Fahrzeug</th>
+            <th style="cursor:pointer;" onclick="sortRentalList('customer_name')">Kunde${rentalSortIcon('customer_name')}</th>
+            <th>Von</th><th>Bis</th><th>Tage</th><th>Mietart</th><th>Versicherung</th><th>Status</th><th>Akte</th><th>Aktionen</th>
+          </tr>
+          <tr class="filter-row">
+            <td></td>
+            <td></td>
+            <td><input type="text" id="rf-vehicle" value="${escapeHtml(f.vehicle)}" placeholder="Kennzeichen / Modell" oninput="applyRentalFilters()" class="filter-input"></td>
+            <td><input type="text" id="rf-customer" value="${escapeHtml(f.customer)}" placeholder="Name / Firma" oninput="applyRentalFilters()" class="filter-input"></td>
+            <td><input type="date" id="rf-from-start" value="${escapeHtml(f.fromStart)}" onchange="applyRentalFilters()" class="filter-input" title="Miete startet ab/nach diesem Datum"></td>
+            <td><input type="date" id="rf-to-end" value="${escapeHtml(f.toEnd)}" onchange="applyRentalFilters()" class="filter-input" title="Miete endet bis/vor diesem Datum"></td>
+            <td></td>
+            <td>
+              <select id="rf-mietart" onchange="applyRentalFilters()" class="filter-input">
+                <option value=""${sel('', f.mietart)}>Alle</option>
+                ${mietartValues.map(m => `<option value="${escapeHtml(m)}"${sel(m, f.mietart)}>${escapeHtml(m)}</option>`).join('')}
+              </select>
+            </td>
+            <td></td>
+            <td>
+              <select id="rf-status" onchange="applyRentalFilters()" class="filter-input">
+                <option value="__active__"${sel('__active__', f.status)}>Aktive</option>
+                <option value=""${sel('', f.status)}>Alle</option>
+                <option value="Reservierung"${sel('Reservierung', f.status)}>Reservierung</option>
+                <option value="Vermietet"${sel('Vermietet', f.status)}>Vermietet</option>
+                <option value="Abgeschlossen"${sel('Abgeschlossen', f.status)}>Abgeschlossen</option>
+              </select>
+            </td>
+            <td><input type="text" id="rf-akte" value="${escapeHtml(f.akte)}" placeholder="Aktennr." oninput="applyRentalFilters()" class="filter-input"></td>
+            <td><button class="btn btn-sm btn-secondary" onclick="resetRentalFilters()" title="Filter zuruecksetzen">Filter zuruecksetzen</button></td>
+          </tr>
+        </thead>
+        <tbody id="rental-list-tbody"></tbody>
+      </table>
+    </div>`;
+}
+
+function applyRentalFilters() {
+  _captureRentalFiltersFromDOM();
+  const f = _rentalFilters;
+
+  function matchesCreated(createdAt) {
+    if (!f.created) return true;
+    if (!createdAt) return false;
+    const d = createdAt.split(' ')[0] || createdAt.split('T')[0] || '';
+    const parts = f.created.split('.');
+    if (parts.length === 2 && parts[0].length <= 2 && parts[1].length === 4) {
+      const mm = parts[0].padStart(2, '0');
+      const yyyy = parts[1];
+      return d.startsWith(yyyy + '-' + mm);
+    }
+    if (parts.length === 3) {
+      const dd = parts[0].padStart(2, '0');
+      const mm = parts[1].padStart(2, '0');
+      const yyyy = parts[2];
+      return d === (yyyy + '-' + mm + '-' + dd);
+    }
+    return d.includes(f.created);
+  }
+
+  const idLc       = f.id.toLowerCase();
+  const vehicleLc  = f.vehicle.toLowerCase();
+  const customerLc = f.customer.toLowerCase();
+  const versLc     = f.versicherung.toLowerCase();
+  const akteLc     = f.akte.toLowerCase();
+
+  const filtered = _rentalListCache.filter(e => {
+    if (idLc && !String(e.id).toLowerCase().includes(idLc)) return false;
+    if (!matchesCreated(e.created_at)) return false;
+    if (vehicleLc) {
+      const vstr = ((e.license_plate || '') + ' ' + (e.manufacturer || '') + ' ' + (e.model || '')).toLowerCase();
+      if (!vstr.includes(vehicleLc)) return false;
+    }
+    if (customerLc && !(e.customer_name || '').toLowerCase().includes(customerLc)) return false;
+    if (f.fromStart && (e.start_date || '') < f.fromStart) return false;
+    if (f.toEnd && (e.end_date || '') > f.toEnd) return false;
+    if (f.mietart && e.mietart !== f.mietart) return false;
+    if (versLc && !(e.versicherung || '').toLowerCase().includes(versLc)) return false;
+    if (f.status === '__active__') {
+      if (e.status === 'Abgeschlossen') return false;
+    } else if (f.status) {
+      if (e.status !== f.status) return false;
+    }
+    if (akteLc) {
+      const astr = ((e.aktennummer || '') + ' ' + (e.akte_id || '')).toLowerCase();
+      if (!astr.includes(akteLc)) return false;
+    }
+    return true;
+  });
+
+  // Sort wie bisher
+  const sorted = [...filtered].sort((a, b) => {
     let va, vb;
     if (_rentalListSort.field === 'id') { va = a.id; vb = b.id; }
     else if (_rentalListSort.field === 'created_at') { va = a.created_at || ''; vb = b.created_at || ''; }
@@ -12911,46 +13057,56 @@ function renderRentalList(entries) {
     return 0;
   });
 
-  return `
-    <div class="card" style="margin-top:20px;">
-      <div class="card-header"><h3>Vermietungen ${rentalCurrentYear}</h3></div>
-      <table class="data-table">
-        <thead><tr>
-          <th style="cursor:pointer;" onclick="sortRentalList('id')">Nr.${rentalSortIcon('id')}</th>
-          <th style="cursor:pointer;" onclick="sortRentalList('created_at')">Angelegt am${rentalSortIcon('created_at')}</th>
-          <th>Fahrzeug</th>
-          <th style="cursor:pointer;" onclick="sortRentalList('customer_name')">Kunde${rentalSortIcon('customer_name')}</th>
-          <th>Von</th><th>Bis</th><th>Tage</th><th>Mietart</th><th>Versicherung</th><th>Status</th><th>Akte</th><th>Aktionen</th>
-        </tr></thead>
-        <tbody>
-          ${sorted.map(e => {
-            let tage = '';
-            if (e.start_date && e.end_date) {
-              const d = Math.max(1, Math.round((new Date(e.end_date + 'T00:00:00') - new Date(e.start_date + 'T00:00:00')) / 86400000) + 1);
-              tage = String(d);
-            }
-            const angelegt = e.created_at ? formatDate(e.created_at.split(' ')[0] || e.created_at.split('T')[0]) : '-';
-            const akteCell = e.akte_id
-              ? `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();navigate('akte-detail', ${e.akte_id})">${escapeHtml(e.aktennummer || String(e.akte_id))}</button>`
-              : '<span style="color:var(--text-muted);">\u2014</span>';
-            return `<tr style="cursor:pointer;" onclick="openRentalDetail(${e.id})">
-              <td><strong>${e.id}</strong></td>
-              <td>${angelegt}</td>
-              <td>${escapeHtml((e.license_plate || '') + ' - ' + (e.manufacturer || '') + ' ' + (e.model || ''))}</td>
-              <td>${escapeHtml(e.customer_name || '')}</td>
-              <td>${formatDate(e.start_date)}</td>
-              <td>${formatDate(e.end_date)}</td>
-              <td>${escapeHtml(tage)}</td>
-              <td>${escapeHtml(e.mietart || '')}</td>
-              <td>${escapeHtml(e.versicherung || '')}</td>
-              <td>${rentalStatusBadge(e.status)}</td>
-              <td>${akteCell}</td>
-              <td><button class="btn btn-sm btn-danger" onclick="event.stopPropagation();confirmDeleteRental(${e.id})">L\u00f6schen</button></td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-    </div>`;
+  const tbody = document.getElementById('rental-list-tbody');
+  const countEl = document.getElementById('rental-list-count');
+  if (!tbody) return;
+
+  const totalCount = _rentalListCache.length;
+  if (countEl) {
+    countEl.textContent = sorted.length === totalCount
+      ? (totalCount + ' Eintraege')
+      : (sorted.length + ' von ' + totalCount + ' Eintraegen');
+  }
+
+  if (sorted.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text-muted);padding:24px;">Keine Vermietungen gefunden.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = sorted.map(e => {
+    let tage = '';
+    if (e.start_date && e.end_date) {
+      const d = Math.max(1, Math.round((new Date(e.end_date + 'T00:00:00') - new Date(e.start_date + 'T00:00:00')) / 86400000) + 1);
+      tage = String(d);
+    }
+    const angelegt = e.created_at ? formatDate(e.created_at.split(' ')[0] || e.created_at.split('T')[0]) : '-';
+    const akteCell = e.akte_id
+      ? `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();navigate('akte-detail', ${e.akte_id})">${escapeHtml(e.aktennummer || String(e.akte_id))}</button>`
+      : '<span style="color:var(--text-muted);">\u2014</span>';
+    return `<tr style="cursor:pointer;" onclick="openRentalDetail(${e.id})">
+      <td><strong>${e.id}</strong></td>
+      <td>${angelegt}</td>
+      <td>${escapeHtml((e.license_plate || '') + ' - ' + (e.manufacturer || '') + ' ' + (e.model || ''))}</td>
+      <td>${escapeHtml(e.customer_name || '')}</td>
+      <td>${formatDate(e.start_date)}</td>
+      <td>${formatDate(e.end_date)}</td>
+      <td>${escapeHtml(tage)}</td>
+      <td>${escapeHtml(e.mietart || '')}</td>
+      <td>${escapeHtml(e.versicherung || '')}</td>
+      <td>${rentalStatusBadge(e.status)}</td>
+      <td>${akteCell}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="event.stopPropagation();confirmDeleteRental(${e.id})">L\u00f6schen</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function resetRentalFilters() {
+  _rentalFilters = {
+    id: '', created: '', vehicle: '', customer: '',
+    fromStart: '', toEnd: '', mietart: '', versicherung: '',
+    status: '__active__', akte: ''
+  };
+  renderVermietung();
 }
 
 function rentalChangeYear(offset) {
@@ -13375,6 +13531,196 @@ async function deleteLawyer(id, name) {
     renderLawyers();
   } catch (err) {
     showToast(err.message, 'error');
+  }
+}
+
+// ===== PAGE: Preisliste =====
+// Cache fuer schnellen Lookup in der Rechnung-Detailseite — wird beim Laden der
+// Preisliste-Seite UND beim Oeffnen einer Rechnung mit Fahrzeuggruppe gefuellt.
+let _priceListCache = [];
+
+function priceListCanEdit() {
+  return isAdmin() || isVerwaltung() || isBuchhaltung();
+}
+
+function priceFmt(n) {
+  return (Number(n) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+}
+
+async function loadPriceListCache() {
+  try {
+    _priceListCache = await api('/api/price-list');
+  } catch (e) {
+    _priceListCache = [];
+  }
+  return _priceListCache;
+}
+
+function getPriceListEntry(group) {
+  const g = Number(group);
+  if (!g) return null;
+  return _priceListCache.find(p => Number(p.vehicle_group) === g) || null;
+}
+
+// Inline-Preisanzeige unter dem "Abgerechnete Fahrzeuggruppe"-Dropdown in der Rechnung.
+// Eine Zeile, kein Umbruch, alle vier Preise nebeneinander.
+function renderInvoicePriceListRow(group) {
+  const entry = getPriceListEntry(group);
+  if (!entry) return '';
+  const item = (label, val) =>
+    `<span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;">
+       <span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.4px;">${label}</span>
+       <strong style="font-size:13px;">${priceFmt(val)}</strong>
+     </span>`;
+  return `
+    <div style="display:flex;align-items:center;gap:18px;flex-wrap:nowrap;overflow-x:auto;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-subtle,#f9fafb);font-size:13px;">
+      <span style="font-size:11px;font-weight:600;color:var(--primary);text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Preisliste · Gruppe ${entry.vehicle_group}</span>
+      <span style="color:var(--border);">|</span>
+      ${item('Tag', entry.price_day)}
+      ${item('3 Tage', entry.price_3days)}
+      ${item('Woche', entry.price_week)}
+      ${item('Wochenende', entry.price_weekend)}
+    </div>`;
+}
+
+function updateInvoicePriceListRow() {
+  const sel = document.getElementById('inv-edit-group-billed');
+  const target = document.getElementById('inv-pricelist-row');
+  if (!sel || !target) return;
+  target.innerHTML = renderInvoicePriceListRow(sel.value);
+}
+
+async function renderPriceList() {
+  const main = document.getElementById('main-content');
+  main.innerHTML = '<div class="empty-state"><p>Lade...</p></div>';
+  try {
+    const data = await api('/api/price-list');
+    _priceListCache = data;
+    const canEdit = priceListCanEdit();
+
+    const rows = data.length ? data.map(p => `
+      <tr style="cursor:${canEdit ? 'pointer' : 'default'};" ${canEdit ? `onclick="openPriceListForm(${p.id})"` : ''}>
+        <td><strong>Gruppe ${escapeHtml(String(p.vehicle_group))}</strong></td>
+        <td style="text-align:right;">${priceFmt(p.price_day)}</td>
+        <td style="text-align:right;">${priceFmt(p.price_3days)}</td>
+        <td style="text-align:right;">${priceFmt(p.price_week)}</td>
+        <td style="text-align:right;">${priceFmt(p.price_weekend)}</td>
+        <td style="text-align:right;white-space:nowrap;">
+          ${canEdit ? `<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deletePriceListEntry(${p.id}, ${p.vehicle_group})">Löschen</button>` : ''}
+        </td>
+      </tr>
+    `).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">Noch keine Einträge in der Preisliste.</td></tr>';
+
+    main.innerHTML = `
+      <div class="page-header">
+        <h2>Preisliste</h2>
+        ${canEdit ? '<button class="btn btn-primary" onclick="openPriceListForm()">+ Neuer Eintrag</button>' : ''}
+      </div>
+      <div class="card">
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Fahrzeuggruppe</th>
+                <th style="text-align:right;">Tagespreis</th>
+                <th style="text-align:right;">3-Tages-Pauschale</th>
+                <th style="text-align:right;">Wochen-Pauschale</th>
+                <th style="text-align:right;">Wochenend-Pauschale</th>
+                <th style="text-align:right;width:120px;">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        ${canEdit ? '<div style="padding:10px 16px;font-size:12px;color:var(--text-muted);">Klick auf eine Zeile öffnet sie zum Bearbeiten.</div>' : ''}
+      </div>
+    `;
+  } catch (err) {
+    main.innerHTML = '<p class="error">Fehler: ' + escapeHtml(err.message) + '</p>';
+  }
+}
+
+async function openPriceListForm(editId) {
+  if (!priceListCanEdit()) return;
+  let entry = { vehicle_group: '', price_day: 0, price_3days: 0, price_week: 0, price_weekend: 0 };
+  if (editId) {
+    const e = _priceListCache.find(p => p.id === editId);
+    if (e) entry = e;
+  }
+  const usedGroups = new Set(_priceListCache.filter(p => p.id !== editId).map(p => Number(p.vehicle_group)));
+
+  openModal(editId ? 'Preisliste — Bearbeiten' : 'Preisliste — Neuer Eintrag', `
+    <form onsubmit="savePriceListEntry(event, ${editId || 'null'})">
+      <div class="form-group">
+        <label>Fahrzeuggruppe <span style="color:var(--danger);">*</span></label>
+        <select id="pl-group" required>
+          ${editId ? '' : '<option value="">-- Auswählen --</option>'}
+          ${[1,2,3,4,5,6,7,8,9,10,11,12].map(g => {
+            const disabled = usedGroups.has(g);
+            const selected = Number(entry.vehicle_group) === g;
+            return `<option value="${g}" ${selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}>Gruppe ${g}${disabled ? ' (bereits vergeben)' : ''}</option>`;
+          }).join('')}
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;">
+        <div class="form-group">
+          <label>Tagespreis (€)</label>
+          <input type="number" step="0.01" min="0" id="pl-day" value="${entry.price_day || 0}">
+        </div>
+        <div class="form-group">
+          <label>3-Tages-Pauschale (€)</label>
+          <input type="number" step="0.01" min="0" id="pl-3days" value="${entry.price_3days || 0}">
+        </div>
+        <div class="form-group">
+          <label>Wochen-Pauschale (€)</label>
+          <input type="number" step="0.01" min="0" id="pl-week" value="${entry.price_week || 0}">
+        </div>
+        <div class="form-group">
+          <label>Wochenend-Pauschale (€)</label>
+          <input type="number" step="0.01" min="0" id="pl-weekend" value="${entry.price_weekend || 0}">
+        </div>
+      </div>
+      <div class="form-actions" style="margin-top:16px;">
+        <button type="submit" class="btn btn-primary">${editId ? 'Speichern' : 'Anlegen'}</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      </div>
+    </form>
+  `);
+}
+
+async function savePriceListEntry(ev, editId) {
+  ev.preventDefault();
+  const body = {
+    vehicle_group: document.getElementById('pl-group').value,
+    price_day: document.getElementById('pl-day').value,
+    price_3days: document.getElementById('pl-3days').value,
+    price_week: document.getElementById('pl-week').value,
+    price_weekend: document.getElementById('pl-weekend').value
+  };
+  try {
+    if (editId) {
+      await api('/api/price-list/' + editId, { method: 'PUT', body });
+      showToast('Aktualisiert');
+    } else {
+      await api('/api/price-list', { method: 'POST', body });
+      showToast('Eintrag angelegt');
+    }
+    closeModal();
+    renderPriceList();
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+async function deletePriceListEntry(id, group) {
+  const ok = await showConfirm('Löschen?', 'Eintrag für Gruppe ' + group + ' wirklich löschen?', { danger: true, yesLabel: 'Ja, löschen' });
+  if (!ok) return;
+  try {
+    await api('/api/price-list/' + id, { method: 'DELETE' });
+    showToast('Gelöscht');
+    renderPriceList();
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
   }
 }
 

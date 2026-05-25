@@ -497,6 +497,48 @@ app.delete('/api/vermittler-credits/:id', (req, res) => {
   res.json({ message: 'Gutschrift gelöscht' });
 });
 
+// ===== PREISLISTE — Standard-Mietpreise je Fahrzeuggruppe =====
+app.get('/api/price-list', (req, res) => {
+  res.json(queryAll('SELECT * FROM price_list ORDER BY vehicle_group ASC'));
+});
+
+app.post('/api/price-list', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { vehicle_group, price_day, price_3days, price_week, price_weekend } = req.body;
+  const grp = Number(vehicle_group);
+  if (!grp || grp < 1 || grp > 12) return res.status(400).json({ error: 'Fahrzeuggruppe (1-12) ist Pflichtfeld' });
+  const existing = queryOne('SELECT id FROM price_list WHERE vehicle_group = ?', [grp]);
+  if (existing) return res.status(400).json({ error: 'Für Gruppe ' + grp + ' existiert bereits ein Eintrag — bitte bearbeiten statt neu anlegen' });
+  const result = execute(
+    'INSERT INTO price_list (vehicle_group, price_day, price_3days, price_week, price_weekend) VALUES (?, ?, ?, ?, ?)',
+    [grp, Number(price_day) || 0, Number(price_3days) || 0, Number(price_week) || 0, Number(price_weekend) || 0]
+  );
+  res.json({ id: result.lastId, message: 'Preisliste-Eintrag erstellt' });
+});
+
+app.put('/api/price-list/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const { vehicle_group, price_day, price_3days, price_week, price_weekend } = req.body;
+  const grp = Number(vehicle_group);
+  if (!grp || grp < 1 || grp > 12) return res.status(400).json({ error: 'Fahrzeuggruppe (1-12) ist Pflichtfeld' });
+  const dup = queryOne('SELECT id FROM price_list WHERE vehicle_group = ? AND id != ?', [grp, Number(req.params.id)]);
+  if (dup) return res.status(400).json({ error: 'Für Gruppe ' + grp + ' existiert bereits ein anderer Eintrag' });
+  execute(
+    'UPDATE price_list SET vehicle_group=?, price_day=?, price_3days=?, price_week=?, price_weekend=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    [grp, Number(price_day) || 0, Number(price_3days) || 0, Number(price_week) || 0, Number(price_weekend) || 0, Number(req.params.id)]
+  );
+  res.json({ message: 'aktualisiert' });
+});
+
+app.delete('/api/price-list/:id', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  execute('DELETE FROM price_list WHERE id = ?', [Number(req.params.id)]);
+  res.json({ message: 'gelöscht' });
+});
+
 // Set/unset reminder block on customer (with password check for unblock)
 app.put('/api/customers/:id/reminder-block', (req, res) => {
   const { blocked } = req.body;

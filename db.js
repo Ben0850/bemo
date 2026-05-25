@@ -416,6 +416,21 @@ async function getDb() {
     )
   `);
 
+  // Preisliste — Standard-Mietpreise je Fahrzeuggruppe (1-12).
+  // Wird in der Rechnung-Detailseite unter "Abgerechnete Fahrzeuggruppe" zur Info eingeblendet.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS price_list (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_group INTEGER NOT NULL UNIQUE,
+      price_day REAL DEFAULT 0,
+      price_3days REAL DEFAULT 0,
+      price_week REAL DEFAULT 0,
+      price_weekend REAL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Invoice schema additions for v1 milestone (DB-01, DB-02)
   try { db.run("ALTER TABLE invoices ADD COLUMN service_date TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE invoices ADD COLUMN payment_method TEXT DEFAULT 'Überweisung'"); } catch(e) {}
