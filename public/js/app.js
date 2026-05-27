@@ -678,13 +678,15 @@ async function renderDashboard() {
     const year = new Date().getFullYear();
 
     const canSeeRebates = isAdmin() || isVerwaltung() || isBuchhaltung();
-    const [timeStatus, rentals, fleet, rebatesDue, vermittlerList, customerRebatesDue] = await Promise.all([
+    const [timeStatus, rentals, fleet, rebatesDue, vermittlerList, customerRebatesDue, draftInvoices, draftCreditNotes] = await Promise.all([
       api('/api/time/status').catch(() => ({ stamped_in: false, on_pause: false, current_entry: null })),
       api(`/api/rentals?year=${year}`).catch(() => []),
       api('/api/fleet-vehicles').catch(() => []),
       api('/api/vermittler-rebates/due').catch(() => []),
       api('/api/vermittler').catch(() => []),
-      canSeeRebates ? api('/api/rebates/due').catch(() => []) : Promise.resolve([])
+      canSeeRebates ? api('/api/rebates/due').catch(() => []) : Promise.resolve([]),
+      canSeeRebates ? api('/api/invoices?status=Entwurf').catch(() => []) : Promise.resolve([]),
+      canSeeRebates ? api('/api/credit-notes').catch(() => []).then(arr => (arr || []).filter(cn => cn.status === 'Entwurf')) : Promise.resolve([])
     ]);
 
     const firstName = (loggedInUser.name || '').split(' ')[0];
@@ -840,6 +842,53 @@ async function renderDashboard() {
               }).join('')}</tbody></table></div>`
               : '<div style="padding:16px;color:var(--text-muted);text-align:center;">Keine f\u00e4lligen R\u00fcckverg\u00fctungen</div>'}
           </div>` : ''}
+          ${canSeeRebates ? (() => {
+            const totalDrafts = draftInvoices.length + draftCreditNotes.length;
+            const showInv = draftInvoices.slice(0, 10);
+            const showCn  = draftCreditNotes.slice(0, 10);
+            const moreInv = Math.max(0, draftInvoices.length - showInv.length);
+            const moreCn  = Math.max(0, draftCreditNotes.length - showCn.length);
+            return `<div class="dash-card" style="grid-column:span 2;">
+              <div class="dash-card-header">
+                <h3>Offene Entw\u00fcrfe \u2014 Handlungsbedarf</h3>
+                <span class="badge ${totalDrafts > 0 ? 'badge-yellow' : 'badge-green'}">${totalDrafts > 0 ? totalDrafts : 'OK'}</span>
+              </div>
+              ${totalDrafts === 0
+                ? '<div style="padding:16px;color:var(--text-muted);text-align:center;">Keine offenen Entw\u00fcrfe</div>'
+                : `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:8px;">
+                    <div>
+                      <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;padding:4px 8px 6px;display:flex;justify-content:space-between;align-items:center;">
+                        <span>Rechnungen (${draftInvoices.length})</span>
+                      </div>
+                      ${showInv.length > 0
+                        ? `<div class="table-wrapper"><table style="font-size:13px;"><thead><tr><th>Nr.</th><th>Kunde</th><th style="text-align:right;">Brutto</th><th>Datum</th></tr></thead><tbody>${showInv.map(inv => `
+                            <tr style="cursor:pointer;" onclick="navigate('invoice-detail', ${inv.id})">
+                              <td><strong>${escapeHtml(inv.invoice_number || '#'+inv.id)}</strong></td>
+                              <td>${escapeHtml(inv.customer_name || '')}</td>
+                              <td style="text-align:right;white-space:nowrap;">${Number(inv.total_gross || 0).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} \u20ac</td>
+                              <td>${formatDate(inv.invoice_date)}</td>
+                            </tr>`).join('')}</tbody></table></div>
+                          ${moreInv > 0 ? `<div style="padding:6px 8px;font-size:11px;color:var(--text-muted);">+ ${moreInv} weitere</div>` : ''}`
+                        : '<div style="padding:12px 8px;font-size:12px;color:var(--text-muted);">Keine Entw\u00fcrfe</div>'}
+                    </div>
+                    <div>
+                      <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;padding:4px 8px 6px;display:flex;justify-content:space-between;align-items:center;">
+                        <span>Gutschriften (${draftCreditNotes.length})</span>
+                      </div>
+                      ${showCn.length > 0
+                        ? `<div class="table-wrapper"><table style="font-size:13px;"><thead><tr><th>Nr.</th><th>Kunde</th><th style="text-align:right;">Brutto</th><th>Datum</th></tr></thead><tbody>${showCn.map(cn => `
+                            <tr style="cursor:pointer;" onclick="navigate('credit-detail', ${cn.id})">
+                              <td><strong>${escapeHtml(cn.credit_number || '#'+cn.id)}</strong></td>
+                              <td>${escapeHtml(cn.customer_name || '')}</td>
+                              <td style="text-align:right;white-space:nowrap;">${Number(cn.total_gross || 0).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} \u20ac</td>
+                              <td>${formatDate(cn.credit_date)}</td>
+                            </tr>`).join('')}</tbody></table></div>
+                          ${moreCn > 0 ? `<div style="padding:6px 8px;font-size:11px;color:var(--text-muted);">+ ${moreCn} weitere</div>` : ''}`
+                        : '<div style="padding:12px 8px;font-size:12px;color:var(--text-muted);">Keine Entw\u00fcrfe</div>'}
+                    </div>
+                  </div>`}
+            </div>`;
+          })() : ''}
         </div>
       </div>
     `;
