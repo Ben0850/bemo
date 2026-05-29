@@ -1111,6 +1111,28 @@ async function getDb() {
     }
   } catch(_) { /* Settings-Tabelle existiert evtl. noch nicht beim allerersten Init — wird beim nächsten Start geseeded */ }
 
+  // Zentrale Audit-Tabelle — pro Mitarbeiter und entityweise filterbare Aktivitaeten.
+  // entity_type Beispiele: 'akte', 'invoice', 'credit_note', 'rental', 'customer', 'vermittler',
+  //   'staff', 'price_list', 'credit', 'rebate', 'file', 'login'
+  // action Beispiele: 'create', 'update', 'delete', 'finalize', 'login', 'logout', 'upload'
+  db.run(`
+    CREATE TABLE IF NOT EXISTS activity_log (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id      INTEGER,
+      username     TEXT NOT NULL DEFAULT '',
+      action       TEXT NOT NULL,
+      entity_type  TEXT NOT NULL,
+      entity_id    INTEGER,
+      entity_label TEXT NOT NULL DEFAULT '',
+      details      TEXT NOT NULL DEFAULT '',
+      created_at   TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES staff(id)
+    )
+  `);
+  try { db.run('CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id, created_at DESC)'); } catch(e) {}
+  try { db.run('CREATE INDEX IF NOT EXISTS idx_activity_log_entity ON activity_log(entity_type, entity_id)'); } catch(e) {}
+  try { db.run('CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(created_at DESC)'); } catch(e) {}
+
   // Phase 1: Audit trail table (DB-05 — GoBD compliance)
   db.run(`
     CREATE TABLE IF NOT EXISTS akten_history (

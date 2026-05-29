@@ -23,6 +23,18 @@ let autoRefreshTimer = null;
 function isAdmin() {
   return loggedInUser && loggedInUser.permission_level === 'Admin';
 }
+// "Benutzer"-Rolle darf nichts loeschen. Alle anderen Rollen schon.
+function canDelete() {
+  return loggedInUser && loggedInUser.permission_level !== 'Benutzer';
+}
+function applyPermissionBodyClasses() {
+  const body = document.body;
+  if (!body) return;
+  body.classList.remove('role-benutzer');
+  if (loggedInUser && loggedInUser.permission_level === 'Benutzer') {
+    body.classList.add('role-benutzer');
+  }
+}
 function isVerwaltung() {
   return loggedInUser && (loggedInUser.permission_level === 'Verwaltung' || loggedInUser.permission_level === 'Admin');
 }
@@ -531,6 +543,7 @@ function navigate(page, data) {
     case 'settings-program': renderSettingsProgram(); break;
     case 'settings-invoicing': renderSettingsInvoicing(); break;
     case 'file-log': renderFileLog(); break;
+    case 'activity-log': renderActivityLog(); break;
     case 'settings': renderSettingsCompany(); break;
     default: renderDashboard();
   }
@@ -9346,6 +9359,7 @@ async function doLogin(e) {
   try {
     const user = await api('/api/login', { method: 'POST', body: { username, password } });
     loggedInUser = user;
+    applyPermissionBodyClasses();
     // Anmeldedaten in der Desktop-App optional verschluesselt speichern (OS-Keychain)
     if (window.electronAPI && typeof window.electronAPI.saveCredentials === 'function') {
       try {
@@ -9368,6 +9382,7 @@ async function doLogin(e) {
 
 function doLogout() {
   loggedInUser = null;
+  applyPermissionBodyClasses();
   document.getElementById('app-container').style.display = 'none';
   document.getElementById('login-screen').style.display = '';
   document.getElementById('login-username').value = '';
@@ -12814,7 +12829,7 @@ async function renderVermietungOverview() {
       <div style="overflow-x:auto;">
         ${tableHtml}
       </div>
-      ${isAdmin() ? renderRentalList(allRentals) : ''}
+      ${renderRentalList(allRentals)}
     `;
   } catch (err) {
     main.innerHTML = '<p class="error">Fehler: ' + escapeHtml(err.message) + '</p>';
@@ -12879,11 +12894,7 @@ async function renderVermietungSingle() {
           cellTitle = (dayEntries[0].customer_name || '') + (rSt ? ' (' + rSt + ')' : '');
         }
 
-        if (isAdmin()) {
-          tableHtml += '<td class="' + cellClass + '" style="' + cellStyle + 'cursor:pointer;user-select:none;" title="' + escapeHtml(cellTitle) + '" data-rdate="' + dateStr + '" onmousedown="rentalDragStart(\'' + dateStr + '\', event)" onmouseover="rentalDragOver(\'' + dateStr + '\')">' + d + '</td>';
-        } else {
-          tableHtml += '<td class="' + cellClass + '" style="' + cellStyle + '" title="' + escapeHtml(cellTitle) + '">' + d + '</td>';
-        }
+        tableHtml += '<td class="' + cellClass + '" style="' + cellStyle + 'cursor:pointer;user-select:none;" title="' + escapeHtml(cellTitle) + '" data-rdate="' + dateStr + '" onmousedown="rentalDragStart(\'' + dateStr + '\', event)" onmouseover="rentalDragOver(\'' + dateStr + '\')">' + d + '</td>';
       }
       tableHtml += '</tr>';
     }
@@ -12912,7 +12923,7 @@ async function renderVermietungSingle() {
       <div style="overflow-x:auto;">
         ${tableHtml}
       </div>
-      ${isAdmin() ? renderRentalList(visibleEntries) : ''}
+      ${renderRentalList(visibleEntries)}
     `;
   } catch (err) {
     main.innerHTML = '<p class="error">Fehler: ' + escapeHtml(err.message) + '</p>';
@@ -18916,6 +18927,158 @@ async function deleteInsurance(id, name) {
 }
 
 // ===== PAGE: Datei-Aktivitätslog =====
+// ===== Mitarbeiter-Aktivitätslog (Audit-Log) =====
+const ACTIVITY_ENTITY_LABELS = {
+  'akte': 'Akten',
+  'invoice': 'Rechnungen',
+  'credit_note': 'Gutschriften',
+  'rental': 'Vermietungen',
+  'customer': 'Kunden',
+  'login': 'Login',
+  'staff': 'Mitarbeiter',
+  'price_list': 'Preisliste',
+  'credit': 'Rückvergütungen (Credits)',
+  'rebate': 'Rückvergütungsvereinbarungen',
+  'file': 'Dateien'
+};
+const ACTIVITY_ACTION_BADGES = {
+  'create':   { bg: '#d1fae5', color: '#065f46', text: 'angelegt' },
+  'update':   { bg: '#dbeafe', color: '#1e40af', text: 'bearbeitet' },
+  'delete':   { bg: '#fee2e2', color: '#991b1b', text: 'gelöscht' },
+  'finalize': { bg: '#fef3c7', color: '#92400e', text: 'finalisiert' },
+  'login':    { bg: '#e0e7ff', color: '#3730a3', text: 'Login' }
+};
+
+function activityActionBadge(action) {
+  const a = ACTIVITY_ACTION_BADGES[action] || { bg: '#f3f4f6', color: '#374151', text: action };
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;background:${a.bg};color:${a.color};">${escapeHtml(a.text)}</span>`;
+}
+
+async function renderActivityLog() {
+  const main = document.getElementById('main-content');
+  main.innerHTML = `
+    <div class="page-header">
+      <h2>Mitarbeiter-Aktivitätslog</h2>
+      <button class="btn btn-secondary" onclick="renderActivityLog()">Aktualisieren</button>
+    </div>
+    <div class="card" style="padding:14px 16px;margin-bottom:14px;">
+      <div style="display:grid;grid-template-columns:2fr 1.5fr 1fr 0.7fr;gap:10px;align-items:end;">
+        <div class="form-group" style="margin:0;">
+          <label>Mitarbeiter</label>
+          <select id="al-staff" onchange="applyActivityLogFilters()">
+            <option value="">Alle</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label>Bereich</label>
+          <select id="al-entity" onchange="applyActivityLogFilters()">
+            <option value="">Alle</option>
+            ${Object.entries(ACTIVITY_ENTITY_LABELS).map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label>Aktion</label>
+          <select id="al-action" onchange="applyActivityLogFilters()">
+            <option value="">Alle</option>
+            <option value="create">angelegt</option>
+            <option value="update">bearbeitet</option>
+            <option value="delete">gelöscht</option>
+            <option value="finalize">finalisiert</option>
+            <option value="login">Login</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label>&nbsp;</label>
+          <button class="btn btn-secondary" style="width:100%;" onclick="resetActivityLogFilters()">Zurücksetzen</button>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="padding:0;">
+      <div id="al-content"><div class="loading">Laden...</div></div>
+    </div>
+  `;
+  try {
+    const staff = await api('/api/staff').catch(() => []);
+    const sel = document.getElementById('al-staff');
+    staff.filter(s => s.active).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de')).forEach(s => {
+      const o = document.createElement('option');
+      o.value = s.id;
+      o.textContent = s.name;
+      sel.appendChild(o);
+    });
+    await applyActivityLogFilters();
+  } catch (err) {
+    document.getElementById('al-content').innerHTML = '<div class="empty-state"><p>Fehler: ' + escapeHtml(err.message) + '</p></div>';
+  }
+}
+
+async function applyActivityLogFilters() {
+  const userId = document.getElementById('al-staff')?.value || '';
+  const entity = document.getElementById('al-entity')?.value || '';
+  const action = document.getElementById('al-action')?.value || '';
+  const container = document.getElementById('al-content');
+  if (!container) return;
+  container.innerHTML = '<div class="loading" style="padding:20px;color:var(--text-muted);text-align:center;">Laden...</div>';
+  try {
+    const params = new URLSearchParams();
+    if (userId) params.set('user_id', userId);
+    if (entity) params.set('entity_type', entity);
+    if (action) params.set('action', action);
+    params.set('limit', '500');
+    const logs = await api('/api/activity-log?' + params.toString());
+    if (!logs.length) {
+      container.innerHTML = '<div class="empty-state" style="padding:24px;color:var(--text-muted);text-align:center;">Keine Aktivitäten gefunden.</div>';
+      return;
+    }
+    container.innerHTML = `
+      <div class="table-wrapper">
+        <table>
+          <thead><tr>
+            <th style="white-space:nowrap;">Datum / Uhrzeit</th>
+            <th>Mitarbeiter</th>
+            <th>Aktion</th>
+            <th>Bereich</th>
+            <th>Objekt</th>
+            <th>Details</th>
+          </tr></thead>
+          <tbody>
+            ${logs.map(l => {
+              const entityLabel = ACTIVITY_ENTITY_LABELS[l.entity_type] || l.entity_type;
+              const detailPage = ({
+                'akte': 'akte-detail',
+                'invoice': 'invoice-detail',
+                'credit_note': 'credit-detail',
+                'rental': null,
+                'customer': 'customer-detail'
+              })[l.entity_type];
+              const link = (detailPage && l.entity_id)
+                ? `<a href="#" onclick="navigate('${detailPage}', ${l.entity_id});return false;" style="color:var(--primary);text-decoration:none;">${escapeHtml(l.entity_label || ('#' + l.entity_id))}</a>`
+                : escapeHtml(l.entity_label || (l.entity_id ? '#' + l.entity_id : '—'));
+              return `<tr>
+                <td style="white-space:nowrap;font-size:12px;">${escapeHtml(l.created_at || '')}</td>
+                <td>${escapeHtml(l.staff_name || l.username || '—')}</td>
+                <td>${activityActionBadge(l.action)}</td>
+                <td>${escapeHtml(entityLabel)}</td>
+                <td>${link}</td>
+                <td style="font-size:12px;color:var(--text-muted);">${escapeHtml(l.details || '')}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (err) {
+    container.innerHTML = '<div class="empty-state" style="padding:24px;color:var(--danger);text-align:center;">Fehler: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+function resetActivityLogFilters() {
+  ['al-staff', 'al-entity', 'al-action'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  applyActivityLogFilters();
+}
+
 async function renderFileLog() {
   const main = document.getElementById('main-content');
   main.innerHTML = `
@@ -19768,11 +19931,79 @@ async function sendComposerEmail() {
     const payload = { from, to, cc, bcc, subject, body, attachments: _emailComposerAttachments };
     await api('/api/o365/send', { method: 'POST', body: payload });
     showToast('E-Mail gesendet', 'success');
+
+    // Snapshot fuer Archivierung nehmen, bevor Composer-State geleert wird
+    const ctxSnap = _emailComposerCtx ? { ..._emailComposerCtx } : null;
+    const attsSnap = _emailComposerAttachments.slice();
     _emailComposerAttachments = [];
     closeModal();
+
+    // Gesendete E-Mail + Anhaenge automatisch als Post-Eintraege in die Akte ablegen,
+    // genau wie wenn man externe Dateien per Drag&Drop reinzieht.
+    if (ctxSnap && ctxSnap.akteId) {
+      archiveSentEmailAsAktenPost(ctxSnap, { from, to, cc, bcc, subject, body }, attsSnap)
+        .catch(e => showToast('E-Mail gesendet, aber Archivierung in Akte fehlgeschlagen: ' + e.message, 'error'));
+    }
   } catch (err) {
     showToast('Versand fehlgeschlagen: ' + err.message, 'error');
     if (btn) { btn.disabled = false; btn.innerHTML = '&#9993; Senden'; }
+  }
+}
+
+// Erzeugt eine simple RFC822-EML-Datei aus den Composer-Inhalten — damit die gesendete Mail
+// in der Akte als oeffenbare .eml-Datei vorliegt (Vorschau funktioniert dann ueber die bestehende MSG/EML-Vorschau).
+function _buildEmlFromComposer(mail) {
+  const dt = new Date().toUTCString();
+  const lines = [
+    'From: ' + (mail.from || ''),
+    'To: ' + (mail.to || ''),
+  ];
+  if (mail.cc) lines.push('Cc: ' + mail.cc);
+  if (mail.bcc) lines.push('Bcc: ' + mail.bcc);
+  lines.push('Subject: ' + (mail.subject || ''));
+  lines.push('Date: ' + dt);
+  lines.push('MIME-Version: 1.0');
+  lines.push('Content-Type: text/html; charset=UTF-8');
+  lines.push('Content-Transfer-Encoding: 8bit');
+  lines.push('');
+  lines.push(mail.body || '');
+  return lines.join('\r\n');
+}
+
+function _base64ToFile(base64, name, contentType) {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], name, { type: contentType || 'application/octet-stream' });
+}
+
+// Archiviert die soeben gesendete Mail + Anhaenge als Post-Eintraege in der Akte.
+// Pro Datei ein Post-Eintrag (analog Drop-Verhalten). Direction immer "ausgehend".
+async function archiveSentEmailAsAktenPost(ctx, mail, attachments) {
+  const { akteId, aktennummer } = ctx;
+  const postDate = localDateStr(new Date());
+  const participant = mail.to || '';
+  const subject = (mail.subject || '(kein Betreff)').trim();
+  const direction = 'ausgehend';
+
+  // 1) Mail selbst als .eml — sicheren Dateinamen erzeugen (Windows-illegale Zeichen ersetzen)
+  const safeBase = (subject.substring(0, 60) || 'Email').replace(/[\\/:*?"<>|\r\n]+/g, '_').trim() || 'Email';
+  const emlText = _buildEmlFromComposer(mail);
+  const emlFile = new File([new Blob([emlText], { type: 'message/rfc822' })], safeBase + '.eml', { type: 'message/rfc822' });
+  try {
+    await uploadPostFile(akteId, aktennummer, emlFile, postDate, participant, subject, direction);
+  } catch (e) {
+    console.error('EML-Archivierung fehlgeschlagen:', e);
+  }
+
+  // 2) Jeden Anhang als eigenen Post-Eintrag
+  for (const att of (attachments || [])) {
+    try {
+      const file = _base64ToFile(att.contentBytes, att.name, att.contentType);
+      await uploadPostFile(akteId, aktennummer, file, postDate, participant, subject + ' — Anhang: ' + att.name, direction);
+    } catch (e) {
+      console.error('Anhang-Archivierung fehlgeschlagen (' + att.name + '):', e);
+    }
   }
 }
 

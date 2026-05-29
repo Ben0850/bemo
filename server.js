@@ -30,6 +30,22 @@ function berlinTime() {
   return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}:${String(n.getSeconds()).padStart(2, '0')}`;
 }
 
+// Zentrales Aktivitaets-Logging. Fehler werden geschluckt, damit der eigentliche Request
+// nicht scheitert wenn das Log mal nicht schreibbar ist.
+function logActivity(req, action, entityType, entityId, entityLabel, details) {
+  try {
+    const userId = Number(req.headers['x-user-id']) || null;
+    const username = req.headers['x-user-name'] || '';
+    const ts = `${berlinToday()} ${berlinTime()}`;
+    execute(
+      'INSERT INTO activity_log (user_id, username, action, entity_type, entity_id, entity_label, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [userId, username, action, entityType, entityId || null, entityLabel || '', details || '', ts]
+    );
+  } catch (e) {
+    console.error('activity_log insert failed:', e && e.message);
+  }
+}
+
 app.use(cors());
 app.use(express.json({ limit: '250mb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -39,6 +55,19 @@ app.use(express.static(path.join(__dirname, 'public'), {
     }
   }
 }));
+
+// Globale Sperre: "Benutzer"-Rolle darf NICHTS loeschen.
+// Greift fuer alle DELETE-API-Endpoints (sowie POST/PUT auf invoice-payment-reversal etc.
+// werden nicht erfasst — bei Bedarf separat haerten).
+app.use((req, res, next) => {
+  if (req.method === 'DELETE' && req.path.startsWith('/api/')) {
+    const permission = req.headers['x-user-permission'];
+    if (permission === 'Benutzer') {
+      return res.status(403).json({ error: 'Benutzer dürfen keine Datensätze löschen' });
+    }
+  }
+  next();
+});
 
 // Trust proxy headers (Nginx reverse proxy)
 if (process.env.NODE_ENV === 'production') {
@@ -205,6 +234,8 @@ app.post('/api/customers', (req, res) => {
     `INSERT INTO customers (first_name, last_name, street, zip, city, phone, email, reminder_asked, reminder_response, reminder_blocked, notes, customer_type, company_name, contact_person, contact_phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [first_name || '', last_name || '', street || '', zip || '', city || '', phone || '', email || '', reminder_asked ? 1 : 0, reminder_response || '', reminder_blocked ? 1 : 0, notes || '', type, company_name || '', contact_person || '', contact_phone || '']
   );
+  const label = (type === 'Privatkunde') ? (last_name + ', ' + first_name) : (company_name || ('Kunde #' + result.lastId));
+  logActivity(req, 'create', 'customer', result.lastId, label, type);
   res.json({ id: result.lastId, message: 'Kunde erstellt' });
 });
 
@@ -229,6 +260,8 @@ app.put('/api/customers/:id', (req, res) => {
     `UPDATE customers SET first_name=?, last_name=?, street=?, zip=?, city=?, phone=?, email=?, reminder_asked=?, reminder_response=?, reminder_blocked=?, notes=?, customer_type=?, company_name=?, contact_person=?, contact_phone=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
     [first_name || '', last_name || '', street || '', zip || '', city || '', phone || '', email || '', reminder_asked ? 1 : 0, reminder_response || '', reminder_blocked ? 1 : 0, notes || '', type, company_name || '', contact_person || '', contact_phone || '', Number(req.params.id)]
   );
+  const label = (type === 'Privatkunde') ? (last_name + ', ' + first_name) : (company_name || ('Kunde #' + req.params.id));
+  logActivity(req, 'update', 'customer', Number(req.params.id), label, '');
   res.json({ message: 'Kunde aktualisiert' });
 });
 
@@ -556,8 +589,15 @@ app.put('/api/customers/:id/reminder-block', (req, res) => {
 });
 
 app.delete('/api/customers/:id', (req, res) => {
+  const existing = queryOne('SELECT first_name, last_name, company_name, customer_type FROM customers WHERE id = ?', [Number(req.params.id)]);
   execute('DELETE FROM vehicles WHERE customer_id = ?', [Number(req.params.id)]);
   execute('DELETE FROM customers WHERE id = ?', [Number(req.params.id)]);
+  if (existing) {
+    const label = (existing.customer_type === 'Privatkunde')
+      ? ((existing.last_name || '') + ', ' + (existing.first_name || ''))
+      : (existing.company_name || ('Kunde #' + req.params.id));
+    logActivity(req, 'delete', 'customer', Number(req.params.id), label, '');
+  }
   res.json({ message: 'Kunde gelöscht' });
 });
 
@@ -618,6 +658,14 @@ app.post('/api/login', (req, res) => {
   }
 
   const needsPassword = !staff.password || staff.password === '';
+  // Login-Event ins Activity-Log — req.headers x-user-* sind noch nicht gesetzt, daher direkter Insert
+  try {
+    const ts = `${berlinToday()} ${berlinTime()}`;
+    execute(
+      'INSERT INTO activity_log (user_id, username, action, entity_type, entity_id, entity_label, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [staff.id, staff.name || '', 'login', 'login', staff.id, staff.name || '', '', ts]
+    );
+  } catch (e) { console.error('login activity_log failed:', e && e.message); }
   res.json({ id: staff.id, name: staff.name, permission_level: staff.permission_level || 'Benutzer', default_station_id: staff.default_station_id || null, work_days: staff.work_days || '1,2,3,4,5', needs_password: needsPassword });
 });
 
@@ -1879,6 +1927,7 @@ app.post('/api/invoices', (req, res) => {
     );
     // Hinweis: Keine automatische Vorlagen-Uebernahme mehr — User waehlt im Rechnungs-Formular
     // gezielt eine Positionsgruppe per Dropdown aus.
+    logActivity(req, 'create', 'invoice', result.lastId, 'Rechnung ' + invoice_number, '');
     res.json({ id: result.lastId, invoice_number, message: 'Rechnung erstellt' });
   } catch(e) {
     console.error('POST /api/invoices failed:', e && e.stack ? e.stack : e);
@@ -1970,6 +2019,9 @@ app.put('/api/invoices/:id', (req, res) => {
     'UPDATE invoices SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, vermittler_id=?, intro_text=?, abgerechnete_fahrzeuggruppe=?, kundenfahrzeuggruppe=?, rental_id=?, rechnungsart=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
     [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', finalVermittlerId, finalIntroText, finalGroupBilled, finalGroupCustomer, finalRentalId, finalRechnungsart, id]
   );
+  const invForLog = queryOne('SELECT invoice_number, status FROM invoices WHERE id = ?', [id]);
+  const isFinalize = status && status !== 'Entwurf' && invForLog && invForLog.status !== 'Entwurf';
+  logActivity(req, isFinalize ? 'finalize' : 'update', 'invoice', id, 'Rechnung ' + (invForLog?.invoice_number || id), status ? ('Status: ' + status) : '');
   res.json({ message: 'Rechnung aktualisiert' });
 });
 
@@ -1978,12 +2030,13 @@ app.delete('/api/invoices/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   // AUTH-05: GoBD — finalisierte Rechnungen (status != Entwurf) dürfen nicht gelöscht werden
-  const invoice = queryOne('SELECT status FROM invoices WHERE id = ?', [Number(req.params.id)]);
+  const invoice = queryOne('SELECT invoice_number, status FROM invoices WHERE id = ?', [Number(req.params.id)]);
   if (!invoice) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
   if (invoice.status !== 'Entwurf') {
     return res.status(403).json({ error: 'Finalisierte Rechnungen dürfen nicht gelöscht werden (GoBD)' });
   }
   execute('DELETE FROM invoices WHERE id = ?', [Number(req.params.id)]);
+  logActivity(req, 'delete', 'invoice', Number(req.params.id), 'Rechnung ' + (invoice.invoice_number || req.params.id), '');
   res.json({ message: 'Rechnung gelöscht' });
 });
 
@@ -2608,6 +2661,7 @@ app.post('/api/credit-notes', (req, res) => {
       'INSERT INTO credit_notes (credit_number, customer_id, vermittler_id, credit_date, due_date, service_date, payment_method, notes, company_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [credit_number, customer_id || 0, vermittler_id || null, credit_date, due_date || '', service_date || '', payment_method || 'Überweisung', notes || '', snapshot]
     );
+    logActivity(req, 'create', 'credit_note', result.lastId, 'Gutschrift ' + credit_number, '');
     res.json({ id: result.lastId, credit_number, message: 'Gutschrift erstellt' });
   } catch(e) {
     console.error('Credit note creation error:', e.message);
@@ -2620,7 +2674,7 @@ app.put('/api/credit-notes/:id', (req, res) => {
   if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
-  const existing = queryOne('SELECT status FROM credit_notes WHERE id = ?', [Number(req.params.id)]);
+  const existing = queryOne('SELECT credit_number, status FROM credit_notes WHERE id = ?', [Number(req.params.id)]);
   if (!existing) return res.status(404).json({ error: 'Gutschrift nicht gefunden' });
   if (existing.status === 'Final') {
     return res.status(403).json({ error: 'Finalisierte Gutschrift kann nicht mehr geändert werden' });
@@ -2630,18 +2684,21 @@ app.put('/api/credit-notes/:id', (req, res) => {
     'UPDATE credit_notes SET due_date=?, status=?, service_date=?, payment_method=?, notes=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
     [due_date || '', status || 'Entwurf', service_date || '', payment_method || 'Überweisung', notes || '', Number(req.params.id)]
   );
+  const isFinalize = status === 'Final';
+  logActivity(req, isFinalize ? 'finalize' : 'update', 'credit_note', Number(req.params.id), 'Gutschrift ' + (existing.credit_number || req.params.id), status ? ('Status: ' + status) : '');
   res.json({ message: 'Gutschrift aktualisiert' });
 });
 
 app.delete('/api/credit-notes/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
-  const cn = queryOne('SELECT status FROM credit_notes WHERE id = ?', [Number(req.params.id)]);
+  const cn = queryOne('SELECT credit_number, status FROM credit_notes WHERE id = ?', [Number(req.params.id)]);
   if (!cn) return res.status(404).json({ error: 'Gutschrift nicht gefunden' });
   if (cn.status !== 'Entwurf') {
     return res.status(403).json({ error: 'Finalisierte Gutschriften dürfen nicht gelöscht werden' });
   }
   execute('DELETE FROM credit_notes WHERE id = ?', [Number(req.params.id)]);
+  logActivity(req, 'delete', 'credit_note', Number(req.params.id), 'Gutschrift ' + (cn.credit_number || req.params.id), '');
   res.json({ message: 'Gutschrift gelöscht' });
 });
 
@@ -3451,6 +3508,7 @@ app.post('/api/rentals', (req, res) => {
     'INSERT INTO rentals (vehicle_id, customer_name, start_date, end_date, start_time, end_time, mietart, status, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     [Number(vehicle_id), customer_name || '', start_date, end_date, start_time || '', end_time || '', mietart || '', status || 'Reservierung', notes || '', userId]
   );
+  logActivity(req, 'create', 'rental', result.lastId, 'Vermietung #' + result.lastId + (customer_name ? ' (' + customer_name + ')' : ''), '');
   res.json({ id: result.lastId, message: 'Vermietung erstellt' });
 });
 
@@ -3478,6 +3536,7 @@ app.put('/api/rentals/:id', (req, res) => {
     'UPDATE rentals SET vehicle_id=?, customer_name=?, start_date=?, end_date=?, start_time=?, end_time=?, km_start=?, km_end=?, mietart=?, status=?, notes=?, versicherung=? WHERE id=?',
     [merged.vehicle_id, merged.customer_name, merged.start_date, merged.end_date, merged.start_time, merged.end_time, merged.km_start, merged.km_end, merged.mietart, merged.status, merged.notes, merged.versicherung, Number(req.params.id)]
   );
+  logActivity(req, 'update', 'rental', Number(req.params.id), 'Vermietung #' + req.params.id + (merged.customer_name ? ' (' + merged.customer_name + ')' : ''), b.status ? ('Status: ' + b.status) : '');
   res.json({ message: 'Vermietung aktualisiert' });
 });
 
@@ -3490,7 +3549,9 @@ app.delete('/api/rentals/:id', (req, res) => {
       error: `Mietvorgang kann nicht gel\u00f6scht werden, da er in Akte ${akteRef.aktennummer || akteRef.id} verwendet wird. Bitte entfernen Sie den Mietvorgang zuerst aus der Akte.`
     });
   }
+  const existing = queryOne('SELECT customer_name FROM rentals WHERE id = ?', [rentalId]);
   execute('DELETE FROM rentals WHERE id = ?', [rentalId]);
+  logActivity(req, 'delete', 'rental', rentalId, 'Vermietung #' + rentalId + (existing && existing.customer_name ? ' (' + existing.customer_name + ')' : ''), '');
   res.json({ message: 'Vermietung gel\u00f6scht' });
 });
 
@@ -4154,6 +4215,27 @@ app.get('/api/files/log', (req, res) => {
   res.json(queryAll('SELECT * FROM file_log ORDER BY id DESC LIMIT ?', [limit]));
 });
 
+// Aktivitaets-Log lesen. Nur Admin/Verwaltung. Filter: user_id, entity_type, action, limit
+app.get('/api/activity-log', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+  const userId = req.query.user_id ? Number(req.query.user_id) : null;
+  const entityType = req.query.entity_type || '';
+  const action = req.query.action || '';
+  const limit = Math.min(Number(req.query.limit) || 500, 2000);
+
+  let sql = 'SELECT a.*, s.name AS staff_name FROM activity_log a LEFT JOIN staff s ON s.id = a.user_id WHERE 1=1';
+  const params = [];
+  if (userId) { sql += ' AND a.user_id = ?'; params.push(userId); }
+  if (entityType) { sql += ' AND a.entity_type = ?'; params.push(entityType); }
+  if (action) { sql += ' AND a.action = ?'; params.push(action); }
+  sql += ' ORDER BY a.id DESC LIMIT ?';
+  params.push(limit);
+  res.json(queryAll(sql, params));
+});
+
 // Delete file
 app.delete('/api/files/:key(*)', async (req, res) => {
   try {
@@ -4511,6 +4593,7 @@ app.post('/api/akten', (req, res) => {
      unfalldatum || '', unfallort || '', polizei_vor_ort ? 1 : 0,
      mietart || '', wiedervorlage_datum || '', userId]
   );
+  logActivity(req, 'create', 'akte', result.lastId, 'Akte ' + aktennummer, '');
   res.status(201).json(queryOne('SELECT * FROM akten WHERE id = ?', [result.lastId]));
 });
 
@@ -4594,6 +4677,7 @@ app.put('/api/akten/:id', (req, res) => {
     ]
   );
 
+  logActivity(req, 'update', 'akte', Number(req.params.id), 'Akte ' + (existing.aktennummer || req.params.id), '');
   res.json(queryOne('SELECT * FROM akten WHERE id = ?', [Number(req.params.id)]));
 });
 
@@ -5141,13 +5225,14 @@ app.delete('/api/akten/:id', (req, res) => {
     });
   }
   const akteId = Number(req.params.id);
-  const existing = queryOne('SELECT id FROM akten WHERE id = ?', [akteId]);
+  const existing = queryOne('SELECT id, aktennummer FROM akten WHERE id = ?', [akteId]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
   // WICHTIG: Nur DB-Loeschung. Alle verknuepften Tabellen (akten_beteiligte, akten_eintraege,
   // akten_post, akten_kommunikation, akten_invoices, akten_credit_notes, akten_history) sind
   // per FK ON DELETE CASCADE konfiguriert und werden automatisch mitgeloescht.
   // Der S3-Ordner zur Akte wird unter KEINEN Umstaenden angefasst — keinerlei S3-API-Aufruf.
   execute('DELETE FROM akten WHERE id = ?', [akteId]);
+  logActivity(req, 'delete', 'akte', akteId, 'Akte ' + (existing.aktennummer || akteId), '');
   res.json({ success: true });
 });
 
