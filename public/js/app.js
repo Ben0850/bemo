@@ -20010,14 +20010,105 @@ function _base64ToFile(base64, name, contentType) {
   return new File([bytes], name, { type: contentType || 'application/octet-stream' });
 }
 
+// Erste Empfaenger-E-Mail aus einer komma-/semikolon-separierten "To"-Liste.
+function _firstRecipientEmail(toStr) {
+  if (!toStr) return '';
+  const parts = toStr.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+  return parts[0] || '';
+}
+
+// Sucht in einer Beteiligten-Liste den Eintrag, dessen E-Mail-Adresse case-insensitive
+// zur uebergebenen Empfaenger-Adresse passt.
+function _findBeteiligterByEmail(email, beteiligte) {
+  if (!email) return null;
+  const target = email.trim().toLowerCase();
+  if (!target) return null;
+  for (const b of (beteiligte || [])) {
+    const be = (b.email || '').trim().toLowerCase();
+    if (be && be === target) return b;
+  }
+  return null;
+}
+
+// Formatiert einen Beteiligten als "Typ - Name" (gleicher String wie im Post-Meta-Dropdown).
+function _formatBeteiligterForPost(b) {
+  const typeLabel = POST_BET_TYPE_LABELS[b.type] || b.type || 'Beteiligter';
+  return typeLabel + ' - ' + (b.name || '');
+}
+
+// Modaler Dialog wenn die Empfaenger-Adresse keinem Beteiligten zugeordnet werden konnte.
+// Resolves mit { mode: 'name', value }, { mode: 'email' } oder { mode: 'cancel' }.
+function askBeteiligterForArchive(recipientEmail) {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      const existing = document.getElementById('app-archive-bet-overlay');
+      if (existing) existing.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'app-archive-bet-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:20000;display:flex;align-items:center;justify-content:center;';
+      const emailHtml = recipientEmail ? '<strong>' + escapeHtml(recipientEmail) + '</strong>' : '<em>(keine Empfaenger-Adresse)</em>';
+      overlay.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px 28px;max-width:460px;width:90%;box-shadow:0 16px 48px rgba(0,0,0,0.3);">'
+        + '<h3 style="margin:0 0 8px;font-size:17px;">Beteiligten zuordnen</h3>'
+        + '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.45;">Die E-Mail wurde an ' + emailHtml + ' gesendet. Diese Adresse ist keinem Beteiligten der Akte zugeordnet.<br>Wer ist der Beteiligte fuer diese Mail?</div>'
+        + '<div class="form-group" style="margin-bottom:10px;">'
+        +   '<label style="font-size:13px;font-weight:600;">Name des Beteiligten</label>'
+        +   '<input type="text" id="ar-bet-name" placeholder="z.B. Max Mustermann" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;box-sizing:border-box;">'
+        + '</div>'
+        + '<button type="button" id="ar-bet-submit-name" class="btn btn-primary" style="width:100%;margin-bottom:14px;">Namen uebernehmen</button>'
+        + (recipientEmail ? ('<div style="border-top:1px solid var(--border);padding-top:14px;">'
+        +   '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Alternativ:</div>'
+        +   '<button type="button" id="ar-bet-use-email" class="btn btn-secondary" style="width:100%;">E-Mail-Adresse als Beteiligten verwenden</button>'
+        + '</div>') : '')
+        + '<div style="display:flex;justify-content:flex-end;margin-top:16px;">'
+        +   '<button type="button" id="ar-bet-cancel" style="background:transparent;border:none;color:var(--text-muted);font-size:13px;cursor:pointer;padding:6px 4px;">Archivierung ueberspringen</button>'
+        + '</div></div>';
+      document.body.appendChild(overlay);
+      const cleanup = (result) => { try { overlay.remove(); } catch(_){} resolve(result); };
+      const input = overlay.querySelector('#ar-bet-name');
+      const submitName = () => {
+        const name = (input.value || '').trim();
+        if (!name) { input.focus(); return; }
+        cleanup({ mode: 'name', value: name });
+      };
+      overlay.querySelector('#ar-bet-submit-name').addEventListener('click', e => { e.stopPropagation(); submitName(); });
+      const emailBtn = overlay.querySelector('#ar-bet-use-email');
+      if (emailBtn) emailBtn.addEventListener('click', e => { e.stopPropagation(); cleanup({ mode: 'email' }); });
+      overlay.querySelector('#ar-bet-cancel').addEventListener('click', e => { e.stopPropagation(); cleanup({ mode: 'cancel' }); });
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); submitName(); } });
+      overlay.addEventListener('click', e => { e.stopPropagation(); if (e.target === overlay) cleanup({ mode: 'cancel' }); });
+      input.focus();
+    }, 50);
+  });
+}
+
 // Archiviert die soeben gesendete Mail + Anhaenge als Post-Eintraege in der Akte.
 // Pro Datei ein Post-Eintrag (analog Drop-Verhalten). Direction immer "ausgehend".
 async function archiveSentEmailAsAktenPost(ctx, mail, attachments) {
   const { akteId, aktennummer } = ctx;
   const postDate = localDateStr(new Date());
-  const participant = mail.to || '';
   const subject = (mail.subject || '(kein Betreff)').trim();
   const direction = 'ausgehend';
+
+  // Beteiligten ermitteln: Erst die Beteiligten-Liste der Akte laden und schauen, ob die
+  // Empfaenger-Adresse einem Beteiligten zugeordnet werden kann. Falls ja: dessen Name (im
+  // gleichen "Typ - Name"-Format wie im Post-Dropdown). Falls nein: Anwender fragen.
+  const recipientEmail = _firstRecipientEmail(mail.to || '');
+  let beteiligte = [];
+  try {
+    beteiligte = await api('/api/akten/' + akteId + '/beteiligte');
+  } catch (_e) { /* leer ist OK — Modal faengt das ab */ }
+  const matched = _findBeteiligterByEmail(recipientEmail, beteiligte);
+  let participant;
+  if (matched) {
+    participant = _formatBeteiligterForPost(matched);
+  } else {
+    const choice = await askBeteiligterForArchive(recipientEmail);
+    if (choice.mode === 'cancel') {
+      showToast('Archivierung uebersprungen', 'info');
+      return;
+    }
+    participant = choice.mode === 'email' ? recipientEmail : choice.value;
+  }
 
   // 1) Mail selbst als .eml — sicheren Dateinamen erzeugen (Windows-illegale Zeichen ersetzen)
   const safeBase = (subject.substring(0, 60) || 'Email').replace(/[\\/:*?"<>|\r\n]+/g, '_').trim() || 'Email';
