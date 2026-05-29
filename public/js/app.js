@@ -5062,6 +5062,7 @@ async function s3DeleteSelected() {
     _s3SelectedFiles.clear();
     _s3SelectedFolders.clear();
     showToast('Auswahl gelöscht');
+    resetPreviewPanel('s3-preview-panel');
     await s3LoadFolder(_s3CurrentPath);
   } catch (err) {
     showToast('Fehler: ' + err.message, 'error');
@@ -5225,6 +5226,16 @@ async function s3Preview(key, filename) {
   }
 }
 
+// Setzt ein Preview-Panel zurueck auf den Default-Leer-Zustand (Auge-Icon + Hinweis).
+// Wird nach Loeschen aufgerufen, damit die Vorschau einer geloeschten Datei nicht stehen bleibt,
+// und am Anfang asynchroner Preview-Loads als Sofort-Platzhalter (statt alten Inhalt zu zeigen).
+function resetPreviewPanel(panelId, label) {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  panel.style.padding = '16px';
+  panel.innerHTML = '<div style="text-align:center;color:var(--text-muted);"><div style="font-size:40px;margin-bottom:8px;">&#128065;</div><div style="font-size:13px;">' + (label || 'Datei anklicken für Vorschau') + '</div></div>';
+}
+
 async function s3ShowInlinePreview(key, filename) {
   const panel = document.getElementById('s3-preview-panel');
   if (!panel) return;
@@ -5362,6 +5373,7 @@ async function s3DeleteFile(key) {
   try {
     await api('/api/files/' + key, { method: 'DELETE' });
     showToast('Datei gelöscht');
+    resetPreviewPanel('s3-preview-panel');
     await s3LoadFolder(_s3CurrentPath);
   } catch (err) {
     showToast('Fehler: ' + err.message, 'error');
@@ -5387,6 +5399,7 @@ async function s3DeleteFolder(folderPath) {
   try {
     await withBusy('Ordner wird gelöscht...', () => _s3DeleteFolderRecursive(folderPath));
     showToast('Ordner gelöscht');
+    resetPreviewPanel('s3-preview-panel');
     await s3LoadFolder(_s3CurrentPath);
   } catch (err) {
     showToast('Fehler: ' + err.message, 'error');
@@ -10708,6 +10721,8 @@ function fvPreview(key, filename) {
   const panel = document.getElementById('fv-preview-panel');
   if (!panel) return;
   const ext = (filename.split('.').pop() || '').toLowerCase();
+  panel.style.padding = '16px';
+  panel.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">Laden...</div>';
   if (['jpg','jpeg','png','gif','webp','svg'].includes(ext)) {
     api('/api/files/download?key=' + encodeURIComponent(key)).then(r => {
       panel.innerHTML = '<img src="' + r.url + '" style="max-width:100%;max-height:100%;object-fit:contain;">';
@@ -10817,6 +10832,7 @@ async function fvDeleteFile(key) {
   try {
     await api('/api/files/' + encodeURIComponent(key).replace(/%2F/g, '/'), { method: 'DELETE' });
     showToast('Datei gel\u00f6scht');
+    resetPreviewPanel('fv-preview-panel');
     fvLoadFolder(_fvCurrentPath);
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
 }
@@ -10832,6 +10848,7 @@ async function fvDeleteFolder(folderPath) {
   try {
     await withBusy('Ordner wird gel\u00f6scht...', () => _fvDeleteFolderRecursive(folderPath));
     showToast('Ordner gel\u00f6scht');
+    resetPreviewPanel('fv-preview-panel');
     fvLoadFolder(_fvCurrentPath);
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
 }
@@ -15325,12 +15342,18 @@ function akFileClick(el) {
   const panel = document.getElementById('ak-preview-panel');
   if (!panel) return;
   const ext = (name.split('.').pop() || '').toLowerCase();
+  panel.style.padding = '16px';
+  panel.innerHTML = '<div style="color:var(--text-muted);text-align:center;font-size:13px;">Laden...</div>';
   if (['jpg','jpeg','png','gif','webp','svg'].includes(ext)) {
     panel.style.padding = '8px';
-    api('/api/files/download?key=' + encodeURIComponent(key)).then(r => { panel.innerHTML = '<img src="' + r.url + '" style="max-width:100%;max-height:100%;object-fit:contain;display:block;margin:auto;">'; });
+    api('/api/files/download?key=' + encodeURIComponent(key))
+      .then(r => { panel.innerHTML = '<img src="' + r.url + '" style="max-width:100%;max-height:100%;object-fit:contain;display:block;margin:auto;">'; })
+      .catch(() => { panel.innerHTML = '<div style="color:var(--text-muted);text-align:center;">Vorschau nicht möglich</div>'; });
   } else if (ext === 'pdf') {
     panel.style.padding = '0';
-    api('/api/files/download?key=' + encodeURIComponent(key)).then(r => { panel.innerHTML = '<iframe src="' + r.url + '#toolbar=0" style="width:100%;height:100%;border:none;display:block;"></iframe>'; });
+    api('/api/files/download?key=' + encodeURIComponent(key))
+      .then(r => { panel.innerHTML = '<iframe src="' + r.url + '#toolbar=0" style="width:100%;height:100%;border:none;display:block;"></iframe>'; })
+      .catch(() => { panel.style.padding = '16px'; panel.innerHTML = '<div style="color:var(--text-muted);text-align:center;">Vorschau nicht möglich</div>'; });
   } else if (['doc','docx','xls','xlsx','ppt','pptx'].includes(ext)) {
     panel.style.padding = '0';
     panel.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:16px;font-size:13px;">Laden...</div>';
@@ -15404,6 +15427,7 @@ async function akDeleteFile(b64Key) {
   try {
     await api('/api/files/' + encodeURIComponent(key).replace(/%2F/g, '/'), { method: 'DELETE' });
     showToast('Datei gel\u00f6scht');
+    resetPreviewPanel('ak-preview-panel');
     akLoadFolder(_akCurrentPath);
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
 }
@@ -15420,6 +15444,7 @@ async function akDeleteFolder(folderPath) {
   try {
     await withBusy('Ordner wird gel\u00f6scht...', () => _akDeleteFolderRecursive(folderPath));
     showToast('Ordner gel\u00f6scht');
+    resetPreviewPanel('ak-preview-panel');
     akLoadFolder(_akCurrentPath);
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
 }
@@ -15513,12 +15538,18 @@ function rvFileClick(el) {
   const panel = document.getElementById('rv-preview-panel');
   if (!panel) return;
   const ext = (name.split('.').pop() || '').toLowerCase();
+  panel.style.padding = '16px';
+  panel.innerHTML = '<div style="color:var(--text-muted);text-align:center;font-size:13px;">Laden...</div>';
   if (['jpg','jpeg','png','gif','webp','svg'].includes(ext)) {
     panel.style.padding = '8px';
-    api('/api/files/download?key=' + encodeURIComponent(key)).then(r => { panel.innerHTML = '<img src="' + r.url + '" style="max-width:100%;max-height:100%;object-fit:contain;display:block;margin:auto;">'; });
+    api('/api/files/download?key=' + encodeURIComponent(key))
+      .then(r => { panel.innerHTML = '<img src="' + r.url + '" style="max-width:100%;max-height:100%;object-fit:contain;display:block;margin:auto;">'; })
+      .catch(() => { panel.style.padding = '16px'; panel.innerHTML = '<div style="color:var(--text-muted);text-align:center;">Vorschau nicht möglich</div>'; });
   } else if (ext === 'pdf') {
     panel.style.padding = '0';
-    api('/api/files/download?key=' + encodeURIComponent(key)).then(r => { panel.innerHTML = '<iframe src="' + r.url + '#toolbar=0" style="width:100%;height:100%;border:none;display:block;"></iframe>'; });
+    api('/api/files/download?key=' + encodeURIComponent(key))
+      .then(r => { panel.innerHTML = '<iframe src="' + r.url + '#toolbar=0" style="width:100%;height:100%;border:none;display:block;"></iframe>'; })
+      .catch(() => { panel.style.padding = '16px'; panel.innerHTML = '<div style="color:var(--text-muted);text-align:center;">Vorschau nicht möglich</div>'; });
   } else if (['doc','docx','xls','xlsx','ppt','pptx'].includes(ext)) {
     panel.style.padding = '0';
     panel.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:16px;font-size:13px;">Laden...</div>';
@@ -15586,6 +15617,7 @@ async function rvDeleteFile(b64Key) {
   try {
     await api('/api/files/' + encodeURIComponent(key).replace(/%2F/g, '/'), { method: 'DELETE' });
     showToast('Datei gel\u00f6scht');
+    resetPreviewPanel('rv-preview-panel');
     rvLoadFolder(_rvCurrentPath);
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
 }
@@ -15601,6 +15633,7 @@ async function rvDeleteFolder(folderPath) {
   try {
     await withBusy('Ordner wird gel\u00f6scht...', () => _rvDeleteFolderRecursive(folderPath));
     showToast('Ordner gel\u00f6scht');
+    resetPreviewPanel('rv-preview-panel');
     rvLoadFolder(_rvCurrentPath);
   } catch (err) { showToast('Fehler: ' + err.message, 'error'); }
 }
