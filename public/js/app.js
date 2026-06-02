@@ -17130,6 +17130,20 @@ async function handlePostDrop(event, akteId, aktennummer) {
 const POST_SUBJECTS = ['Gutachten', 'Anschreiben', 'Abrechnungsschreiben', 'Prüfbericht'];
 const POST_BET_TYPE_LABELS = { kunde: 'Kunde', vermittler: 'Vermittler', werkstatt: 'Werkstatt', versicherung: 'Versicherung', anwalt: 'Anwalt', sonstige: 'Sonstige' };
 
+// Erzeugt den S3-Dateinamen fuer einen Korrespondenz-Eintrag: "<id> <Betreff>.<ext>".
+// Sanitisiert Windows-/S3-unfreundliche Zeichen und kuerzt den Betreff auf 80 Zeichen.
+// Faellt zurueck auf reines "<id>.<ext>", wenn kein Betreff gepflegt ist.
+function _buildPostFilename(entryId, subject, ext) {
+  const cleaned = (subject || '')
+    .replace(/[\\/:*?"<>|\r\n\t]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .substring(0, 80)
+    .replace(/[ _]+$/, '');
+  if (!cleaned) return entryId + '.' + ext;
+  return entryId + ' ' + cleaned + '.' + ext;
+}
+
 async function buildPostBeteiligteOptions(akteId) {
   let options = '<option value="">-- bitte wählen --</option>';
   try {
@@ -17236,7 +17250,7 @@ async function openPostMetaDialog(fileLabel) {
         const part = participant || '';
         const dateStr = postDate || localDateStr(new Date());
         const entry = await api(`/api/akten/${akteId}/post`, { method: 'POST', body: { post_date: dateStr, participant: part, subject: subject || '', s3_key: '', filename: file.name, direction: dir } });
-        const newFilename = entry.id + '.' + ext;
+        const newFilename = _buildPostFilename(entry.id, subject, ext);
         const s3Key = folder + '/' + newFilename;
         await uploadManager.uploadOne({ folder, filename: newFilename, file, content_type: file.type }, onProgress);
         await api(`/api/akten-post/${entry.id}`, { method: 'PUT', body: { post_date: dateStr, participant: part, subject: subject || '', s3_key: s3Key, filename: newFilename, direction: dir } });
@@ -17265,9 +17279,9 @@ async function uploadPostFile(akteId, aktennummer, file, postDate, participant, 
         const dir = direction || 'eingehend';
         const part = participant || '';
         const entry = await api(`/api/akten/${akteId}/post`, { method: 'POST', body: { post_date: postDate || localDateStr(new Date()), participant: part, subject: subject || '', s3_key: '', filename: file.name, direction: dir } });
-        const newFilename = entry.id + '.' + ext;
+        const newFilename = _buildPostFilename(entry.id, subject, ext);
         const s3Key = folder + '/' + newFilename;
-        // Upload with ID as filename
+        // Upload mit "<id> <Betreff>.<ext>" als Dateiname
         await api('/api/files/upload', { method: 'POST', body: { folder, filename: newFilename, data: reader.result.split(',')[1], content_type: file.type } });
         // Update entry with correct s3_key and filename
         await api(`/api/akten-post/${entry.id}`, { method: 'PUT', body: { post_date: postDate || localDateStr(new Date()), participant: part, subject: subject || '', s3_key: s3Key, filename: newFilename, direction: dir } });
@@ -17342,7 +17356,7 @@ async function openPostUploadForm(akteId, aktennummer) {
       label: 'Post wird hochgeladen…',
       itemUploader: async (f, ctx, onProgress) => {
         const entry = await api(`/api/akten/${akteId}/post`, { method: 'POST', body: { post_date: postDate, participant, subject, s3_key: '', filename: f.name, direction } });
-        const newFilename = entry.id + '.' + ext;
+        const newFilename = _buildPostFilename(entry.id, subject, ext);
         const s3Key = folder + '/' + newFilename;
         await uploadManager.uploadOne({ folder, filename: newFilename, file: f, content_type: f.type }, onProgress);
         await api(`/api/akten-post/${entry.id}`, { method: 'PUT', body: { post_date: postDate, participant, subject, s3_key: s3Key, filename: newFilename, direction } });
