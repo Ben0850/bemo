@@ -8248,9 +8248,12 @@ function renderInvoiceItemsTable(items, invoiceId, canEdit) {
   if (items.length === 0) return '<p style="color:var(--text-muted);font-size:13px;">Noch keine Positionen vorhanden.</p>';
   let html = `<table class="invoice-items-table">
     <thead><tr>
-      <th style="width:40px;">Pos</th><th>Bezeichnung</th><th style="width:80px;">Menge</th><th style="width:100px;">Einzelpreis</th><th style="width:100px;">Gesamt</th>${canEdit ? '<th style="width:140px;">Aktionen</th>' : ''}
+      <th style="width:40px;">Pos</th><th>Bezeichnung</th><th style="width:80px;">Menge</th><th style="width:100px;">Einzelpreis</th><th style="width:100px;">Gesamt</th>${canEdit ? '<th style="width:140px;">Aktionen</th><th style="width:64px;text-align:center;">Reihenfolge</th>' : ''}
     </tr></thead><tbody>`;
-  items.forEach(item => {
+  const lastIdx = items.length - 1;
+  items.forEach((item, idx) => {
+    const isFirst = idx === 0;
+    const isLast = idx === lastIdx;
     html += `<tr id="inv-item-row-${item.id}">
       <td>${item.position}</td>
       <td style="white-space:pre-wrap;">${escapeHtml(item.description)}</td>
@@ -8260,11 +8263,25 @@ function renderInvoiceItemsTable(items, invoiceId, canEdit) {
       ${canEdit ? `<td style="white-space:nowrap;">
         <button class="btn btn-sm btn-secondary" onclick="editInvoiceItemRow(${item.id}, ${invoiceId})">Bearbeiten</button>
         ${isFinance() ? `<button class="btn btn-sm btn-danger" onclick="deleteInvoiceItem(${item.id}, ${invoiceId})">Löschen</button>` : ''}
+      </td>
+      <td style="white-space:nowrap;text-align:center;">
+        <button class="btn btn-sm btn-secondary" onclick="moveInvoiceItem(${item.id}, ${invoiceId}, 'up')" ${isFirst ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="Nach oben">&uarr;</button>
+        <button class="btn btn-sm btn-secondary" onclick="moveInvoiceItem(${item.id}, ${invoiceId}, 'down')" ${isLast ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="Nach unten">&darr;</button>
       </td>` : '<td></td>'}
     </tr>`;
   });
   html += '</tbody></table>';
   return html;
+}
+
+async function moveInvoiceItem(itemId, invoiceId, direction) {
+  if (!canEditInvoice()) return;
+  try {
+    await api(`/api/invoice-items/${itemId}/move`, { method: 'POST', body: { direction } });
+    refreshInvoiceItems(invoiceId);
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
 }
 
 function renderInvoiceSummary(inv) {
@@ -8515,7 +8532,7 @@ async function addInvoiceItemRow(invoiceId) {
   if (!table) {
     container.innerHTML = `<table class="invoice-items-table">
       <thead><tr>
-        <th style="width:40px;">Pos</th><th>Bezeichnung</th><th style="width:80px;">Menge</th><th style="width:100px;">Einzelpreis</th><th style="width:100px;">Gesamt</th><th style="width:140px;">Aktionen</th>
+        <th style="width:40px;">Pos</th><th>Bezeichnung</th><th style="width:80px;">Menge</th><th style="width:100px;">Einzelpreis</th><th style="width:100px;">Gesamt</th><th style="width:140px;">Aktionen</th><th style="width:64px;text-align:center;">Reihenfolge</th>
       </tr></thead><tbody></tbody></table>`;
     table = container.querySelector('table');
   }
@@ -8541,7 +8558,7 @@ async function addInvoiceItemRow(invoiceId) {
   if (tplOptions) {
     const tplRow = document.createElement('tr');
     tplRow.id = 'inv-item-row-tpl';
-    tplRow.innerHTML = `<td colspan="6" style="background:var(--bg-subtle,#f9fafb);padding:8px 12px;">${tplOptions}</td>`;
+    tplRow.innerHTML = `<td colspan="7" style="background:var(--bg-subtle,#f9fafb);padding:8px 12px;">${tplOptions}</td>`;
     tbody.appendChild(tplRow);
   }
   tr.innerHTML = `
@@ -8559,6 +8576,7 @@ async function addInvoiceItemRow(invoiceId) {
       <button class="btn btn-sm btn-primary" onclick="saveInvoiceItemNew(${invoiceId})">Speichern</button>
       <button class="btn btn-sm btn-secondary" onclick="cancelInvoiceItemRowNew()">Abbrechen</button>
     </td>
+    <td></td>
   `;
   tbody.appendChild(tr);
   tr.querySelector('#new-inv-item-desc').focus();
@@ -8667,6 +8685,7 @@ function editInvoiceItemRow(itemId, invoiceId) {
       <button class="btn btn-sm btn-primary" onclick="saveInvoiceItemEdit(${itemId}, ${invoiceId})">Speichern</button>
       <button class="btn btn-sm btn-secondary" onclick="refreshInvoiceItems(${invoiceId})">Abbrechen</button>
     </td>
+    <td></td>
   `;
 }
 
@@ -8689,7 +8708,11 @@ async function saveInvoiceItemEdit(itemId, invoiceId) {
 }
 
 async function deleteInvoiceItem(itemId, invoiceId) {
-  if (!confirm('Position wirklich löschen?')) return;
+  // showConfirm statt nativem confirm — verhindert Electron-Bug bei dem nach Schliessen
+  // der nativen Dialog-Box die Eingabefelder den Focus nicht zurueck bekommen, bis das
+  // Fenster verlassen und wieder geoeffnet wird.
+  const ok = await showConfirm('Position löschen?', 'Soll diese Position wirklich gelöscht werden?', { danger: true, yesLabel: 'Ja, löschen' });
+  if (!ok) return;
   try {
     await api(`/api/invoice-items/${itemId}`, { method: 'DELETE' });
     showToast('Position gelöscht');
@@ -9136,9 +9159,12 @@ function renderCreditItemsTable(items, creditId, canEdit) {
   if (items.length === 0) return '<p style="color:var(--text-muted);font-size:13px;">Noch keine Positionen vorhanden.</p>';
   let html = `<table class="invoice-items-table">
     <thead><tr>
-      <th style="width:40px;">Pos</th><th>Bezeichnung</th><th style="width:80px;">Menge</th><th style="width:100px;">Einzelpreis</th><th style="width:100px;">Gesamt</th>${canEdit ? '<th style="width:140px;">Aktionen</th>' : ''}
+      <th style="width:40px;">Pos</th><th>Bezeichnung</th><th style="width:80px;">Menge</th><th style="width:100px;">Einzelpreis</th><th style="width:100px;">Gesamt</th>${canEdit ? '<th style="width:140px;">Aktionen</th><th style="width:64px;text-align:center;">Reihenfolge</th>' : ''}
     </tr></thead><tbody>`;
-  items.forEach(item => {
+  const lastIdx = items.length - 1;
+  items.forEach((item, idx) => {
+    const isFirst = idx === 0;
+    const isLast = idx === lastIdx;
     html += `<tr id="cn-item-row-${item.id}">
       <td>${item.position}</td>
       <td style="white-space:pre-wrap;">${escapeHtml(item.description)}</td>
@@ -9148,11 +9174,25 @@ function renderCreditItemsTable(items, creditId, canEdit) {
       ${canEdit ? `<td style="white-space:nowrap;">
         <button class="btn btn-sm btn-secondary" onclick="editCreditItemRow(${item.id}, ${creditId})">Bearbeiten</button>
         ${isFinance() ? `<button class="btn btn-sm btn-danger" onclick="deleteCreditItem(${item.id}, ${creditId})">Löschen</button>` : ''}
+      </td>
+      <td style="white-space:nowrap;text-align:center;">
+        <button class="btn btn-sm btn-secondary" onclick="moveCreditItem(${item.id}, ${creditId}, 'up')" ${isFirst ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="Nach oben">&uarr;</button>
+        <button class="btn btn-sm btn-secondary" onclick="moveCreditItem(${item.id}, ${creditId}, 'down')" ${isLast ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="Nach unten">&darr;</button>
       </td>` : '<td></td>'}
     </tr>`;
   });
   html += '</tbody></table>';
   return html;
+}
+
+async function moveCreditItem(itemId, creditId, direction) {
+  if (!canEditInvoice()) return;
+  try {
+    await api(`/api/credit-note-items/${itemId}/move`, { method: 'POST', body: { direction } });
+    refreshCreditItems(creditId);
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
 }
 
 function renderCreditSummary(cn) {
@@ -9200,7 +9240,7 @@ function addCreditItemRow(creditId) {
   if (!table) {
     container.innerHTML = `<table class="invoice-items-table">
       <thead><tr>
-        <th style="width:40px;">Pos</th><th>Bezeichnung</th><th style="width:80px;">Menge</th><th style="width:100px;">Einzelpreis</th><th style="width:100px;">Gesamt</th><th style="width:140px;">Aktionen</th>
+        <th style="width:40px;">Pos</th><th>Bezeichnung</th><th style="width:80px;">Menge</th><th style="width:100px;">Einzelpreis</th><th style="width:100px;">Gesamt</th><th style="width:140px;">Aktionen</th><th style="width:64px;text-align:center;">Reihenfolge</th>
       </tr></thead><tbody></tbody></table>`;
     table = container.querySelector('table');
   }
@@ -9223,6 +9263,7 @@ function addCreditItemRow(creditId) {
       <button class="btn btn-sm btn-primary" onclick="saveCreditItemNew(${creditId})">Speichern</button>
       <button class="btn btn-sm btn-secondary" onclick="this.closest('tr').remove()">Abbrechen</button>
     </td>
+    <td></td>
   `;
   tbody.appendChild(tr);
   tr.querySelector('#new-cn-item-desc').focus();
@@ -9285,6 +9326,7 @@ function editCreditItemRow(itemId, creditId) {
       <button class="btn btn-sm btn-primary" onclick="saveCreditItemEdit(${itemId}, ${creditId})">Speichern</button>
       <button class="btn btn-sm btn-secondary" onclick="refreshCreditItems(${creditId})">Abbrechen</button>
     </td>
+    <td></td>
   `;
 }
 
@@ -9307,7 +9349,9 @@ async function saveCreditItemEdit(itemId, creditId) {
 }
 
 async function deleteCreditItem(itemId, creditId) {
-  if (!confirm('Position wirklich löschen?')) return;
+  // siehe deleteInvoiceItem: showConfirm statt nativem confirm wegen Electron-Focus-Bug.
+  const ok = await showConfirm('Position löschen?', 'Soll diese Position wirklich gelöscht werden?', { danger: true, yesLabel: 'Ja, löschen' });
+  if (!ok) return;
   try {
     await api(`/api/credit-note-items/${itemId}`, { method: 'DELETE' });
     showToast('Position gelöscht');

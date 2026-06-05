@@ -2137,6 +2137,15 @@ app.put('/api/invoice-items/:id', (req, res) => {
   res.json({ message: 'Position aktualisiert' });
 });
 
+// Setzt die Positions-Nummern einer Rechnung wieder auf 1..N in aktueller Reihenfolge.
+// Wird nach DELETE/Move aufgerufen, damit die im UI angezeigten Positionsnummern lueckenlos bleiben.
+function renumberInvoiceItemPositions(invoiceId) {
+  const items = queryAll('SELECT id FROM invoice_items WHERE invoice_id = ? ORDER BY position ASC, id ASC', [invoiceId]);
+  items.forEach((it, idx) => {
+    execute('UPDATE invoice_items SET position = ? WHERE id = ?', [idx + 1, it.id]);
+  });
+}
+
 app.delete('/api/invoice-items/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
@@ -2147,8 +2156,38 @@ app.delete('/api/invoice-items/:id', (req, res) => {
   }
   const item = queryOne('SELECT invoice_id FROM invoice_items WHERE id = ?', [Number(req.params.id)]);
   execute('DELETE FROM invoice_items WHERE id = ?', [Number(req.params.id)]);
-  if (item) recalcInvoiceTotals(item.invoice_id);
+  if (item) {
+    renumberInvoiceItemPositions(item.invoice_id);
+    recalcInvoiceTotals(item.invoice_id);
+  }
   res.json({ message: 'Position gelöscht' });
+});
+
+// Verschiebt eine Position eine Stelle nach oben oder unten. Direction: 'up' | 'down'.
+// Tauscht die position-Werte mit dem direkten Nachbarn und nummeriert anschliessend
+// defensiv durch, damit auch bei zuvor luckenhaften Nummern alles 1..N bleibt.
+app.post('/api/invoice-items/:id/move', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const id = Number(req.params.id);
+  const direction = req.body && req.body.direction;
+  if (!['up', 'down'].includes(direction)) return res.status(400).json({ error: 'Ungueltige Richtung' });
+  const current = queryOne('SELECT id, invoice_id FROM invoice_items WHERE id = ?', [id]);
+  if (!current) return res.status(404).json({ error: 'Position nicht gefunden' });
+  const parent = queryOne('SELECT status FROM invoices WHERE id = ?', [current.invoice_id]);
+  if (parent && parent.status && parent.status !== 'Entwurf') {
+    return res.status(403).json({ error: 'Rechnung ist nicht im Entwurf-Status. Positionen sind gesperrt.' });
+  }
+  // Erst durchnummerieren, damit Lueckenfreiheit garantiert ist
+  renumberInvoiceItemPositions(current.invoice_id);
+  const fresh = queryOne('SELECT position FROM invoice_items WHERE id = ?', [id]);
+  const neighbor = direction === 'up'
+    ? queryOne('SELECT id, position FROM invoice_items WHERE invoice_id = ? AND position < ? ORDER BY position DESC LIMIT 1', [current.invoice_id, fresh.position])
+    : queryOne('SELECT id, position FROM invoice_items WHERE invoice_id = ? AND position > ? ORDER BY position ASC LIMIT 1', [current.invoice_id, fresh.position]);
+  if (!neighbor) return res.json({ message: 'Keine Verschiebung moeglich' });
+  execute('UPDATE invoice_items SET position = ? WHERE id = ?', [neighbor.position, current.id]);
+  execute('UPDATE invoice_items SET position = ? WHERE id = ?', [fresh.position, neighbor.id]);
+  res.json({ message: 'Position verschoben' });
 });
 
 // ===== INVOICE PAYMENTS (Phase 4 — Zahlungsverwaltung) =====
@@ -2752,6 +2791,14 @@ app.put('/api/credit-note-items/:id', (req, res) => {
   res.json({ message: 'Position aktualisiert' });
 });
 
+// Setzt die Positions-Nummern einer Gutschrift wieder auf 1..N in aktueller Reihenfolge.
+function renumberCreditNoteItemPositions(creditId) {
+  const items = queryAll('SELECT id FROM credit_note_items WHERE credit_note_id = ? ORDER BY position ASC, id ASC', [creditId]);
+  items.forEach((it, idx) => {
+    execute('UPDATE credit_note_items SET position = ? WHERE id = ?', [idx + 1, it.id]);
+  });
+}
+
 app.delete('/api/credit-note-items/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
@@ -2760,8 +2807,31 @@ app.delete('/api/credit-note-items/:id', (req, res) => {
   const parent = queryOne('SELECT status FROM credit_notes WHERE id = ?', [item.credit_note_id]);
   if (parent && parent.status === 'Final') return res.status(403).json({ error: 'Finalisierte Gutschrift kann nicht mehr geändert werden' });
   execute('DELETE FROM credit_note_items WHERE id = ?', [Number(req.params.id)]);
+  renumberCreditNoteItemPositions(item.credit_note_id);
   recalcCreditTotals(item.credit_note_id);
   res.json({ message: 'Position gelöscht' });
+});
+
+// Verschiebt eine Gutschrift-Position eine Stelle nach oben oder unten.
+app.post('/api/credit-note-items/:id/move', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  const id = Number(req.params.id);
+  const direction = req.body && req.body.direction;
+  if (!['up', 'down'].includes(direction)) return res.status(400).json({ error: 'Ungueltige Richtung' });
+  const current = queryOne('SELECT id, credit_note_id FROM credit_note_items WHERE id = ?', [id]);
+  if (!current) return res.status(404).json({ error: 'Position nicht gefunden' });
+  const parent = queryOne('SELECT status FROM credit_notes WHERE id = ?', [current.credit_note_id]);
+  if (parent && parent.status === 'Final') return res.status(403).json({ error: 'Finalisierte Gutschrift kann nicht mehr geändert werden' });
+  renumberCreditNoteItemPositions(current.credit_note_id);
+  const fresh = queryOne('SELECT position FROM credit_note_items WHERE id = ?', [id]);
+  const neighbor = direction === 'up'
+    ? queryOne('SELECT id, position FROM credit_note_items WHERE credit_note_id = ? AND position < ? ORDER BY position DESC LIMIT 1', [current.credit_note_id, fresh.position])
+    : queryOne('SELECT id, position FROM credit_note_items WHERE credit_note_id = ? AND position > ? ORDER BY position ASC LIMIT 1', [current.credit_note_id, fresh.position]);
+  if (!neighbor) return res.json({ message: 'Keine Verschiebung moeglich' });
+  execute('UPDATE credit_note_items SET position = ? WHERE id = ?', [neighbor.position, current.id]);
+  execute('UPDATE credit_note_items SET position = ? WHERE id = ?', [fresh.position, neighbor.id]);
+  res.json({ message: 'Position verschoben' });
 });
 
 // Credit Note PDF
