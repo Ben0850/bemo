@@ -19250,6 +19250,14 @@ async function openEmailComposer(akteId, aktennummer) {
     const sel = a === addrData.default ? 'selected' : '';
     return `<option value="${escapeHtml(a)}" ${sel}>${escapeHtml(a)}${isStaff ? ' (mein Postfach)' : ''}</option>`;
   }).join('');
+  // Anzeigename des eingeloggten Mitarbeiters — wird vor jede gesendete Mail gesetzt,
+  // damit der Empfaenger nicht nur die rohe E-Mail-Adresse sieht. Preview unterhalb des
+  // Von-Selects zeigt dem Mitarbeiter live, wie der Absender beim Empfaenger ankommt.
+  const staffName = (addrData.staffName || '').trim();
+  const defaultFrom = addrData.default || addrData.addresses[0] || '';
+  const previewHtml = staffName
+    ? `Sichtbar fuer Empfaenger: <strong>${escapeHtml(staffName)}</strong> &lt;<span id="ec-from-preview-addr">${escapeHtml(defaultFrom)}</span>&gt;`
+    : `<span style="color:var(--danger);">Hinweis: dein Mitarbeiter-Profil hat keinen Namen — die Mail erscheint nur mit E-Mail-Adresse beim Empfaenger.</span>`;
 
   const subjectDefault = aktennummer ? `Akte ${aktennummer}` : '';
 
@@ -19273,7 +19281,11 @@ async function openEmailComposer(akteId, aktennummer) {
       <div class="email-composer-fields">
         <div class="email-composer-row">
           <label>Von</label>
-          <select id="ec-from">${fromOptions}</select>
+          <select id="ec-from" onchange="emailComposerUpdateFromPreview()">${fromOptions}</select>
+        </div>
+        <div class="email-composer-row" style="font-size:12px;color:var(--text-muted);padding:2px 0 6px;">
+          <label></label>
+          <div id="ec-from-preview" style="flex:1;">${previewHtml}</div>
         </div>
         <div class="email-composer-row">
           <label>An</label>
@@ -19386,6 +19398,14 @@ function closeEmailComposer() {
 // Klick auf einen Beteiligten fügt die E-Mail dort ein.
 function emailComposerOnFieldFocus(fieldId) {
   _emailComposerLastFocused = fieldId;
+}
+
+// Aktualisiert die "Sichtbar fuer Empfaenger"-Vorschau, wenn der User das Postfach im
+// Von-Dropdown wechselt. Der Anzeigename (Mitarbeiter) bleibt gleich, nur die Adresse hinten.
+function emailComposerUpdateFromPreview() {
+  const sel = document.getElementById('ec-from');
+  const target = document.getElementById('ec-from-preview-addr');
+  if (sel && target) target.textContent = sel.value || '';
 }
 
 async function emailComposerOpenParticipants(evt) {

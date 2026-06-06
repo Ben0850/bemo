@@ -1401,10 +1401,12 @@ app.get('/api/o365/composer-from-addresses', (req, res) => {
     const userSendList = userSendStr.split('\n').map(m => m.trim()).filter(Boolean);
     const userId = req.headers['x-user-id'];
     let staffEmail = '';
+    let staffName = '';
     let signature = '';
     if (userId) {
-      const staff = queryOne('SELECT email, signature FROM staff WHERE id = ?', [userId]);
+      const staff = queryOne('SELECT name, email, signature FROM staff WHERE id = ?', [userId]);
       staffEmail = (staff && staff.email || '').trim();
+      staffName = (staff && staff.name || '').trim();
       signature = (staff && staff.signature || '').toString();
     }
     // Default = erste Adresse aus den konfigurierten Sende-Postfächern
@@ -1412,7 +1414,7 @@ app.get('/api/o365/composer-from-addresses', (req, res) => {
     if (staffEmail && !ordered.some(m => m.toLowerCase() === staffEmail.toLowerCase())) {
       ordered.push(staffEmail);
     }
-    res.json({ addresses: ordered, default: ordered[0] || '', staffEmail, signature });
+    res.json({ addresses: ordered, default: ordered[0] || '', staffEmail, staffName, signature });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1431,9 +1433,11 @@ app.post('/api/o365/send', async (req, res) => {
     const userSendList = userSendStr.split('\n').map(m => m.trim()).filter(Boolean);
     const userId = req.headers['x-user-id'];
     let staffEmail = '';
+    let staffName = '';
     if (userId) {
-      const staff = queryOne('SELECT email FROM staff WHERE id = ?', [userId]);
+      const staff = queryOne('SELECT name, email FROM staff WHERE id = ?', [userId]);
       staffEmail = ((staff && staff.email) || '').trim();
+      staffName = ((staff && staff.name) || '').trim();
     }
     const allowed = new Set([appSend, ...userSendList, staffEmail].filter(Boolean).map(s => s.toLowerCase()));
     const requestedFrom = (from || '').trim();
@@ -1456,6 +1460,13 @@ app.post('/api/o365/send', async (req, res) => {
       body: { contentType: 'HTML', content: wrappedBody },
       toRecipients: to.split(',').map(e => ({ emailAddress: { address: e.trim() } })).filter(r => r.emailAddress.address)
     };
+    // Anzeigename des Mitarbeiters mitschicken, damit der Empfaenger nicht nur die E-Mail-Adresse
+    // sieht ("Ben Albers <info@bemo.de>" statt nur "info@bemo.de"). Faellt auf reine Adresse zurueck
+    // wenn der eingeloggte User keinen Staff-Namen hat.
+    if (staffName) {
+      message.from = { emailAddress: { address: fromAddr, name: staffName } };
+      message.sender = { emailAddress: { address: fromAddr, name: staffName } };
+    }
     if (cc) message.ccRecipients = cc.split(',').map(e => ({ emailAddress: { address: e.trim() } })).filter(r => r.emailAddress.address);
     if (bcc) message.bccRecipients = bcc.split(',').map(e => ({ emailAddress: { address: e.trim() } })).filter(r => r.emailAddress.address);
     if (replyTo) message.replyTo = [{ emailAddress: { address: replyTo.trim() } }];
