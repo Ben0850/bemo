@@ -667,6 +667,18 @@ async function getDb() {
       FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
     )
   `);
+  // Migration 2026-06-08: Vorzeichen-Semantik der overtime_deductions invertiert.
+  // Alte Logik: positiv = Abzug (Saldo -= minutes), negativ = Gutschrift.
+  // Neue Logik (intuitiv): positiv = Gutschrift (Saldo += minutes), negativ = Abzug.
+  // Wir flippen die bestehenden Werte einmalig und merken uns das in settings, damit
+  // alte Salden nach dem Logikwechsel weiterhin korrekt sind.
+  try {
+    const flipped = queryOne("SELECT value FROM settings WHERE key = 'overtime_deductions_sign_flipped_v1'");
+    if (!flipped) {
+      execute('UPDATE overtime_deductions SET minutes = -minutes');
+      execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('overtime_deductions_sign_flipped_v1', '1')");
+    }
+  } catch(_) { /* Settings-Tabelle wird beim ersten Start angelegt — Migration laeuft beim naechsten Start */ }
 
   // File activity log
   db.run(`

@@ -12306,11 +12306,11 @@ async function renderTimeTracking() {
       ${!isMobile && canSeeDeductions ? `
       <div class="card" style="margin-top:16px;">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
-          <h3>Überstunden-Abzüge</h3>
+          <h3>Überstunden-Korrekturen</h3>
           <button class="btn btn-primary btn-sm" onclick="openOvertimeDeductionForm(${effectiveStaffId})">+ Korrektur</button>
         </div>
         <div id="overtime-deductions-table">
-          ${deductions.length === 0 ? '<p style="padding:12px;color:var(--text-muted);">Keine Abzüge vorhanden</p>' : `
+          ${deductions.length === 0 ? '<p style="padding:12px;color:var(--text-muted);">Keine Korrekturen vorhanden</p>' : `
           <div class="table-wrapper">
             <table>
               <thead>
@@ -12326,7 +12326,7 @@ async function renderTimeTracking() {
                 ${deductions.map(d => `
                 <tr>
                   <td>${formatDate(d.deduction_date)}</td>
-                  <td style="color:${d.minutes < 0 ? 'var(--success)' : 'var(--danger)'};">${d.minutes < 0 ? '+' : '-'}${Math.abs(d.minutes / 60).toFixed(1).replace('.', ',')}h</td>
+                  <td style="color:${d.minutes < 0 ? 'var(--danger)' : 'var(--success)'};">${d.minutes < 0 ? '-' : '+'}${Math.abs(d.minutes / 60).toFixed(1).replace('.', ',')}h</td>
                   <td>${escapeHtml(d.reason || '-')}</td>
                   <td>${escapeHtml(d.created_by_name || '-')}</td>
                   ${canSeeDeductions ? `<td>
@@ -12366,8 +12366,8 @@ function openOvertimeDeductionForm(staffId, editId, editDate, editMinutes, editR
         <input type="date" id="ot-ded-date" value="${editDate || today}" required>
       </div>
       <div class="form-group">
-        <label>Stunden * <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(positiv = Abzug, negativ = Gutschrift)</span></label>
-        <input type="number" id="ot-ded-hours" step="0.5" value="${editMinutes ? (editMinutes / 60).toFixed(1) : ''}" required placeholder="z.B. 8 oder -4">
+        <label>Stunden * <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(positiv = Gutschrift, negativ = Abzug)</span></label>
+        <input type="number" id="ot-ded-hours" step="0.5" value="${editMinutes ? (editMinutes / 60).toFixed(1) : ''}" required placeholder="z.B. -8 oder +4">
       </div>
       <div class="form-group">
         <label>Begründung</label>
@@ -12392,10 +12392,10 @@ async function saveOvertimeDeduction(e, staffId, editId) {
   try {
     if (editId) {
       await api(`/api/overtime-deductions/${editId}`, { method: 'PUT', body: { deduction_date: date, minutes, reason } });
-      showToast('Abzug aktualisiert');
+      showToast('Korrektur aktualisiert');
     } else {
       await api('/api/overtime-deductions', { method: 'POST', body: { staff_id: staffId, deduction_date: date, minutes, reason } });
-      showToast('Abzug hinzugefügt');
+      showToast('Korrektur hinzugefügt');
     }
     closeModal();
     renderTimeTracking();
@@ -12410,10 +12410,11 @@ function editOvertimeDeduction(id, date, minutes, reason) {
 }
 
 async function deleteOvertimeDeduction(id) {
-  if (!confirm('Abzug wirklich löschen?')) return;
+  const ok = await showConfirm('Korrektur löschen?', 'Soll diese Überstunden-Korrektur wirklich gelöscht werden?', { danger: true, yesLabel: 'Ja, löschen' });
+  if (!ok) return;
   try {
     await api(`/api/overtime-deductions/${id}`, { method: 'DELETE' });
-    showToast('Abzug gelöscht');
+    showToast('Korrektur gelöscht');
     renderTimeTracking();
   } catch (err) {
     showToast('Fehler: ' + err.message, 'error');

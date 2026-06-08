@@ -3713,6 +3713,26 @@ app.get('/api/time/entries', (req, res) => {
   res.json(entries);
 });
 
+// Findet bestehende Zeiteintraege am gleichen Tag, deren Intervall [start_time, end_time)
+// sich mit dem uebergebenen Bereich ueberlappt. Ignoriert offene Eintraege (end_time = '')
+// und einen ggf. uebergebenen excludeId (fuer PUT-Eigenausschluss).
+function findOverlappingTimeEntries(staffId, entryDate, startTime, endTime, excludeId) {
+  if (!startTime || !endTime) return [];
+  return queryAll(
+    "SELECT id, start_time, end_time, notes FROM time_entries WHERE staff_id = ? AND entry_date = ? AND end_time != '' AND id != ? AND start_time < ? AND end_time > ?",
+    [staffId, entryDate, excludeId || 0, endTime, startTime]
+  );
+}
+
+function describeTimeEntryConflict(conflict) {
+  const s = (conflict.start_time || '').slice(0, 5);
+  const e = (conflict.end_time || '').slice(0, 5);
+  const what = conflict.notes === '__pause__' ? 'Arbeitszeit' : 'Arbeitszeit';
+  // Hinweis: ein __pause__-Eintrag in dieser Datenform ist ein Arbeitsblock, der mit einer Pause endete.
+  // Die Pause selbst ergibt sich aus der Luecke zwischen Bloecken und steht nicht als eigene Zeile in der DB.
+  return what + ' ' + s + '-' + e;
+}
+
 // POST /api/time/entries – Manueller Eintrag
 app.post('/api/time/entries', (req, res) => {
   const userId = Number(req.headers['x-user-id']);
@@ -3725,6 +3745,40 @@ app.post('/api/time/entries', (req, res) => {
   }
   const targetStaffId = Number(staff_id) || userId;
   if (!entry_date || !start_time) return res.status(400).json({ error: 'Datum und Startzeit sind Pflichtfelder' });
+
+  // Nachtraegliches Einfuegen einer Pause in eine bestehende Arbeitszeit: die Arbeit am Pausen-Start
+  // beenden (mit __pause__-Marker) und nach der Pause als zweite Arbeitszeile fortsetzen. Die Pause
+  // selbst wird NICHT als eigene Zeile gespeichert — die Luecke zwischen den zwei Arbeitsbloecken
+  // ergibt die Pause (gleiche Daten-Form wie beim normalen Stempeln, fuer das die Aggregation
+  // bereits korrekt arbeitet).
+  const isPause = (notes || '') === '__pause__';
+  if (isPause && start_time && end_time) {
+    const overlappingWork = queryAll(
+      "SELECT * FROM time_entries WHERE staff_id = ? AND entry_date = ? AND notes != '__pause__' AND end_time != '' AND start_time < ? AND end_time > ?",
+      [targetStaffId, entry_date, end_time, start_time]
+    );
+    const containing = overlappingWork.find(w => w.start_time < start_time && w.end_time > end_time);
+    if (containing) {
+      execute(
+        'UPDATE time_entries SET end_time = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [start_time, '__pause__', containing.id]
+      );
+      execute(
+        'INSERT INTO time_entries (staff_id, entry_date, start_time, end_time, break_minutes, notes) VALUES (?, ?, ?, ?, ?, ?)',
+        [targetStaffId, entry_date, end_time, containing.end_time, 0, containing.notes && containing.notes !== '__pause__' ? containing.notes : '']
+      );
+      return res.json({ message: 'Pause eingefuegt, Arbeitszeit gesplittet', split: true });
+    }
+  }
+
+  // Ueberlappungs-Check: am gleichen Tag duerfen sich Eintraege zeitlich nicht ueberschneiden.
+  // Greift nicht im Pause-Split-Pfad oben (der returned bereits) und nicht bei offenen Eintraegen (kein Ende).
+  if (start_time && end_time) {
+    const conflicts = findOverlappingTimeEntries(targetStaffId, entry_date, start_time, end_time, 0);
+    if (conflicts.length > 0) {
+      return res.status(400).json({ error: 'Zeitraum überschneidet sich mit bestehender ' + describeTimeEntryConflict(conflicts[0]) });
+    }
+  }
 
   const result = execute(
     'INSERT INTO time_entries (staff_id, entry_date, start_time, end_time, break_minutes, notes) VALUES (?, ?, ?, ?, ?, ?)',
@@ -3749,9 +3803,19 @@ app.put('/api/time/entries/:id', (req, res) => {
   }
 
   const { start_time, end_time, break_minutes, notes, entry_date } = req.body;
+  const effStart = start_time || entry.start_time;
+  const effEnd = end_time !== undefined ? end_time : entry.end_time;
+  const effDate = entry_date || entry.entry_date;
+  // Beim Bearbeiten darf der neue Bereich keinen anderen Eintrag desselben Tages ueberlappen.
+  if (effStart && effEnd) {
+    const conflicts = findOverlappingTimeEntries(entry.staff_id, effDate, effStart, effEnd, entryId);
+    if (conflicts.length > 0) {
+      return res.status(400).json({ error: 'Zeitraum überschneidet sich mit bestehender ' + describeTimeEntryConflict(conflicts[0]) });
+    }
+  }
   execute(
     'UPDATE time_entries SET start_time=?, end_time=?, break_minutes=?, notes=?, entry_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-    [start_time || entry.start_time, end_time !== undefined ? end_time : entry.end_time, break_minutes !== undefined ? break_minutes : entry.break_minutes, notes !== undefined ? notes : entry.notes, entry_date || entry.entry_date, entryId]
+    [effStart, effEnd, break_minutes !== undefined ? break_minutes : entry.break_minutes, notes !== undefined ? notes : entry.notes, effDate, entryId]
   );
   const updated = queryOne('SELECT * FROM time_entries WHERE id = ?', [entryId]);
   res.json(updated);
@@ -3968,12 +4032,13 @@ app.get('/api/time/overtime', (req, res) => {
     };
   });
 
-  // Subtract overtime deductions
-  const deductionRows = queryAll('SELECT minutes FROM overtime_deductions WHERE staff_id = ?', [staffId]);
-  const deductedMinutes = deductionRows.reduce((sum, r) => sum + (Number(r.minutes) || 0), 0);
-  const adjustedOvertime = totalOvertimeMinutes - deductedMinutes;
+  // Ueberstunden-Korrekturen aufaddieren — neue Semantik seit 2026-06-08:
+  // gespeicherter Wert wird direkt auf das Saldo addiert (positiv = Gutschrift, negativ = Abzug).
+  const correctionRows = queryAll('SELECT minutes FROM overtime_deductions WHERE staff_id = ?', [staffId]);
+  const correctionMinutes = correctionRows.reduce((sum, r) => sum + (Number(r.minutes) || 0), 0);
+  const adjustedOvertime = totalOvertimeMinutes + correctionMinutes;
 
-  res.json({ weekly_hours: weeklyHours, work_days: workDaysStr, total_overtime_minutes: adjustedOvertime, deducted_minutes: deductedMinutes, weeks });
+  res.json({ weekly_hours: weeklyHours, work_days: workDaysStr, total_overtime_minutes: adjustedOvertime, deducted_minutes: -correctionMinutes, weeks });
 });
 
 // ===== OVERTIME DEDUCTIONS =====
