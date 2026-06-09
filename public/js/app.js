@@ -4251,7 +4251,6 @@ function getVacReqFilters() {
     staff_id: document.getElementById('vacreq-filter-staff')?.value || '',
     date_from: document.getElementById('vacreq-filter-from')?.value || '',
     date_to: document.getElementById('vacreq-filter-to')?.value || '',
-    status: document.getElementById('vacreq-filter-status')?.value || '',
   };
 }
 
@@ -4259,7 +4258,7 @@ async function renderVacationRequests(filters) {
   const main = document.getElementById('main-content');
   if (!filters) {
     const currentYear = new Date().getFullYear();
-    filters = { staff_id: '', date_from: `${currentYear}-01-01`, date_to: `${currentYear}-12-31`, status: '' };
+    filters = { staff_id: '', date_from: `${currentYear}-01-01`, date_to: `${currentYear}-12-31` };
   }
   try {
     const [entries, staffListAll] = await Promise.all([
@@ -4282,9 +4281,6 @@ async function renderVacationRequests(filters) {
     }
     if (filters.date_to) {
       requests = requests.filter(e => e.start_date <= filters.date_to);
-    }
-    if (filters.status) {
-      requests = requests.filter(e => e.status === filters.status);
     }
 
     // Im Planer ausgeblendete Mitarbeiter rausfiltern (für Kalender + Filter-Block)
@@ -4382,14 +4378,18 @@ async function renderVacationRequests(filters) {
       <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#2563eb;display:inline-block;"></span> Genehmigt</span>
     </div>` : '';
 
+    // Tabelle zeigt ausschliesslich Beantragte — Genehmigte und Abgelehnte sind komplett
+    // ausgeblendet (Kalender oben visualisiert sie weiterhin farblich).
+    const tableRequests = requests.filter(e => e.status === 'Beantragt');
+
     let tableHtml = '';
-    if (requests.length > 0) {
+    if (tableRequests.length > 0) {
       tableHtml = `<table class="data-table">
         <thead><tr>
           <th>Mitarbeiter</th><th>Typ</th><th>Von</th><th>Bis</th><th>Tage</th><th>Notizen</th><th>Status</th>${admin ? '<th>Aktionen</th>' : ''}
         </tr></thead>
         <tbody>
-        ${requests.map(e => {
+        ${tableRequests.map(e => {
           const days = getVacationDaysInRange(e.start_date, e.end_date, holidays);
           const wd = e.entry_type === 'Weiterbildung' ? days.length : countWorkdays(days, holidays);
           const statusColor = e.status === 'Beantragt' ? 'badge-yellow' : e.status === 'Genehmigt' ? 'badge-green' : 'badge-red';
@@ -4418,7 +4418,7 @@ async function renderVacationRequests(filters) {
         }).join('')}
         </tbody></table>`;
     } else {
-      tableHtml = '<p style="color:var(--text-muted);padding:20px 0;">Keine Anträge vorhanden.</p>';
+      tableHtml = '<p style="color:var(--text-muted);padding:20px 16px;">Keine offenen Urlaubsantraege.</p>';
     }
 
     main.innerHTML = `
@@ -4427,8 +4427,19 @@ async function renderVacationRequests(filters) {
         <button class="btn btn-primary" onclick="openVacRequestForm()">Urlaubsantrag stellen</button>
       </div>
       ${getVacSubNav('requests')}
+      ${admin ? `<div class="card" style="margin-bottom:16px;">
+        ${buildVacStaffFilterBlock('vacreq-staff-filter', staffList, staffColorMap, vacReqFilteredStaffIds, 'vacReqToggleStaffFilter', 'vacReqToggleAllStaff')}
+      </div>` : ''}
       <div class="card" style="margin-bottom:16px;">
-        <div style="padding:12px 16px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="card-header"><h3>Kalender-Übersicht ${calYear}</h3></div>
+        <div style="padding:12px 16px;">
+          ${calLegendHtml}
+          <div style="overflow-x:auto;">${calHtml}</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>Urlaubsanträge (${tableRequests.length})</h3></div>
+        <div style="padding:12px 16px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;border-bottom:1px solid var(--border);">
           ${admin ? `<div class="form-group" style="margin:0;">
             <label style="font-size:12px;">Mitarbeiter</label>
             <select id="vacreq-filter-staff" onchange="renderVacationRequests(getVacReqFilters())" style="padding:5px 8px;">
@@ -4444,25 +4455,7 @@ async function renderVacationRequests(filters) {
             <label style="font-size:12px;">Bis</label>
             <input type="date" id="vacreq-filter-to" value="${filters.date_to}" onchange="renderVacationRequests(getVacReqFilters())" style="padding:5px 8px;">
           </div>
-          <div class="form-group" style="margin:0;">
-            <label style="font-size:12px;">Status</label>
-            <select id="vacreq-filter-status" onchange="renderVacationRequests(getVacReqFilters())" style="padding:5px 8px;">
-              <option value="">Alle</option>
-              ${VAC_REQUEST_STATUS.map(s => `<option value="${s}" ${filters.status === s ? 'selected' : ''}>${s}</option>`).join('')}
-            </select>
-          </div>
         </div>
-        ${admin ? buildVacStaffFilterBlock('vacreq-staff-filter', staffList, staffColorMap, vacReqFilteredStaffIds, 'vacReqToggleStaffFilter', 'vacReqToggleAllStaff') : ''}
-      </div>
-      <div class="card" style="margin-bottom:16px;">
-        <div class="card-header"><h3>Kalender-Übersicht ${calYear}</h3></div>
-        <div style="padding:12px 16px;">
-          ${calLegendHtml}
-          <div style="overflow-x:auto;">${calHtml}</div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>Urlaubsanträge (${requests.length})</h3></div>
         ${tableHtml}
       </div>
     `;
@@ -11910,6 +11903,10 @@ async function submitSuggestion() {
 
 let timeTrackingWeekOffset = 0;
 let timeTrackingSelectedStaffId = null;
+// Zeitraum-Filter im Ueberstundenkonto: leer = Standardansicht (laufender Saldo).
+// Gefuellt = Drei-Werte-Anzeige (Soll/Ist/Diff) summiert aus overtime.weeks[*].days.
+let _otRangeFrom = '';
+let _otRangeTo = '';
 
 function getWeekDates(offset = 0) {
   const now = new Date();
@@ -12192,6 +12189,23 @@ async function renderTimeTracking() {
     const totalOT = overtime.total_overtime_minutes || 0;
     const otColor = totalOT >= 0 ? 'var(--success)' : 'var(--danger)';
 
+    // Optional: Auswertung fuer einen ausgewaehlten Zeitraum (Anzeigen-Button hat _otRangeFrom/_otRangeTo gesetzt).
+    // Summiert pro Tag target_minutes und actual_minutes aus den bereits geladenen overtime.weeks-Daten.
+    let otRangeStats = null;
+    if (_otRangeFrom && _otRangeTo) {
+      let soll = 0;
+      let ist = 0;
+      (overtime.weeks || []).forEach(w => {
+        Object.entries(w.days || {}).forEach(([dateStr, d]) => {
+          if (dateStr >= _otRangeFrom && dateStr <= _otRangeTo) {
+            soll += d.target_minutes || 0;
+            ist += d.actual_minutes || 0;
+          }
+        });
+      });
+      otRangeStats = { soll, ist, diff: ist - soll };
+    }
+
     const isMobile = isMobileView();
 
     // Week navigation (shared, but styled differently)
@@ -12297,10 +12311,42 @@ async function renderTimeTracking() {
         <div class="card-header">
           <h3>Überstundenkonto</h3>
         </div>
-        <div style="text-align:center;padding:12px;">
+        <div style="padding:14px 16px 22px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;border-bottom:1px solid var(--border);">
+          <div class="form-group" style="margin:0;">
+            <label style="font-size:12px;">Von</label>
+            <input type="date" id="ot-range-from" value="${_otRangeFrom}" style="padding:5px 8px;">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label style="font-size:12px;">Bis</label>
+            <input type="date" id="ot-range-to" value="${_otRangeTo}" style="padding:5px 8px;">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="applyOvertimeRange()">Anzeigen</button>
+          <button class="btn btn-secondary btn-sm" onclick="resetOvertimeRange()">Zurücksetzen</button>
+        </div>
+        ${otRangeStats ? `
+        <div style="padding:20px 16px 16px;">
+          <div style="display:flex;gap:${isMobile ? '14' : '32'}px;justify-content:center;flex-wrap:wrap;text-align:center;">
+            <div>
+              <div style="font-size:${isMobile ? '20' : '24'}px;font-weight:700;color:var(--text-muted);">${formatDuration(otRangeStats.soll)}</div>
+              <div style="color:var(--text-muted);font-size:13px;margin-top:2px;">Arbeitsstunden Soll</div>
+            </div>
+            <div>
+              <div style="font-size:${isMobile ? '20' : '24'}px;font-weight:700;">${formatDuration(otRangeStats.ist)}</div>
+              <div style="color:var(--text-muted);font-size:13px;margin-top:2px;">Geleistete Arbeitsstunden</div>
+            </div>
+            <div>
+              <div style="font-size:${isMobile ? '20' : '24'}px;font-weight:700;color:${otRangeStats.diff >= 0 ? 'var(--success)' : 'var(--danger)'};">${(otRangeStats.diff >= 0 ? '+' : '') + formatDuration(otRangeStats.diff)}</div>
+              <div style="color:var(--text-muted);font-size:13px;margin-top:2px;">Überstunden</div>
+            </div>
+          </div>
+          <div style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:10px;">Zeitraum: ${formatDate(_otRangeFrom)} – ${formatDate(_otRangeTo)}</div>
+        </div>
+        ` : `
+        <div style="text-align:center;padding:20px 12px 16px;">
           <div style="font-size:${isMobile ? '26' : '32'}px;font-weight:700;color:${otColor};">${(totalOT >= 0 ? '+' : '') + formatDuration(totalOT)}</div>
           <div style="color:var(--text-muted);margin-top:4px;">Laufender Saldo</div>
         </div>
+        `}
       </div>
 
       ${!isMobile && canSeeDeductions ? `
@@ -12453,7 +12499,32 @@ function startStampElapsedTimer(startTime) {
 async function silentRefreshTimeTracking() {
   if (currentPage !== 'time-tracking') return;
   if (document.getElementById('modal-overlay')?.classList.contains('active')) return;
+  // Auto-Refresh aussetzen wenn der User gerade dabei ist, einen Zeitraum im Ueberstundenkonto einzugeben.
+  // Sonst plaettet der 10-Sekunden-Refresh die noch nicht angewendete Eingabe (Von-/Bis-Felder werden geleert).
+  const fromEl = document.getElementById('ot-range-from');
+  const toEl = document.getElementById('ot-range-to');
+  if (document.activeElement === fromEl || document.activeElement === toEl) return;
+  if (fromEl && fromEl.value && fromEl.value !== _otRangeFrom) return;
+  if (toEl && toEl.value && toEl.value !== _otRangeTo) return;
   try { await renderTimeTracking(); } catch(e) {}
+}
+
+// Wendet den Zeitraum-Filter im Ueberstundenkonto an. Validiert grob und triggert
+// renderTimeTracking — die Range-Auswertung selbst passiert dort aus _otRangeFrom/_otRangeTo.
+function applyOvertimeRange() {
+  const from = document.getElementById('ot-range-from')?.value || '';
+  const to = document.getElementById('ot-range-to')?.value || '';
+  if (!from || !to) { showToast('Bitte Von und Bis auswählen', 'error'); return; }
+  if (from > to) { showToast('„Von" muss vor „Bis" liegen', 'error'); return; }
+  _otRangeFrom = from;
+  _otRangeTo = to;
+  renderTimeTracking();
+}
+
+function resetOvertimeRange() {
+  _otRangeFrom = '';
+  _otRangeTo = '';
+  renderTimeTracking();
 }
 
 async function doStamp() {
