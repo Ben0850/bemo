@@ -12849,6 +12849,7 @@ async function renderVermietungOverview() {
     const monthStart = year + '-' + monthStr + '-01';
     const monthEnd = year + '-' + monthStr + '-' + String(daysInMonth).padStart(2, '0');
     const allRentals = await api('/api/rentals?year=' + year);
+    _rentalCache = allRentals;
     // Filter to rentals that overlap with this month
     const monthRentals = allRentals.filter(r => r.start_date <= monthEnd && r.end_date >= monthStart);
 
@@ -12860,7 +12861,8 @@ async function renderVermietungOverview() {
       for (let d = 1; d <= daysInMonth; d++) {
         const dateStr = year + '-' + monthStr + '-' + String(d).padStart(2, '0');
         if (dateStr >= r.start_date && dateStr <= r.end_date) {
-          vehicleDayMap[r.vehicle_id][dateStr] = r;
+          if (!vehicleDayMap[r.vehicle_id][dateStr]) vehicleDayMap[r.vehicle_id][dateStr] = [];
+          vehicleDayMap[r.vehicle_id][dateStr].push(r);
         }
       }
     });
@@ -12896,37 +12898,24 @@ async function renderVermietungOverview() {
         const dow = dt.getDay();
         const isWeekend = dow === 0 || dow === 6;
         const isHoliday = holidays.has(dateStr);
-        const rental = vehicleDayMap[v.id][dateStr];
+        const dayRentals = vehicleDayMap[v.id][dateStr];
 
         let cls = 'vac-day-cell';
         let cellStyle = '';
         let title = '';
-        if (rental) {
-          const rStatus = rental.status || 'Reservierung';
-          let bgNormal, bgWe, txtNormal, txtWe;
-          if (rStatus === 'Vermietet') {
-            bgNormal = '#c2410c'; txtNormal = '#fff';
-            bgWe = '#f87171'; txtWe = '#fff';
-          } else if (rStatus === 'Abgeschlossen') {
-            bgNormal = '#15803d'; txtNormal = '#fff';
-            bgWe = '#bbf7d0'; txtWe = '#000';
-          } else {
-            bgNormal = '#1e40af'; txtNormal = '#fff';
-            bgWe = '#bfdbfe'; txtWe = '#000';
-          }
-          if (isHoliday || isWeekend) {
-            cellStyle = 'background:' + bgWe + ';color:' + txtWe + ';cursor:pointer;';
-          } else {
-            cellStyle = 'background:' + bgNormal + ';color:' + txtNormal + ';cursor:pointer;';
-          }
-          title = escapeHtml((rental.customer_name || '') + (rStatus ? ' (' + rStatus + ')' : ''));
+        let onclick = '';
+        const rc = rentalCellRender(dayRentals, dateStr, isHoliday || isWeekend);
+        if (rc) {
+          cellStyle = rc.style;
+          title = escapeHtml(rc.title);
+          onclick = ' onclick="' + rc.onclick + '"';
         } else if (isHoliday) {
           cls += ' vac-holiday';
           title = escapeHtml(holidays.get(dateStr));
         } else if (isWeekend) {
           cls += ' vac-weekend';
         }
-        tableHtml += '<td class="' + cls + '" style="' + cellStyle + 'font-size:10px;text-align:center;" title="' + title + '"' + (rental ? ' onclick="openRentalDetail(' + rental.id + ')"' : '') + '>' + d + '</td>';
+        tableHtml += '<td class="' + cls + '" style="' + cellStyle + 'font-size:10px;text-align:center;" title="' + title + '"' + onclick + '>' + d + '</td>';
       }
       tableHtml += '</tr>';
     });
@@ -12979,6 +12968,7 @@ async function renderVermietungSingle() {
     const vehicleList = allVehicles.filter(v => v.rental_type !== 'lang');
     const holidays = getNRWHolidays(rentalCurrentYear);
     const months = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+    _rentalCache = entries;
 
     const visibleEntries = entries.filter(e => e.vehicle_id === Number(rentalSelectedVehicle));
     const selectedVeh = allVehicles.find(v => v.id === Number(rentalSelectedVehicle));
@@ -13013,19 +13003,8 @@ async function renderVermietungSingle() {
         let cellTitle = '';
         if (isHoliday) { cellClass += ' vac-holiday'; cellTitle = holidays.get(dateStr); }
         else if (isWeekend) { cellClass += ' vac-weekend'; }
-        if (dayEntries.length > 0) {
-          const rSt = dayEntries[0].status || 'Reservierung';
-          let bgN, bgW, txN, txW;
-          if (rSt === 'Vermietet') { bgN = '#c2410c'; txN = '#fff'; bgW = '#f87171'; txW = '#fff'; }
-          else if (rSt === 'Abgeschlossen') { bgN = '#15803d'; txN = '#fff'; bgW = '#bbf7d0'; txW = '#000'; }
-          else { bgN = '#1e40af'; txN = '#fff'; bgW = '#bfdbfe'; txW = '#000'; }
-          if (isHoliday || isWeekend) {
-            cellStyle = 'background:' + bgW + ';color:' + txW + ';';
-          } else {
-            cellStyle = 'background:' + bgN + ';color:' + txN + ';';
-          }
-          cellTitle = (dayEntries[0].customer_name || '') + (rSt ? ' (' + rSt + ')' : '');
-        }
+        const rc = rentalCellRender(dayEntries, dateStr, isHoliday || isWeekend);
+        if (rc) { cellStyle = rc.style; cellTitle = rc.title; }
 
         tableHtml += '<td class="' + cellClass + '" style="' + cellStyle + 'cursor:pointer;user-select:none;" title="' + escapeHtml(cellTitle) + '" data-rdate="' + dateStr + '" onmousedown="rentalDragStart(\'' + dateStr + '\', event)" onmouseover="rentalDragOver(\'' + dateStr + '\')">' + d + '</td>';
       }
@@ -13075,6 +13054,46 @@ function rentalStatusBadge(status) {
     return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:' + c.text + ';background:' + c.bg + ';">' + escapeHtml(status || '') + '</span>';
   }
   return '<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;color:#000;background:#fff;border:1px solid var(--border);">' + escapeHtml(status || '') + '</span>';
+}
+
+let _rentalCache = []; // zuletzt geladene Vermietungen, fuer den Tages-Auswahldialog
+
+// Hintergrund-/Textfarbe einer Vermietungs-Kalenderzelle je nach Status.
+function rentalCellColors(status, weekendOrHoliday) {
+  if (status === 'Vermietet')    return weekendOrHoliday ? { bg: '#f87171', txt: '#fff' } : { bg: '#c2410c', txt: '#fff' };
+  if (status === 'Abgeschlossen') return weekendOrHoliday ? { bg: '#bbf7d0', txt: '#000' } : { bg: '#15803d', txt: '#fff' };
+  return weekendOrHoliday ? { bg: '#bfdbfe', txt: '#000' } : { bg: '#1e40af', txt: '#fff' };
+}
+
+// Liefert {style, title, onclick} fuer eine Kalenderzelle mit 1..n Vermietungen.
+// Bei 2+ Vermietungen am selben Tag (z.B. Rueckgabe + Uebergabe) wird die Zelle
+// diagonal geteilt dargestellt. Gibt null zurueck, wenn keine Vermietung vorliegt.
+function rentalCellRender(rentals, dateStr, weekendOrHoliday) {
+  if (!rentals || rentals.length === 0) return null;
+  const titleOf = r => (r.customer_name || '(ohne Kunde)') + (r.status ? ' (' + r.status + ')' : '');
+  if (rentals.length === 1) {
+    const c = rentalCellColors(rentals[0].status, weekendOrHoliday);
+    return { style: 'background:' + c.bg + ';color:' + c.txt + ';cursor:pointer;', title: titleOf(rentals[0]), onclick: 'openRentalDetail(' + rentals[0].id + ')' };
+  }
+  // Endende Vermietung nach oben-links, beginnende nach unten-rechts.
+  const sorted = [...rentals].sort((a, b) => (a.end_date === dateStr ? 0 : 1) - (b.end_date === dateStr ? 0 : 1));
+  const cA = rentalCellColors(sorted[0].status, weekendOrHoliday);
+  const cB = rentalCellColors(sorted[1].status, weekendOrHoliday);
+  const style = 'background:linear-gradient(135deg,' + cA.bg + ' 0%,' + cA.bg + ' 45%,#e11d48 45%,#e11d48 55%,' + cB.bg + ' 55%,' + cB.bg + ' 100%);color:#fff;text-shadow:0 0 2px rgba(0,0,0,0.85);cursor:pointer;font-weight:700;';
+  const ids = sorted.map(r => r.id).join(',');
+  return { style: style, title: sorted.map(titleOf).join('  |  '), onclick: "openRentalDayPicker('" + ids + "')" };
+}
+
+// Dialog: mehrere Vermietungen an einem Tag -> Auswahl, welcher Vorgang geoeffnet wird.
+function openRentalDayPicker(idsCsv) {
+  const ids = String(idsCsv).split(',').map(Number);
+  const rentals = ids.map(id => _rentalCache.find(r => r.id === id)).filter(Boolean);
+  if (rentals.length === 0) return;
+  if (rentals.length === 1) { openRentalDetail(rentals[0].id); return; }
+  const rows = rentals.map(r => '<div onclick="closeModal();openRentalDetail(' + r.id + ');" style="cursor:pointer;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:12px;">'
+    + '<span><strong>' + escapeHtml(r.customer_name || '(ohne Kunde)') + '</strong><br><span style="color:var(--text-muted);font-size:12px;">' + formatDate(r.start_date) + ' – ' + formatDate(r.end_date) + '</span></span>'
+    + rentalStatusBadge(r.status) + '</div>').join('');
+  openModal('Mehrere Vermietungen an diesem Tag', '<p style="color:var(--text-muted);margin-bottom:12px;">Welchen Vorgang möchten Sie öffnen?</p>' + rows);
 }
 
 let _rentalListSort = { field: 'id', dir: 'desc' };
@@ -13337,19 +13356,23 @@ async function rentalDragEnd() {
   const end = rentalDragStartDate <= rentalDragEndDate ? rentalDragEndDate : rentalDragStartDate;
   rentalClearHighlight();
 
-  // Check if there's an existing rental overlapping this range
-  try {
-    const entries = await api(`/api/rentals?year=${rentalCurrentYear}`);
-    const vehicleFilter = rentalSelectedVehicle !== 'alle' ? Number(rentalSelectedVehicle) : null;
-    const match = entries.find(e => {
-      if (vehicleFilter && e.vehicle_id !== vehicleFilter) return false;
-      return e.start_date <= end && e.end_date >= start;
-    });
-    if (match) {
-      openRentalForm(match.id, start, end);
-      return;
-    }
-  } catch (e) {}
+  // Einzelner Klick auf einen Tag -> bestehende Vermietung(en) oeffnen.
+  // Mehrtaegiges Ziehen -> IMMER eine neue Vermietung anlegen. So sind
+  // Ueberschneidungen moeglich (z.B. Rueckgabe- und Uebergabetag am selben Datum),
+  // ohne dass eine bestehende Reservierung ueberschrieben wird.
+  if (start === end) {
+    try {
+      const entries = await api(`/api/rentals?year=${rentalCurrentYear}`);
+      _rentalCache = entries;
+      const vehicleFilter = rentalSelectedVehicle !== 'alle' ? Number(rentalSelectedVehicle) : null;
+      const matches = entries.filter(e => {
+        if (vehicleFilter && e.vehicle_id !== vehicleFilter) return false;
+        return e.start_date <= end && e.end_date >= start;
+      });
+      if (matches.length === 1) { openRentalDetail(matches[0].id); return; }
+      if (matches.length > 1) { openRentalDayPicker(matches.map(m => m.id).join(',')); return; }
+    } catch (e) {}
+  }
 
   openRentalForm(null, start, end);
 }
