@@ -5466,10 +5466,48 @@ function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
+// ── Auto-Logout: offene Zeiteintraege taeglich um 23:00 Uhr automatisch ausloggen ──
+// Kein Mitarbeiter arbeitet laenger als 23:00. Vergessenes Ausstempeln (v.a. ueber
+// Mitternacht hinaus) wuerde sonst die Arbeitszeit-Berechnung kaputt machen. Der Eintrag
+// wird exakt wie bei einem manuellen Ausstempeln geschlossen (nur end_time = 23:00:00,
+// Notiz bleibt unveraendert), sodass danach kein doppeltes Ausloggen moeglich ist.
+// Bei Bedarf kann die Zeit im Nachgang manuell korrigiert werden.
+const AUTO_LOGOUT_HOUR = 23;
+const AUTO_LOGOUT_TIME = '23:00:00';
+let autoLogoutLastRun = ''; // berlinToday() des letzten Laufs, verhindert Doppellauf
+
+function runAutoLogout() {
+  try {
+    const open = queryAll("SELECT id FROM time_entries WHERE end_time = ''");
+    if (open.length === 0) return;
+    execute(
+      "UPDATE time_entries SET end_time = ?, updated_at = CURRENT_TIMESTAMP WHERE end_time = ''",
+      [AUTO_LOGOUT_TIME]
+    );
+    console.log(`[Auto-Logout] ${open.length} offene Zeiteintrag(e) um 23:00 ausgeloggt.`);
+  } catch (e) {
+    console.error('[Auto-Logout] Fehler:', e.message);
+  }
+}
+
+// Laeuft minuetlich; schliesst offene Eintraege beim ersten Check ab 23:00 Uhr.
+// Robust gegen Serverneustarts: startet der Server nach 23:00 neu, werden noch
+// offene Eintraege sofort geschlossen.
+function checkAutoLogout() {
+  const now = berlinNow();
+  const today = berlinToday();
+  if (now.getHours() >= AUTO_LOGOUT_HOUR && autoLogoutLastRun !== today) {
+    autoLogoutLastRun = today;
+    runAutoLogout();
+  }
+}
+
 // Start server after DB is ready
 getDb().then(() => {
   app.listen(PORT, HOST, () => {
     console.log(`Bemo-Verwaltung läuft auf http://${HOST}:${PORT} [${process.env.NODE_ENV || 'development'}]`);
+    checkAutoLogout();                       // direkt beim Start pruefen (Neustart nach 23:00)
+    setInterval(checkAutoLogout, 60 * 1000); // danach minuetlich
   });
 }).catch(err => {
   console.error('Datenbankfehler:', err);
