@@ -733,7 +733,7 @@ async function renderDashboard() {
       const vehicle = fleet.find(v => v.id === r.vehicle_id);
       const plate = vehicle ? (vehicle.license_plate || '') : '';
       const vName = vehicle ? `${vehicle.manufacturer} ${vehicle.model}` : '';
-      const statusColors = { 'Reservierung': '#1e40af', 'Vermietet': '#c2410c', 'Abgeschlossen': '#15803d' };
+      const statusColors = { 'Reservierung': '#1e40af', 'Vermietet': '#c2410c', 'Abgeschlossen': '#15803d', 'Werkstatt': '#9333ea', 'nicht verfügbar': '#4b5563' };
       const bg = statusColors[r.status] || '#6b7280';
       return `<tr style="cursor:pointer;" onclick="navigate('vermietung')">
         <td><span style="background:${bg};color:#fff;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${escapeHtml(r.status)}</span></td>
@@ -12946,6 +12946,8 @@ async function renderVermietungOverview() {
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#1e40af;display:inline-block;"></span> Reservierung</span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#c2410c;display:inline-block;"></span> Vermietet</span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#15803d;display:inline-block;"></span> Abgeschlossen</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#9333ea;display:inline-block;"></span> Werkstatt</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#4b5563;display:inline-block;"></span> nicht verfügbar</span>
         <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">Klicke links auf ein Fahrzeug für die Jahresansicht</span>
       </div>
       <div style="overflow-x:auto;">
@@ -13031,6 +13033,8 @@ async function renderVermietungSingle() {
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#1e40af;display:inline-block;"></span> Reservierung</span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#c2410c;display:inline-block;"></span> Vermietet</span>
         <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#15803d;display:inline-block;"></span> Abgeschlossen</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#9333ea;display:inline-block;"></span> Werkstatt</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:14px;border-radius:3px;background:#4b5563;display:inline-block;"></span> nicht verfügbar</span>
       </div>
       <div style="overflow-x:auto;">
         ${tableHtml}
@@ -13043,9 +13047,11 @@ async function renderVermietungSingle() {
 }
 
 const RENTAL_STATUS_COLORS = {
-  'Reservierung': { bg: '#1e40af', text: '#fff' },
-  'Vermietet':    { bg: '#c2410c', text: '#fff' },
-  'Abgeschlossen':{ bg: '#15803d', text: '#fff' },
+  'Reservierung':    { bg: '#1e40af', text: '#fff' },
+  'Vermietet':       { bg: '#c2410c', text: '#fff' },
+  'Abgeschlossen':   { bg: '#15803d', text: '#fff' },
+  'Werkstatt':       { bg: '#9333ea', text: '#fff' },
+  'nicht verfügbar': { bg: '#4b5563', text: '#fff' },
 };
 
 function rentalStatusBadge(status) {
@@ -13060,8 +13066,10 @@ let _rentalCache = []; // zuletzt geladene Vermietungen, fuer den Tages-Auswahld
 
 // Hintergrund-/Textfarbe einer Vermietungs-Kalenderzelle je nach Status.
 function rentalCellColors(status, weekendOrHoliday) {
-  if (status === 'Vermietet')    return weekendOrHoliday ? { bg: '#f87171', txt: '#fff' } : { bg: '#c2410c', txt: '#fff' };
-  if (status === 'Abgeschlossen') return weekendOrHoliday ? { bg: '#bbf7d0', txt: '#000' } : { bg: '#15803d', txt: '#fff' };
+  if (status === 'Vermietet')       return weekendOrHoliday ? { bg: '#f87171', txt: '#fff' } : { bg: '#c2410c', txt: '#fff' };
+  if (status === 'Abgeschlossen')   return weekendOrHoliday ? { bg: '#bbf7d0', txt: '#000' } : { bg: '#15803d', txt: '#fff' };
+  if (status === 'Werkstatt')       return weekendOrHoliday ? { bg: '#d8b4fe', txt: '#000' } : { bg: '#9333ea', txt: '#fff' };
+  if (status === 'nicht verfügbar') return weekendOrHoliday ? { bg: '#9ca3af', txt: '#000' } : { bg: '#4b5563', txt: '#fff' };
   return weekendOrHoliday ? { bg: '#bfdbfe', txt: '#000' } : { bg: '#1e40af', txt: '#fff' };
 }
 
@@ -13193,6 +13201,8 @@ function renderRentalList(entries) {
                 <option value="Reservierung"${sel('Reservierung', f.status)}>Reservierung</option>
                 <option value="Vermietet"${sel('Vermietet', f.status)}>Vermietet</option>
                 <option value="Abgeschlossen"${sel('Abgeschlossen', f.status)}>Abgeschlossen</option>
+                <option value="Werkstatt"${sel('Werkstatt', f.status)}>Werkstatt</option>
+                <option value="nicht verfügbar"${sel('nicht verfügbar', f.status)}>nicht verfügbar</option>
               </select>
             </td>
             <td><input type="text" id="rf-akte" value="${escapeHtml(f.akte)}" placeholder="Aktennr." oninput="applyRentalFilters()" class="filter-input"></td>
@@ -13447,6 +13457,8 @@ async function openRentalForm(editId, presetStart, presetEnd) {
             <option value="Reservierung" ${(entry.status || '') === 'Reservierung' ? 'selected' : ''}>Reservierung</option>
             <option value="Vermietet" ${(entry.status || '') === 'Vermietet' ? 'selected' : ''}>Vermietet</option>
             <option value="Abgeschlossen" ${(entry.status || '') === 'Abgeschlossen' ? 'selected' : ''}>Abgeschlossen</option>
+            <option value="Werkstatt" ${(entry.status || '') === 'Werkstatt' ? 'selected' : ''}>Werkstatt</option>
+            <option value="nicht verfügbar" ${(entry.status || '') === 'nicht verfügbar' ? 'selected' : ''}>nicht verfügbar</option>
           </select>
         </div>
         <div class="form-group">
@@ -15049,6 +15061,8 @@ async function openRentalDataForm() {
               <option value="Reservierung" ${r.status === 'Reservierung' ? 'selected' : ''}>Reservierung</option>
               <option value="Vermietet" ${r.status === 'Vermietet' ? 'selected' : ''}>Vermietet</option>
               <option value="Abgeschlossen" ${r.status === 'Abgeschlossen' ? 'selected' : ''}>Abgeschlossen</option>
+              <option value="Werkstatt" ${r.status === 'Werkstatt' ? 'selected' : ''}>Werkstatt</option>
+              <option value="nicht verfügbar" ${r.status === 'nicht verfügbar' ? 'selected' : ''}>nicht verfügbar</option>
             </select>
           </div>
         </div>
