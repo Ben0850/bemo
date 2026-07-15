@@ -4697,9 +4697,9 @@ app.get('/api/akten/:id', async (req, res) => {
 });
 
 app.post('/api/akten', (req, res) => {
-  // SEC-01: Permission guard
+  // SEC-01: Permission guard — Admin, Verwaltung und Benutzer duerfen Akten anlegen (Buchhaltung nicht).
   const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+  if (!['Admin', 'Verwaltung', 'Benutzer'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   const { datum, kunde, anwalt, zahlungsstatus, vermittler, status,

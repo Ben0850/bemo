@@ -41,6 +41,10 @@ function isVerwaltung() {
 function isBuchhaltung() {
   return loggedInUser && (loggedInUser.permission_level === 'Buchhaltung' || loggedInUser.permission_level === 'Admin');
 }
+// Wer darf neue Akten anlegen: Admin, Verwaltung und Benutzer — Buchhaltung NICHT.
+function canCreateAkte() {
+  return loggedInUser && ['Admin', 'Verwaltung', 'Benutzer'].includes(loggedInUser.permission_level);
+}
 // Berechtigung für sämtliche Rechnungswesen-Aktionen (Gutschriften, Rebates, Bankkonten, Rechnungen,
 // Zahlungen, Vermittler-Provisionen). Buchhaltung hat hier Vollzugriff genau wie Verwaltung/Admin.
 function isFinance() {
@@ -15820,7 +15824,7 @@ async function renderAkten() {
   main.innerHTML = `
     <div class="page-header">
       <h2>Akten</h2>
-      ${isAdmin() ? '<button class="btn btn-primary" onclick="createNewAkte()">+ Neue Akte</button>' : ''}
+      ${canCreateAkte() ? '<button class="btn btn-primary" onclick="createNewAkte()">+ Neue Akte</button>' : ''}
     </div>
     <div class="card" style="margin-bottom:20px;padding:12px 16px;">
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;align-items:end;">
