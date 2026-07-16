@@ -3298,7 +3298,7 @@ async function openStaffForm(id) {
       <div class="form-row">
         <div class="form-group">
           <label>Wochenstunden</label>
-          <input type="number" name="weekly_hours" value="${staff.weekly_hours || 40}" step="0.5" min="0" max="60">
+          <input type="text" inputmode="decimal" name="weekly_hours" value="${staff.weekly_hours != null ? staff.weekly_hours : 40}" placeholder="z. B. 40 oder 37,5">
         </div>
         <div class="form-group">
           <label>Standard-Standort</label>
@@ -3449,7 +3449,11 @@ async function saveStaff(e, id) {
   const yearDays = [];
   for (let y = yearFrom; y <= yearTo; y++) {
     const input = form.querySelector(`[name="vac_${y}"]`);
-    if (input) yearDays.push({ year: y, days: parseInt(input.value) || 30 });
+    if (input) {
+      const raw = String(input.value).trim().replace(',', '.');
+      const n = parseInt(raw, 10);
+      yearDays.push({ year: y, days: (raw === '' || isNaN(n)) ? 30 : Math.max(n, 0) });
+    }
   }
 
   const data = {
@@ -3472,7 +3476,14 @@ async function saveStaff(e, id) {
     phone_business: form.phone_business.value.trim(),
     emergency_name: form.emergency_name.value.trim(),
     emergency_phone: form.emergency_phone.value.trim(),
-    weekly_hours: parseFloat(form.weekly_hours.value) || 40,
+    weekly_hours: (() => {
+      // Komma als Dezimaltrenner erlauben (DE-Tastatur); nur bei leer/ungueltig auf 40 defaulten
+      // (0 bleibt erhalten). Auf sinnvollen Bereich 0..60 begrenzen.
+      const raw = String(form.weekly_hours.value).trim().replace(',', '.');
+      const n = parseFloat(raw);
+      if (raw === '' || isNaN(n)) return 40;
+      return Math.min(Math.max(n, 0), 60);
+    })(),
     work_days: [1,2,3,4,5,6,7].filter(n => document.getElementById('work-day-' + n)?.checked).join(',') || '1,2,3,4,5',
     default_station_id: form.default_station_id.value ? Number(form.default_station_id.value) : null,
     username: form.username.value.trim(),
