@@ -23,16 +23,24 @@ let autoRefreshTimer = null;
 function isAdmin() {
   return loggedInUser && loggedInUser.permission_level === 'Admin';
 }
+// "Fahrer"-Rolle darf ausschliesslich Zeiten stempeln und die eigenen Zeiten sehen —
+// sonst nichts. Wird fuer die komplette Sperrung von Navigation/Seiten verwendet.
+function isFahrer() {
+  return loggedInUser && loggedInUser.permission_level === 'Fahrer';
+}
 // "Benutzer"-Rolle darf nichts loeschen. Alle anderen Rollen schon.
 function canDelete() {
-  return loggedInUser && loggedInUser.permission_level !== 'Benutzer';
+  return loggedInUser && loggedInUser.permission_level !== 'Benutzer' && !isFahrer();
 }
 function applyPermissionBodyClasses() {
   const body = document.body;
   if (!body) return;
-  body.classList.remove('role-benutzer');
+  body.classList.remove('role-benutzer', 'role-fahrer');
   if (loggedInUser && loggedInUser.permission_level === 'Benutzer') {
     body.classList.add('role-benutzer');
+  }
+  if (isFahrer()) {
+    body.classList.add('role-fahrer');
   }
 }
 function isVerwaltung() {
@@ -491,6 +499,11 @@ function closeMobileMenu() {
 }
 
 function navigate(page, data) {
+  // Rolle "Fahrer": komplett auf die Zeiterfassung eingesperrt. Jeder Versuch, eine
+  // andere Seite zu oeffnen (Menue, direkter Funktionsaufruf), landet auf 'time-tracking'.
+  if (isFahrer() && page !== 'time-tracking') {
+    page = 'time-tracking';
+  }
   // On mobile, redirect non-mobile pages to dashboard
   if (isMobileView() && !MOBILE_PAGES.includes(page)) {
     page = 'dashboard';
@@ -3311,7 +3324,7 @@ async function openStaffForm(id) {
         <div class="form-group">
           <label>Freigabelevel</label>
           <select name="permission_level" ${isAdmin() ? '' : 'disabled'}>
-            ${['Benutzer', 'Verwaltung', 'Buchhaltung', 'Admin'].map(l => `<option value="${l}" ${(staff.permission_level || 'Benutzer') === l ? 'selected' : ''}>${l}</option>`).join('')}
+            ${['Fahrer', 'Benutzer', 'Verwaltung', 'Buchhaltung', 'Admin'].map(l => `<option value="${l}" ${(staff.permission_level || 'Benutzer') === l ? 'selected' : ''}>${l}</option>`).join('')}
           </select>
           ${isAdmin() ? '' : '<input type="hidden" name="permission_level" value="' + escapeHtml(staff.permission_level || 'Benutzer') + '">'}
         </div>
@@ -9496,8 +9509,8 @@ function showUpdateModal() {
 }
 
 async function initApp() {
-  // Load stations from DB
-  await loadStations();
+  // Load stations from DB (Fahrer braucht keine Stationen und darf den Endpoint nicht abrufen)
+  if (!isFahrer()) await loadStations();
 
   // Start version polling
   checkVersion();
@@ -9533,6 +9546,17 @@ async function initApp() {
   if (loggedInUser) {
     const userEl = document.getElementById('sidebar-user');
     if (userEl) userEl.textContent = loggedInUser.name;
+  }
+
+  // Rolle "Fahrer": alles ausser der Zeiterfassung ausblenden und direkt dorthin.
+  // Keine Badges/Changelog-Abfragen (die Endpoints sind fuer Fahrer ohnehin gesperrt).
+  if (isFahrer()) {
+    document.querySelectorAll('.nav-list > li').forEach(li => {
+      const isTimeTracking = li.querySelector('.nav-link[data-page="time-tracking"]');
+      li.style.display = isTimeTracking ? '' : 'none';
+    });
+    navigate('time-tracking');
+    return;
   }
 
   // Show/hide permission-based nav items
@@ -11972,7 +11996,7 @@ async function renderTimeTracking() {
       status: api(`/api/time/status`),
       entries: api(`/api/time/entries?staff_id=${effectiveStaffId}&from=${fromStr}&to=${toStr}`),
       overtime: api(`/api/time/overtime?staff_id=${effectiveStaffId}`),
-      vacation: api(`/api/vacation?staff_id=${effectiveStaffId}&status=Genehmigt`),
+      vacation: isFahrer() ? Promise.resolve([]) : api(`/api/vacation?staff_id=${effectiveStaffId}&status=Genehmigt`),
       staff: (isAdmin() || isVerwaltung() || isBuchhaltung()) ? api('/api/staff') : Promise.resolve([]),
       deductions: canSeeDeductions ? api(`/api/overtime-deductions?staff_id=${effectiveStaffId}`) : Promise.resolve([])
     };

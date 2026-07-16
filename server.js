@@ -107,6 +107,23 @@ app.use((req, res, next) => {
   next();
 });
 
+// Rolle "Fahrer": serverseitige Komplettsperre. Fahrer duerfen ausschliesslich die
+// Zeiterfassungs-Endpoints nutzen (diese erzwingen ohnehin den eigenen Benutzer, und
+// POST/PUT/DELETE auf /api/time/entries haben eigene Rollen-Guards, die Fahrer abweisen).
+// Jeder andere /api-Zugriff wird mit 403 abgewiesen — auch bei manipulierten Requests.
+app.use((req, res, next) => {
+  if (req.headers['x-user-permission'] === 'Fahrer' && req.path.startsWith('/api/')) {
+    const allowed = req.path.startsWith('/api/time/')
+      || req.path === '/api/login'
+      || req.path === '/api/version'
+      || req.path === '/api/health';
+    if (!allowed) {
+      return res.status(403).json({ error: 'Keine Berechtigung' });
+    }
+  }
+  next();
+});
+
 // ===== CUSTOMERS =====
 
 app.get('/api/customers', (req, res) => {

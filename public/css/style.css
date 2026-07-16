@@ -2488,11 +2488,11 @@ tr.clickable:hover {
   top: 0;
   left: 0;
   right: 0;
-  height: 56px;
+  height: calc(56px + env(safe-area-inset-top));
   background: var(--sidebar-bg);
   color: #fff;
   align-items: center;
-  padding: 0 16px;
+  padding: env(safe-area-inset-top) calc(16px + env(safe-area-inset-right)) 0 calc(16px + env(safe-area-inset-left));
   z-index: 200;
   gap: 14px;
 }
@@ -2561,8 +2561,8 @@ tr.clickable:hover {
 
   .content {
     margin-left: 0;
-    padding: 16px;
-    padding-top: 72px;
+    padding: 16px calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+    padding-top: calc(72px + env(safe-area-inset-top));
   }
 
   /* Hide non-mobile pages in nav */
