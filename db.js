@@ -568,6 +568,49 @@ async function getDb() {
   // Migration: add username to staff
   try { db.run("ALTER TABLE staff ADD COLUMN username TEXT DEFAULT ''"); } catch(e) {}
 
+  // Migration (TUeV-Parität): Feiertage ignorieren + Zeiterfassung pro Mitarbeiter abschaltbar
+  try { db.run("ALTER TABLE staff ADD COLUMN ignore_holidays INTEGER DEFAULT 0"); } catch(e) {}
+  try { db.run("ALTER TABLE staff ADD COLUMN time_tracking_active INTEGER DEFAULT 1"); } catch(e) {}
+
+  // Einmal-Migration (Bemo-Variante des TUeV 'pause_marker_split_v1'): Die neue (TUeV-)
+  // Zeiterfassungs-Logik behandelt einen '__pause__'-Eintrag, der BUENDIG am naechsten
+  // Eintrag liegt (keine Luecke danach), als dedizierten Pausenblock. In Bemo gab es
+  // diesen Datenfall aber nie als Pause: Bemos alte Logik zaehlte solche Eintraege als
+  // ARBEIT (angezeigt und im Ueberstundenkonto verbucht). Damit den Mitarbeitern durch
+  // den Logik-Wechsel keine Stunden verloren gehen, wird der Marker auf solchen Zeilen
+  // ENTFERNT (notes = '') — sie bleiben normale Arbeitsbloecke, exakt wie bisher gewertet.
+  // Gestempelte '__pause__'-Eintraege MIT Luecke danach bleiben unveraendert (identische
+  // Semantik in alter und neuer Logik: Block = Arbeit, Luecke = Pause).
+  // Nur das Textfeld notes wird gesetzt; keine Zeit wird veraendert, kein DELETE.
+  // Idempotent ueber Flag in settings.
+  try {
+    const flag = db.exec("SELECT value FROM settings WHERE key = 'pause_marker_flush_to_work_v1'");
+    const alreadyDone = flag[0] && flag[0].values && flag[0].values.length > 0 && flag[0].values[0][0] === '1';
+    if (!alreadyDone) {
+      const res = db.exec("SELECT id, staff_id, entry_date, start_time, end_time, notes FROM time_entries ORDER BY staff_id, entry_date, start_time");
+      const rows = (res[0] && res[0].values) ? res[0].values : []; // [id, staff_id, entry_date, start, end, notes]
+      const toMin = t => { const p = (t || '').slice(0, 5).split(':'); return (Number(p[0]) || 0) * 60 + (Number(p[1]) || 0); };
+      const fixIds = [];
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (r[5] !== '__pause__' || !r[4]) continue; // nur abgeschlossene __pause__-Eintraege
+        const next = rows[i + 1];
+        const sameGroup = next && next[1] === r[1] && next[2] === r[2]; // staff_id + entry_date
+        // buendig/ueberlappend = keine Luecke nach dem Eintrag -> wurde bisher als Arbeit gezaehlt
+        if (sameGroup && toMin(next[3]) <= toMin(r[4])) fixIds.push(r[0]);
+      }
+      fixIds.forEach(id => db.run("UPDATE time_entries SET notes = '' WHERE id = ?", [id]));
+      db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('pause_marker_flush_to_work_v1', '1')");
+      console.log(`[Migration] ${fixIds.length} buendige __pause__-Eintraege als Arbeitsbloecke fixiert (Stunden-Erhalt)`);
+    }
+  } catch(e) { console.warn('[Migration] pause_marker_flush_to_work_v1 skipped:', e.message); }
+  // Hinweis: Die TUeV-Einmal-Migrationen 'pause_marker_split_v1' (Relabel auf __pausenblock__)
+  // und 'overtime_logic_inverted_v1' (Vorzeichen-Inversion) werden bewusst NICHT uebernommen:
+  // - Relabel wuerde buendige Bloecke zu Pausen machen, die Bemos alte Logik als Arbeit
+  //   verbucht hat -> Mitarbeitern wuerden Stunden fehlen.
+  // - Bemo rechnet Korrekturen bereits seit 2026-06-08 mit der neuen Semantik
+  //   (positiv = Gutschrift, wird addiert). Eine Inversion wuerde Salden verfaelschen.
+
   // Credit notes (Gutschriften)
   db.run(`
     CREATE TABLE IF NOT EXISTS credit_notes (

@@ -116,7 +116,8 @@ app.use((req, res, next) => {
     const allowed = req.path.startsWith('/api/time/')
       || req.path === '/api/login'
       || req.path === '/api/version'
-      || req.path === '/api/health';
+      || req.path === '/api/health'
+      || req.path === '/api/staff/me/password'; // eigenes Passwort aendern (wirkt nur auf x-user-id, verlangt aktuelles Passwort)
     if (!allowed) {
       return res.status(403).json({ error: 'Keine Berechtigung' });
     }
@@ -683,7 +684,7 @@ app.post('/api/login', (req, res) => {
       [staff.id, staff.name || '', 'login', 'login', staff.id, staff.name || '', '', ts]
     );
   } catch (e) { console.error('login activity_log failed:', e && e.message); }
-  res.json({ id: staff.id, name: staff.name, permission_level: staff.permission_level || 'Benutzer', default_station_id: staff.default_station_id || null, work_days: staff.work_days || '1,2,3,4,5', needs_password: needsPassword });
+  res.json({ id: staff.id, name: staff.name, permission_level: staff.permission_level || 'Benutzer', default_station_id: staff.default_station_id || null, work_days: staff.work_days || '1,2,3,4,5', time_tracking_active: staff.time_tracking_active != null ? staff.time_tracking_active : 1, needs_password: needsPassword });
 });
 
 // ===== STAFF =====
@@ -723,7 +724,7 @@ app.post('/api/staff', (req, res) => {
     // in der Produktions-DB nicht durchgelaufen ist — sonst würde der INSERT mit "no such column" scheitern).
     ensureColumn('staff', 'signature', "TEXT DEFAULT ''");
 
-    const { name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature } = req.body;
+    const { name, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature, ignore_holidays, time_tracking_active } = req.body;
     if (!name) return res.status(400).json({ error: 'Name ist Pflichtfeld' });
     const pwError = validatePassword(password);
     if (pwError) return res.status(400).json({ error: pwError });
@@ -731,9 +732,11 @@ app.post('/api/staff', (req, res) => {
     const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
     const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : 'Benutzer';
     if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
+    ensureColumn('staff', 'ignore_holidays', 'INTEGER DEFAULT 0');
+    ensureColumn('staff', 'time_tracking_active', 'INTEGER DEFAULT 1');
     // role ist historisch NOT NULL ohne Default in der Produktions-DB — explizit mit Leer-String füllen
-    const result = execute('INSERT INTO staff (name, role, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [name, '', station || '', password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours || 40, default_station_id || null, work_days || '1,2,3,4,5', username || '', hidden_in_planning ? 1 : 0, signature || '']);
+    const result = execute('INSERT INTO staff (name, role, station, password, permission_level, has_calendar, calendar_visibility, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature, ignore_holidays, time_tracking_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, '', station || '', password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours || 40, default_station_id || null, work_days || '1,2,3,4,5', username || '', hidden_in_planning ? 1 : 0, signature || '', ignore_holidays ? 1 : 0, time_tracking_active === 0 ? 0 : 1]);
     res.json({ id: result.lastId, message: 'Mitarbeiter hinzugefügt' });
   } catch (err) {
     console.error('POST /api/staff failed:', err && err.stack ? err.stack : err);
@@ -745,19 +748,24 @@ app.put('/api/staff/:id', (req, res) => {
   try {
     ensureColumn('staff', 'signature', "TEXT DEFAULT ''");
 
-    const { name, station, active, password, permission_level, has_calendar, calendar_visibility, vacation_days, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature } = req.body;
+    const { name, station, active, password, permission_level, has_calendar, calendar_visibility, vacation_days, entry_date, exit_date, email, street, zip, city, phone_private, phone_business, emergency_name, emergency_phone, weekly_hours, default_station_id, work_days, username, hidden_in_planning, signature, ignore_holidays, time_tracking_active } = req.body;
     const pwError = validatePassword(password);
     if (pwError) return res.status(400).json({ error: pwError });
+    ensureColumn('staff', 'ignore_holidays', 'INTEGER DEFAULT 0');
+    ensureColumn('staff', 'time_tracking_active', 'INTEGER DEFAULT 1');
     const callerPermission = req.headers['x-user-permission'];
-    const existing = queryOne('SELECT permission_level, hidden_in_planning, signature FROM staff WHERE id = ?', [Number(req.params.id)]);
+    const existing = queryOne('SELECT permission_level, hidden_in_planning, signature, time_tracking_active FROM staff WHERE id = ?', [Number(req.params.id)]);
     const canChangeLevel = (callerPermission === 'Admin' || callerPermission === 'Verwaltung');
     const finalPermissionLevel = canChangeLevel ? (permission_level || 'Benutzer') : (existing ? existing.permission_level : 'Benutzer');
     if (finalPermissionLevel === 'Admin' && callerPermission !== 'Admin') return res.status(403).json({ error: 'Nur Admins können Admin-Rechte vergeben' });
     const finalHidden = (hidden_in_planning !== undefined) ? (hidden_in_planning ? 1 : 0) : (existing ? (existing.hidden_in_planning || 0) : 0);
     // Signatur: explizit übergebener Wert (auch leer) gewinnt; sonst bestehender Wert behalten
     const finalSignature = (signature !== undefined) ? String(signature) : (existing ? (existing.signature || '') : '');
-    execute('UPDATE staff SET name=?, station=?, active=?, password=?, permission_level=?, has_calendar=?, calendar_visibility=?, vacation_days=?, entry_date=?, exit_date=?, email=?, street=?, zip=?, city=?, phone_private=?, phone_business=?, emergency_name=?, emergency_phone=?, weekly_hours=?, default_station_id=?, work_days=?, username=?, hidden_in_planning=?, signature=? WHERE id=?',
-      [name, station || '', active !== undefined ? active : 1, password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days !== undefined ? vacation_days : 30, entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours !== undefined ? weekly_hours : 40, default_station_id !== undefined ? default_station_id : null, work_days || '1,2,3,4,5', username || '', finalHidden, finalSignature, Number(req.params.id)]);
+    const ttActive = time_tracking_active !== undefined
+      ? (time_tracking_active ? 1 : 0)
+      : (existing && existing.time_tracking_active != null ? existing.time_tracking_active : 1);
+    execute('UPDATE staff SET name=?, station=?, active=?, password=?, permission_level=?, has_calendar=?, calendar_visibility=?, vacation_days=?, entry_date=?, exit_date=?, email=?, street=?, zip=?, city=?, phone_private=?, phone_business=?, emergency_name=?, emergency_phone=?, weekly_hours=?, default_station_id=?, work_days=?, username=?, hidden_in_planning=?, signature=?, ignore_holidays=?, time_tracking_active=? WHERE id=?',
+      [name, station || '', active !== undefined ? active : 1, password || '', finalPermissionLevel, has_calendar !== undefined ? has_calendar : 1, calendar_visibility || 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days !== undefined ? vacation_days : 30, entry_date || '', exit_date || '', email || '', street || '', zip || '', city || '', phone_private || '', phone_business || '', emergency_name || '', emergency_phone || '', weekly_hours !== undefined ? weekly_hours : 40, default_station_id !== undefined ? default_station_id : null, work_days || '1,2,3,4,5', username || '', finalHidden, finalSignature, ignore_holidays ? 1 : 0, ttActive, Number(req.params.id)]);
     res.json({ message: 'Mitarbeiter aktualisiert' });
   } catch (err) {
     console.error('PUT /api/staff/:id failed:', err && err.stack ? err.stack : err);
@@ -3655,6 +3663,150 @@ app.delete('/api/rentals/:id', (req, res) => {
 
 // ===== TIME TRACKING =====
 
+// Beim Schliessen eines gestempelten Blocks (Ausstempeln, Pause-Stempeln, Auto-23:00):
+// Waehrend der Block offen war, koennen fuer denselben Tag manuell Eintraege angelegt
+// worden sein (Pause ODER Arbeitszeit), die mitten im gestempelten Zeitraum liegen.
+// Der Split-/Ueberlappungs-Schutz beim manuellen Anlegen sieht offene Eintraege nicht
+// (end_time = ''), deshalb wird der gestempelte Block HIER beim Schliessen um alle
+// bereits abgeschlossenen Eintraege des Tages herum aufgeteilt: Pausen unterbrechen
+// die Arbeitszeit, manuelle Arbeitsbloecke werden nicht doppelt gezaehlt.
+function splitClosedStampBlock(entryId) {
+  try {
+    const entry = queryOne('SELECT * FROM time_entries WHERE id = ?', [entryId]);
+    if (!entry || !entry.end_time) return;
+    const toMin = (t) => { const p = String(t).split(':').map(Number); return p[0] * 60 + (p[1] || 0); };
+    const s0 = toMin(entry.start_time), e0 = toMin(entry.end_time);
+    if (e0 <= s0) return; // negative/leere Bloecke nicht anfassen
+    const overlaps = queryAll(
+      "SELECT * FROM time_entries WHERE staff_id = ? AND entry_date = ? AND id != ? AND end_time != ''",
+      [entry.staff_id, entry.entry_date, entry.id]
+    ).filter(o => toMin(o.start_time) < e0 && toMin(o.end_time) > s0 && toMin(o.end_time) > toMin(o.start_time))
+      .sort((a, b) => toMin(a.start_time) - toMin(b.start_time));
+    if (!overlaps.length) return;
+
+    // Segmente = gestempelter Block minus alle ueberlappenden Eintraege
+    let segments = [{ start: s0, end: e0, startStr: entry.start_time, endStr: entry.end_time }];
+    for (const o of overlaps) {
+      const os = toMin(o.start_time), oe = toMin(o.end_time);
+      const next = [];
+      for (const seg of segments) {
+        if (oe <= seg.start || os >= seg.end) { next.push(seg); continue; }
+        if (os > seg.start) next.push({ start: seg.start, end: os, startStr: seg.startStr, endStr: o.start_time });
+        if (oe < seg.end) next.push({ start: oe, end: seg.end, startStr: o.end_time, endStr: seg.endStr });
+      }
+      segments = next;
+    }
+
+    // '__pause__'-Marker gehoert ans ENDE des Blocks (Pause = Luecke danach) -> nur auf dem
+    // LETZTEN Segment behalten. Auf einem frueheren, buendigen Segment wuerde er das Segment
+    // faelschlich zum Pausenblock machen. Freitext-Notizen bleiben auf dem ersten Segment.
+    const marker = entry.notes === '__pause__' ? '__pause__' : '';
+    const freeNotes = (entry.notes && entry.notes !== '__pause__') ? entry.notes : '';
+    if (!segments.length) {
+      // Komplett von Pausen/Eintraegen ueberdeckt -> Block entfaellt (wie beim manuellen Split)
+      execute('DELETE FROM time_entries WHERE id = ?', [entry.id]);
+      return;
+    }
+    segments.forEach((seg, i) => {
+      const isLast = i === segments.length - 1;
+      const notes = (isLast && marker) ? marker : (i === 0 ? freeNotes : '');
+      if (i === 0) {
+        execute('UPDATE time_entries SET start_time = ?, end_time = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [seg.startStr, seg.endStr, notes, entry.id]);
+      } else {
+        execute('INSERT INTO time_entries (staff_id, entry_date, start_time, end_time, break_minutes, notes) VALUES (?, ?, ?, ?, 0, ?)',
+          [entry.staff_id, entry.entry_date, seg.startStr, seg.endStr, notes]);
+      }
+    });
+  } catch (err) {
+    console.error('[stamp-split] Fehler:', err && err.message);
+  }
+}
+
+// Zeit-Helfer fuer die Stempel-/Split-Logik ('HH:MM' oder 'HH:MM:SS').
+function _ttToMin(t) {
+  if (!t) return null;
+  const p = String(t).split(':').map(Number);
+  if (isNaN(p[0]) || isNaN(p[1])) return null;
+  return p[0] * 60 + p[1];
+}
+
+// Laufender (offener) Eintrag eines Mitarbeiters an einem Tag.
+function _openTimeEntryFor(staffId, entryDate) {
+  return queryOne("SELECT * FROM time_entries WHERE staff_id = ? AND entry_date = ? AND end_time = ''", [Number(staffId), entryDate]);
+}
+
+// Pause faellt in den LAUFENDEN (offenen) Block: den offenen Block sofort splitten,
+// damit die Erfassung nicht kaputtgeht, waehrend der Mitarbeiter eingestempelt ist.
+// Beispiel: eingestempelt seit 08:00, um 13:00 wird Pause 12:00-12:30 eingetragen ->
+// offener Block wird 08:00-12:00 geschlossen, NEUER offener Block startet 12:30
+// (Mitarbeiter bleibt eingestempelt und loggt sich spaeter normal aus).
+// Rueckgabe: null = ok/nichts zu tun, sonst { error } (Pause ragt in die Zukunft).
+function _splitOpenEntryForPause(staffId, entryDate, pauseStart, pauseEnd) {
+  const open = _openTimeEntryFor(staffId, entryDate);
+  if (!open) return null;
+  const pStart = _ttToMin(pauseStart);
+  const pEnd = _ttToMin(pauseEnd);
+  const oStart = _ttToMin(open.start_time);
+  const nowMin = _ttToMin(berlinTime());
+  if (pStart == null || pEnd == null || pEnd <= pStart || oStart == null) return null;
+  // Laufender Block = [oStart, jetzt). Keine Ueberschneidung -> nichts zu tun
+  // (liegt die Pause komplett in der Zukunft, greift beim Ausstempeln das Sicherheitsnetz).
+  if (pEnd <= oStart || pStart >= nowMin) return null;
+  if (pEnd > nowMin) {
+    return { error: 'Der Mitarbeiter ist aktuell eingestempelt und die Pause endet in der Zukunft. Bitte eine bereits beendete Pause eintragen oder warten, bis die Pause vorbei ist.' };
+  }
+  if (oStart >= pStart) {
+    // Pause ueberdeckt den Blockanfang -> laufender Block beginnt erst nach der Pause.
+    execute('UPDATE time_entries SET start_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseEnd, open.id]);
+  } else {
+    // Pause liegt mitten im laufenden Block -> Block bei Pausenbeginn schliessen,
+    // neuen OFFENEN Block ab Pausenende starten (Stempel-Status bleibt "eingestempelt").
+    execute('UPDATE time_entries SET end_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseStart, open.id]);
+    execute("INSERT INTO time_entries (staff_id, entry_date, start_time, end_time, break_minutes, notes) VALUES (?, ?, ?, '', 0, ?)",
+      [open.staff_id, open.entry_date, pauseEnd, open.notes || '']);
+  }
+  return null;
+}
+
+// Manueller Pausenblock teilt bestehende ABGESCHLOSSENE Arbeitsbloecke am selben Tag auf.
+// excludeId: eigener Eintrag beim Bearbeiten (PUT), sonst null.
+// Wichtig: Sobald eine explizite Pause einen Arbeitsblock beschneidet oder teilt, wird dessen
+// implizite break_minutes (z.B. die 60 Min aus "Standardtag") auf 0 gesetzt. Sonst zaehlt die
+// Pause doppelt - einmal als eigener Pausenblock, einmal als break_minutes im Restblock - und
+// dem Mitarbeiter geht Arbeitszeit verloren (Fix 2026-07-14).
+function _splitWorkBlocksForPause(staffId, entryDate, pauseStart, pauseEnd, excludeId) {
+  const overlaps = queryAll(
+    `SELECT * FROM time_entries
+     WHERE staff_id = ? AND entry_date = ? AND id != ?
+       AND (notes IS NULL OR notes NOT IN ('__pause__', '__pausenblock__'))
+       AND end_time != ''
+       AND start_time < ?
+       AND end_time > ?`,
+    [Number(staffId), entryDate, Number(excludeId || 0), pauseEnd, pauseStart]
+  );
+  for (const e of overlaps) {
+    if (e.start_time >= pauseStart && e.end_time <= pauseEnd) {
+      // Arbeit komplett innerhalb der Pause: loeschen
+      execute('DELETE FROM time_entries WHERE id = ?', [e.id]);
+    } else if (e.start_time >= pauseStart) {
+      // Arbeit startet innerhalb der Pause: Start nach Pausenende verschieben
+      execute('UPDATE time_entries SET start_time = ?, break_minutes = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseEnd, e.id]);
+    } else if (e.end_time <= pauseEnd) {
+      // Arbeit endet innerhalb der Pause: Ende auf Pausenstart vorziehen
+      execute('UPDATE time_entries SET end_time = ?, break_minutes = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseStart, e.id]);
+    } else {
+      // Pause komplett innerhalb der Arbeit: aufteilen in zwei Bloecke (beide ohne break_minutes)
+      const originalEnd = e.end_time;
+      execute('UPDATE time_entries SET end_time = ?, break_minutes = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseStart, e.id]);
+      execute(
+        `INSERT INTO time_entries (staff_id, entry_date, start_time, end_time, break_minutes, notes) VALUES (?, ?, ?, ?, ?, ?)`,
+        [e.staff_id, e.entry_date, pauseEnd, originalEnd, 0, e.notes || '']
+      );
+    }
+  }
+}
+
 // POST /api/time/stamp – Ein-/Ausstempeln/Pause
 app.post('/api/time/stamp', (req, res) => {
   const staffId = Number(req.headers['x-user-id']);
@@ -3672,6 +3824,9 @@ app.post('/api/time/stamp', (req, res) => {
     const isPause = action === 'pause' ? 1 : 0;
     execute('UPDATE time_entries SET end_time = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [currentTime, isPause ? '__pause__' : (openEntry.notes || ''), openEntry.id]);
+    // Waehrend der offenen Stempelung manuell eingetragene Pausen/Arbeitszeiten
+    // aus dem gerade geschlossenen Block herausschneiden.
+    splitClosedStampBlock(openEntry.id);
     const updated = queryOne('SELECT * FROM time_entries WHERE id = ?', [openEntry.id]);
     res.json({ status: isPause ? 'paused' : 'stamped_out', entry: updated });
   } else {
@@ -3730,26 +3885,6 @@ app.get('/api/time/entries', (req, res) => {
   res.json(entries);
 });
 
-// Findet bestehende Zeiteintraege am gleichen Tag, deren Intervall [start_time, end_time)
-// sich mit dem uebergebenen Bereich ueberlappt. Ignoriert offene Eintraege (end_time = '')
-// und einen ggf. uebergebenen excludeId (fuer PUT-Eigenausschluss).
-function findOverlappingTimeEntries(staffId, entryDate, startTime, endTime, excludeId) {
-  if (!startTime || !endTime) return [];
-  return queryAll(
-    "SELECT id, start_time, end_time, notes FROM time_entries WHERE staff_id = ? AND entry_date = ? AND end_time != '' AND id != ? AND start_time < ? AND end_time > ?",
-    [staffId, entryDate, excludeId || 0, endTime, startTime]
-  );
-}
-
-function describeTimeEntryConflict(conflict) {
-  const s = (conflict.start_time || '').slice(0, 5);
-  const e = (conflict.end_time || '').slice(0, 5);
-  const what = conflict.notes === '__pause__' ? 'Arbeitszeit' : 'Arbeitszeit';
-  // Hinweis: ein __pause__-Eintrag in dieser Datenform ist ein Arbeitsblock, der mit einer Pause endete.
-  // Die Pause selbst ergibt sich aus der Luecke zwischen Bloecken und steht nicht als eigene Zeile in der DB.
-  return what + ' ' + s + '-' + e;
-}
-
 // POST /api/time/entries – Manueller Eintrag
 app.post('/api/time/entries', (req, res) => {
   const userId = Number(req.headers['x-user-id']);
@@ -3763,38 +3898,41 @@ app.post('/api/time/entries', (req, res) => {
   const targetStaffId = Number(staff_id) || userId;
   if (!entry_date || !start_time) return res.status(400).json({ error: 'Datum und Startzeit sind Pflichtfelder' });
 
-  // Nachtraegliches Einfuegen einer Pause in eine bestehende Arbeitszeit: die Arbeit am Pausen-Start
-  // beenden (mit __pause__-Marker) und nach der Pause als zweite Arbeitszeile fortsetzen. Die Pause
-  // selbst wird NICHT als eigene Zeile gespeichert — die Luecke zwischen den zwei Arbeitsbloecken
-  // ergibt die Pause (gleiche Daten-Form wie beim normalen Stempeln, fuer das die Aggregation
-  // bereits korrekt arbeitet).
-  const isPause = (notes || '') === '__pause__';
-  if (isPause && start_time && end_time) {
-    const overlappingWork = queryAll(
-      "SELECT * FROM time_entries WHERE staff_id = ? AND entry_date = ? AND notes != '__pause__' AND end_time != '' AND start_time < ? AND end_time > ?",
+  // Ueberlappungs-Check fuer Arbeitseintraege: zwei Arbeitsblocks zur selben Zeit nicht erlaubt.
+  // Pausen (gestempelt '__pause__' ODER manueller Block '__pausenblock__') sind keine Arbeit
+  // und nehmen weder selbst am Check teil noch gelten sie als Ueberlappung.
+  if (notes !== '__pause__' && notes !== '__pausenblock__' && start_time && end_time) {
+    const overlap = queryOne(
+      `SELECT id, start_time, end_time FROM time_entries
+       WHERE staff_id = ? AND entry_date = ?
+         AND (notes IS NULL OR notes NOT IN ('__pause__', '__pausenblock__'))
+         AND end_time != ''
+         AND start_time < ?
+         AND end_time > ?`,
       [targetStaffId, entry_date, end_time, start_time]
     );
-    const containing = overlappingWork.find(w => w.start_time < start_time && w.end_time > end_time);
-    if (containing) {
-      execute(
-        'UPDATE time_entries SET end_time = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [start_time, '__pause__', containing.id]
-      );
-      execute(
-        'INSERT INTO time_entries (staff_id, entry_date, start_time, end_time, break_minutes, notes) VALUES (?, ?, ?, ?, ?, ?)',
-        [targetStaffId, entry_date, end_time, containing.end_time, 0, containing.notes && containing.notes !== '__pause__' ? containing.notes : '']
-      );
-      return res.json({ message: 'Pause eingefuegt, Arbeitszeit gesplittet', split: true });
+    if (overlap) {
+      return res.status(409).json({ error: `Überlappt mit Arbeitszeit ${overlap.start_time.slice(0,5)}–${overlap.end_time.slice(0,5)}. Zwei Arbeitszeiten zur selben Zeit sind nicht erlaubt.` });
+    }
+    // ... und auch nicht den LAUFENDEN Block (Mitarbeiter aktuell eingestempelt) ueberlappen.
+    const open = _openTimeEntryFor(targetStaffId, entry_date);
+    if (open) {
+      const s = _ttToMin(start_time), e2 = _ttToMin(end_time);
+      const oStart = _ttToMin(open.start_time), nowMin = _ttToMin(berlinTime());
+      if (s != null && e2 != null && oStart != null && s < nowMin && e2 > oStart) {
+        return res.status(409).json({
+          error: `Der Mitarbeiter ist aktuell eingestempelt (läuft seit ${open.start_time.slice(0,5)}). Die Zeit überschneidet sich mit der laufenden Arbeitszeit.`
+        });
+      }
     }
   }
 
-  // Ueberlappungs-Check: am gleichen Tag duerfen sich Eintraege zeitlich nicht ueberschneiden.
-  // Greift nicht im Pause-Split-Pfad oben (der returned bereits) und nicht bei offenen Eintraegen (kein Ende).
-  if (start_time && end_time) {
-    const conflicts = findOverlappingTimeEntries(targetStaffId, entry_date, start_time, end_time, 0);
-    if (conflicts.length > 0) {
-      return res.status(400).json({ error: 'Zeitraum überschneidet sich mit bestehender ' + describeTimeEntryConflict(conflicts[0]) });
-    }
+  // Pausenblock: zuerst den LAUFENDEN Block behandeln (sofort splitten, Mitarbeiter bleibt
+  // eingestempelt; Zukunfts-Pause wird abgelehnt), dann abgeschlossene Arbeitsbloecke aufteilen.
+  if (notes === '__pausenblock__' && start_time && end_time) {
+    const openErr = _splitOpenEntryForPause(targetStaffId, entry_date, start_time, end_time);
+    if (openErr) return res.status(409).json(openErr);
+    _splitWorkBlocksForPause(targetStaffId, entry_date, start_time, end_time, null);
   }
 
   const result = execute(
@@ -3820,19 +3958,46 @@ app.put('/api/time/entries/:id', (req, res) => {
   }
 
   const { start_time, end_time, break_minutes, notes, entry_date } = req.body;
+  // Ueberlappungs-Check fuer Arbeitseintraege (id != self)
+  const effNotes = notes !== undefined ? notes : entry.notes;
   const effStart = start_time || entry.start_time;
   const effEnd = end_time !== undefined ? end_time : entry.end_time;
   const effDate = entry_date || entry.entry_date;
-  // Beim Bearbeiten darf der neue Bereich keinen anderen Eintrag desselben Tages ueberlappen.
-  if (effStart && effEnd) {
-    const conflicts = findOverlappingTimeEntries(entry.staff_id, effDate, effStart, effEnd, entryId);
-    if (conflicts.length > 0) {
-      return res.status(400).json({ error: 'Zeitraum überschneidet sich mit bestehender ' + describeTimeEntryConflict(conflicts[0]) });
+  if (effNotes !== '__pause__' && effNotes !== '__pausenblock__' && effStart && effEnd) {
+    const overlap = queryOne(
+      `SELECT id, start_time, end_time FROM time_entries
+       WHERE staff_id = ? AND entry_date = ? AND id != ?
+         AND (notes IS NULL OR notes NOT IN ('__pause__', '__pausenblock__'))
+         AND end_time != ''
+         AND start_time < ?
+         AND end_time > ?`,
+      [entry.staff_id, effDate, entryId, effEnd, effStart]
+    );
+    if (overlap) {
+      return res.status(409).json({ error: `Überlappt mit Arbeitszeit ${overlap.start_time.slice(0,5)}–${overlap.end_time.slice(0,5)}. Zwei Arbeitszeiten zur selben Zeit sind nicht erlaubt.` });
     }
+    // ... und auch nicht den LAUFENDEN Block ueberlappen (ausser der Eintrag ist selbst der offene).
+    const open = _openTimeEntryFor(entry.staff_id, effDate);
+    if (open && open.id !== entryId) {
+      const s = _ttToMin(effStart), e2 = _ttToMin(effEnd);
+      const oStart = _ttToMin(open.start_time), nowMin = _ttToMin(berlinTime());
+      if (s != null && e2 != null && oStart != null && s < nowMin && e2 > oStart) {
+        return res.status(409).json({
+          error: `Der Mitarbeiter ist aktuell eingestempelt (läuft seit ${open.start_time.slice(0,5)}). Die Zeit überschneidet sich mit der laufenden Arbeitszeit.`
+        });
+      }
+    }
+  }
+  // Pausenblock: laufenden Block sofort splitten (Zukunfts-Pause ablehnen),
+  // dann abgeschlossene Arbeitsbloecke um die (geaenderte) Pause herum aufteilen.
+  if (effNotes === '__pausenblock__' && effStart && effEnd) {
+    const openErr = _splitOpenEntryForPause(entry.staff_id, effDate, effStart, effEnd);
+    if (openErr) return res.status(409).json(openErr);
+    _splitWorkBlocksForPause(entry.staff_id, effDate, effStart, effEnd, entryId);
   }
   execute(
     'UPDATE time_entries SET start_time=?, end_time=?, break_minutes=?, notes=?, entry_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-    [effStart, effEnd, break_minutes !== undefined ? break_minutes : entry.break_minutes, notes !== undefined ? notes : entry.notes, effDate, entryId]
+    [effStart, effEnd, break_minutes !== undefined ? break_minutes : entry.break_minutes, effNotes, effDate, entryId]
   );
   const updated = queryOne('SELECT * FROM time_entries WHERE id = ?', [entryId]);
   res.json(updated);
@@ -3864,10 +4029,13 @@ app.get('/api/time/overtime', (req, res) => {
 
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) staffId = userId;
 
-  const staff = queryOne('SELECT weekly_hours, work_days, entry_date FROM staff WHERE id = ?', [staffId]);
-  const weeklyHours = staff ? (staff.weekly_hours || 40) : 40;
+  const staff = queryOne('SELECT weekly_hours, work_days, entry_date, exit_date, ignore_holidays FROM staff WHERE id = ?', [staffId]);
+  // 0 = gueltiges Soll von 0h (Minijobber: alles Gestempelte zaehlt als Plus).
+  const weeklyHours = (staff && staff.weekly_hours != null) ? staff.weekly_hours : 40;
   const workDaysStr = staff ? (staff.work_days || '1,2,3,4,5') : '1,2,3,4,5';
   const entryDate = staff ? (staff.entry_date || '') : '';
+  const exitDate = staff ? (staff.exit_date || '') : '';
+  const ignoreHolidays = staff ? !!staff.ignore_holidays : false; // Feiertage als normale Arbeitstage werten
 
   // No entry_date → no time tracking possible
   if (!entryDate) {
@@ -3958,7 +4126,11 @@ app.get('/api/time/overtime', (req, res) => {
   const weekMap = {}; // weekKey -> { target, actual, days: { dateStr -> {target, actual, absence} } }
 
   const cur = new Date(startDate + 'T12:00:00');
-  const end = new Date(today + 'T12:00:00');
+  // Nach dem Austrittsdatum kein Soll mehr aufbauen: Schleife endet am Austrittstag
+  // (falls gesetzt und vor heute), sonst heute. Verhindert endlos wachsende
+  // Minusstunden bei ausgeschiedenen Mitarbeitern.
+  const endDateStr = (exitDate && exitDate < today) ? exitDate : today;
+  const end = new Date(endDateStr + 'T12:00:00');
 
   while (cur <= end) {
     const dateStr = fmtDate(cur);
@@ -3977,7 +4149,7 @@ app.get('/api/time/overtime', (req, res) => {
     let dayTargetMinutes = 0;
     let absenceType = null;
     const beforeEntry = dateStr < entryDate;
-    const holidayName = isHoliday(dateStr);
+    const holidayName = ignoreHolidays ? null : isHoliday(dateStr);
     const absence = absenceMap[dateStr];
 
     if (beforeEntry) {
@@ -4002,7 +4174,7 @@ app.get('/api/time/overtime', (req, res) => {
         dayTargetMinutes = isWorkDay ? dailyTargetMinutes / 2 : 0;
         absenceType = 'Halber Urlaubstag';
       } else {
-        // Weiterbildung etc. -> no target
+        // Weiterbildung, Sonstige Abwesenheit etc. -> no target
         dayTargetMinutes = 0;
       }
     } else if (isWorkDay) {
@@ -4012,10 +4184,40 @@ app.get('/api/time/overtime', (req, res) => {
     // Calculate actual worked minutes for this day
     let dayActualMinutes = 0;
     const dayEntries = entryByDate[dateStr] || [];
-    dayEntries.forEach(e => {
+    // Enthaelt der Tag eine explizite Pause (manueller Pausenblock oder buendiger
+    // __pause__-Block), ist ein break_minutes an einem Arbeitsblock eine Phantom-Pause
+    // (doppelt gezaehlt) -> dann ignorieren. Schuetzt den Saldo auch gegen Altdaten.
+    const dayHasExplicitPause = dayEntries.some((pe, pidx) => {
+      if (pe.notes === '__pausenblock__') return true;
+      if (pe.notes === '__pause__' && pe.end_time) {
+        const nx = dayEntries[pidx + 1];
+        if (nx) {
+          const [nh, nm] = nx.start_time.split(':').map(Number);
+          const [ph, pm] = pe.end_time.split(':').map(Number);
+          return (nh * 60 + nm) - (ph * 60 + pm) <= 0;
+        }
+      }
+      return false;
+    });
+    dayEntries.forEach((e, idx) => {
+      // Manueller Pausenblock zaehlt nie als Arbeit.
+      if (e.notes === '__pausenblock__') return;
+      // __pause__ ist (aus Alt-Daten) mehrdeutig: ein gestempelter __pause__-Eintrag
+      // IST der Arbeitsblock (Pause = Luecke danach) und zaehlt als Arbeit; ein
+      // buendiger __pause__-Block ist eine Pause und zaehlt NICHT. Unterscheidung
+      // an der Luecke zum naechsten Eintrag.
+      if (e.notes === '__pause__') {
+        const next = dayEntries[idx + 1];
+        if (next) {
+          const [neh, nem] = next.start_time.split(':').map(Number);
+          const [peh, pem] = e.end_time.split(':').map(Number);
+          const gap = (neh * 60 + nem) - (peh * 60 + pem);
+          if (gap <= 0) return; // dedizierter Pausenblock -> ueberspringen
+        }
+      }
       const [sh, sm] = e.start_time.split(':').map(Number);
       const [eh, em] = e.end_time.split(':').map(Number);
-      const worked = (eh * 60 + em) - (sh * 60 + sm) - (e.break_minutes || 0);
+      const worked = (eh * 60 + em) - (sh * 60 + sm) - (dayHasExplicitPause ? 0 : (e.break_minutes || 0));
       if (worked > 0) dayActualMinutes += worked;
     });
 
@@ -4049,20 +4251,20 @@ app.get('/api/time/overtime', (req, res) => {
     };
   });
 
-  // Ueberstunden-Korrekturen aufaddieren — neue Semantik seit 2026-06-08:
-  // gespeicherter Wert wird direkt auf das Saldo addiert (positiv = Gutschrift, negativ = Abzug).
+  // Korrekturen direkt aufs Ueberstundenkonto addieren (positiv = Gutschrift, negativ = Abzug)
   const correctionRows = queryAll('SELECT minutes FROM overtime_deductions WHERE staff_id = ?', [staffId]);
   const correctionMinutes = correctionRows.reduce((sum, r) => sum + (Number(r.minutes) || 0), 0);
   const adjustedOvertime = totalOvertimeMinutes + correctionMinutes;
 
-  res.json({ weekly_hours: weeklyHours, work_days: workDaysStr, total_overtime_minutes: adjustedOvertime, deducted_minutes: -correctionMinutes, weeks });
+  res.json({ weekly_hours: weeklyHours, work_days: workDaysStr, ignore_holidays: ignoreHolidays ? 1 : 0, total_overtime_minutes: adjustedOvertime, deducted_minutes: correctionMinutes, weeks });
 });
 
 // ===== OVERTIME DEDUCTIONS =====
 
+// Ueberstunden-Korrekturen: nur Admin (Vorgabe 2026-07-14).
 app.get('/api/overtime-deductions', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  if (permission !== 'Admin') return res.status(403).json({ error: 'Keine Berechtigung' });
   const staffId = Number(req.query.staff_id);
   if (!staffId) return res.status(400).json({ error: 'staff_id erforderlich' });
   res.json(queryAll(
@@ -4073,7 +4275,7 @@ app.get('/api/overtime-deductions', (req, res) => {
 
 app.post('/api/overtime-deductions', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  if (permission !== 'Admin') return res.status(403).json({ error: 'Keine Berechtigung' });
   const userId = Number(req.headers['x-user-id']);
   const { staff_id, deduction_date, minutes, reason } = req.body;
   if (!staff_id || !deduction_date || !minutes) return res.status(400).json({ error: 'staff_id, deduction_date und minutes erforderlich' });
@@ -4086,14 +4288,14 @@ app.post('/api/overtime-deductions', (req, res) => {
 
 app.delete('/api/overtime-deductions/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  if (permission !== 'Admin') return res.status(403).json({ error: 'Keine Berechtigung' });
   execute('DELETE FROM overtime_deductions WHERE id = ?', [Number(req.params.id)]);
   res.json({ message: 'Eintrag gelöscht' });
 });
 
 app.put('/api/overtime-deductions/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  if (permission !== 'Admin') return res.status(403).json({ error: 'Keine Berechtigung' });
   const { deduction_date, minutes, reason } = req.body;
   execute(
     'UPDATE overtime_deductions SET deduction_date=?, minutes=?, reason=? WHERE id=?',
@@ -5483,39 +5685,75 @@ function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// ── Auto-Logout: offene Zeiteintraege taeglich um 23:00 Uhr automatisch ausloggen ──
-// Kein Mitarbeiter arbeitet laenger als 23:00. Vergessenes Ausstempeln (v.a. ueber
-// Mitternacht hinaus) wuerde sonst die Arbeitszeit-Berechnung kaputt machen. Der Eintrag
-// wird exakt wie bei einem manuellen Ausstempeln geschlossen (nur end_time = 23:00:00,
-// Notiz bleibt unveraendert), sodass danach kein doppeltes Ausloggen moeglich ist.
-// Bei Bedarf kann die Zeit im Nachgang manuell korrigiert werden.
-const AUTO_LOGOUT_HOUR = 23;
-const AUTO_LOGOUT_TIME = '23:00:00';
-let autoLogoutLastRun = ''; // berlinToday() des letzten Laufs, verhindert Doppellauf
-
-function runAutoLogout() {
+// ===== Automatisches Ausstempeln um 23:00 (Berlin) =====
+// Kein Mitarbeiter arbeitet nach 23 Uhr. Vergisst jemand das Ausstempeln, bleibt sein
+// Eintrag offen (end_time = ''); der Status bleibt tage-uebergreifend "eingestempelt" und
+// ein spaeteres Ausstempeln schreibt eine falsche Endzeit auf den alten Eintrag. Deshalb
+// wird jeder noch eingestempelte Mitarbeiter taeglich um 23:00 automatisch ausgestempelt -
+// exakt so, als haette er sich selbst ausgestempelt: nur end_time = '23:00' setzen,
+// Notizen unveraendert, keine Sondermarkierung. Da der Eintrag damit abgeschlossen ist,
+// ist die naechste Stempelung wieder ein Einstempeln.
+function autoCloseOpenTimeEntries() {
   try {
-    const open = queryAll("SELECT id FROM time_entries WHERE end_time = ''");
-    if (open.length === 0) return;
-    execute(
-      "UPDATE time_entries SET end_time = ?, updated_at = CURRENT_TIMESTAMP WHERE end_time = ''",
-      [AUTO_LOGOUT_TIME]
-    );
-    console.log(`[Auto-Logout] ${open.length} offene Zeiteintrag(e) um 23:00 ausgeloggt.`);
-  } catch (e) {
-    console.error('[Auto-Logout] Fehler:', e.message);
+    const open = queryAll("SELECT * FROM time_entries WHERE end_time = ''");
+    if (!open.length) return;
+    let closed = 0;
+    for (const e of open) {
+      execute(
+        "UPDATE time_entries SET end_time = '23:00', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [e.id]
+      );
+      // Waehrend der offenen Stempelung manuell eingetragene Pausen/Arbeitszeiten herausschneiden
+      splitClosedStampBlock(e.id);
+      closed++;
+    }
+    console.log(`[auto-clockout] ${closed} offene(r) Zeiteintrag/-eintraege um 23:00 geschlossen`);
+  } catch (err) {
+    console.error('[auto-clockout] Fehler:', err && err.message);
   }
 }
 
-// Laeuft minuetlich; schliesst offene Eintraege beim ersten Check ab 23:00 Uhr.
-// Robust gegen Serverneustarts: startet der Server nach 23:00 neu, werden noch
-// offene Eintraege sofort geschlossen.
-function checkAutoLogout() {
+// Millisekunden bis zur naechsten Berlin-Uhrzeit hh:mm. berlinNow() liefert ein Date,
+// dessen lokale Feldwerte der Berliner Wandzeit entsprechen - die Differenz zweier
+// solcher Werte entspricht der realen Wartezeit (bis auf seltene DST-Wechsel +-1h).
+function msUntilNextBerlin(hour, minute) {
   const now = berlinNow();
-  const today = berlinToday();
-  if (now.getHours() >= AUTO_LOGOUT_HOUR && autoLogoutLastRun !== today) {
-    autoLogoutLastRun = today;
-    runAutoLogout();
+  const target = new Date(now);
+  target.setHours(hour, minute, 0, 0);
+  if (target <= now) target.setDate(target.getDate() + 1);
+  return target.getTime() - now.getTime();
+}
+
+function scheduleAutoClockout() {
+  const delay = msUntilNextBerlin(23, 0);
+  setTimeout(() => {
+    autoCloseOpenTimeEntries();
+    scheduleAutoClockout(); // fuer den Folgetag neu planen
+  }, delay);
+  console.log(`[auto-clockout] naechster Lauf in ${(delay / 3600000).toFixed(1)}h (23:00 Berlin)`);
+}
+
+// Sicherheitsnetz beim Start: Falls der 23:00-Lauf verpasst wurde (z.B. Deploy/Neustart um 23:00),
+// offene Eintraege VON FRUEHEREN TAGEN nachtraeglich schliessen. Heutige offene Eintraege sind
+// laufende Sitzungen und bleiben unangetastet.
+function autoCloseStaleEntries() {
+  try {
+    const today = berlinToday();
+    const stale = queryAll("SELECT * FROM time_entries WHERE end_time = '' AND entry_date < ?", [today]);
+    if (!stale.length) return;
+    let closed = 0;
+    for (const e of stale) {
+      execute(
+        "UPDATE time_entries SET end_time = '23:00', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        [e.id]
+      );
+      // Waehrend der offenen Stempelung manuell eingetragene Pausen/Arbeitszeiten herausschneiden
+      splitClosedStampBlock(e.id);
+      closed++;
+    }
+    console.log(`[auto-clockout] Start: ${closed} alte(r) offene(r) Zeiteintrag/-eintraege nachgeholt geschlossen`);
+  } catch (err) {
+    console.error('[auto-clockout] Start-Nachhol-Fehler:', err && err.message);
   }
 }
 
@@ -5523,8 +5761,10 @@ function checkAutoLogout() {
 getDb().then(() => {
   app.listen(PORT, HOST, () => {
     console.log(`Bemo-Verwaltung läuft auf http://${HOST}:${PORT} [${process.env.NODE_ENV || 'development'}]`);
-    checkAutoLogout();                       // direkt beim Start pruefen (Neustart nach 23:00)
-    setInterval(checkAutoLogout, 60 * 1000); // danach minuetlich
+    // Taeglich um 23:00 (Berlin) alle offenen Zeiteintraege automatisch schliessen,
+    // damit vergessenes Ausstempeln nicht zu falschen/fehlenden Arbeitszeiten fuehrt.
+    autoCloseStaleEntries();
+    scheduleAutoClockout();
   });
 }).catch(err => {
   console.error('Datenbankfehler:', err);

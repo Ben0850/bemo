@@ -803,7 +803,7 @@ async function renderDashboard() {
               <button class="dash-pw-btn" onclick="openChangePasswordModal()">&#9881; Passwort</button>
             </div>
           </div>
-          <div class="dash-time-strip">
+          ${loggedInUser.time_tracking_active === 0 ? '' : `<div class="dash-time-strip">
             <div class="dash-time-card ${timeClass}" onclick="navigate('time-tracking')">
               <div class="dash-time-icon">${timePulse || timeIcon}</div>
               <div>
@@ -811,7 +811,7 @@ async function renderDashboard() {
                 <div class="dash-time-value">${timeValue}</div>
               </div>
             </div>
-          </div>
+          </div>`}
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px;">
@@ -3190,7 +3190,7 @@ function filterStaffTable() {
 }
 
 async function openStaffForm(id) {
-  let staff = { name: '', station: '', password: '', permission_level: 'Benutzer', active: 1, has_calendar: 1, calendar_visibility: 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days: 30, weekly_hours: 40, work_days: '1,2,3,4,5', entry_date: '', exit_date: '', email: '', street: '', zip: '', city: '', phone_private: '', phone_business: '', emergency_name: '', emergency_phone: '', default_station_id: null, username: '', hidden_in_planning: 0, signature: '' };
+  let staff = { name: '', station: '', password: '', permission_level: 'Benutzer', active: 1, has_calendar: 1, calendar_visibility: 'Admin,Verwaltung,Buchhaltung,Benutzer', vacation_days: 30, weekly_hours: 40, work_days: '1,2,3,4,5', ignore_holidays: 0, time_tracking_active: 1, entry_date: '', exit_date: '', email: '', street: '', zip: '', city: '', phone_private: '', phone_business: '', emergency_name: '', emergency_phone: '', default_station_id: null, username: '', hidden_in_planning: 0, signature: '' };
   let perYearDays = {};
   let perYearBonus = {};
 
@@ -3319,6 +3319,20 @@ async function openStaffForm(id) {
             </div>`;
           }).join('')}
         </div>
+      </div>
+      <div class="form-group">
+        <div class="form-check">
+          <input type="checkbox" name="ignore_holidays" id="staff-ignore-holidays" ${staff.ignore_holidays ? 'checked' : ''}>
+          <label for="staff-ignore-holidays">Feiertage ignorieren</label>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 0 24px;">Wenn aktiv, werden Feiertage in der Zeiterfassung wie normale Arbeitstage behandelt (Soll-Stunden gelten, keine automatischen Überstunden an Feiertagen).</p>
+      </div>
+      <div class="form-group">
+        <div class="form-check">
+          <input type="checkbox" name="time_tracking_active" id="staff-tt-active" ${staff.time_tracking_active !== 0 ? 'checked' : ''}>
+          <label for="staff-tt-active">Zeiterfassung aktiv</label>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 0 24px;">Standardmäßig aktiv. Wenn deaktiviert, wird dieser Mitarbeiter komplett aus der Zeiterfassung entfernt (kein Stempeln, nicht in der Mitarbeiterauswahl).</p>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -3485,6 +3499,8 @@ async function saveStaff(e, id) {
       return Math.min(Math.max(n, 0), 60);
     })(),
     work_days: [1,2,3,4,5,6,7].filter(n => document.getElementById('work-day-' + n)?.checked).join(',') || '1,2,3,4,5',
+    ignore_holidays: document.getElementById('staff-ignore-holidays')?.checked ? 1 : 0,
+    time_tracking_active: document.getElementById('staff-tt-active')?.checked ? 1 : 0,
     default_station_id: form.default_station_id.value ? Number(form.default_station_id.value) : null,
     username: form.username.value.trim(),
     signature: document.getElementById('staff-sig-editor')?.innerHTML || '',
@@ -11942,10 +11958,33 @@ async function submitSuggestion() {
 
 let timeTrackingWeekOffset = 0;
 let timeTrackingSelectedStaffId = null;
-// Zeitraum-Filter im Ueberstundenkonto: leer = Standardansicht (laufender Saldo).
-// Gefuellt = Drei-Werte-Anzeige (Soll/Ist/Diff) summiert aus overtime.weeks[*].days.
 let _otRangeFrom = '';
 let _otRangeTo = '';
+
+function calcOvertimeForRange(overtime, fromStr, toStr) {
+  let targetSum = 0, actualSum = 0;
+  (overtime.weeks || []).forEach(w => {
+    Object.entries(w.days || {}).forEach(([dateStr, d]) => {
+      if (dateStr >= fromStr && dateStr <= toStr) {
+        targetSum += d.target_minutes || 0;
+        actualSum += d.actual_minutes || 0;
+      }
+    });
+  });
+  return { target: targetSum, actual: actualSum, diff: actualSum - targetSum };
+}
+
+function applyOvertimeRange() {
+  _otRangeFrom = document.getElementById('ot-range-from')?.value || '';
+  _otRangeTo = document.getElementById('ot-range-to')?.value || '';
+  renderTimeTracking();
+}
+
+function resetOvertimeRange() {
+  _otRangeFrom = '';
+  _otRangeTo = '';
+  renderTimeTracking();
+}
 
 function getWeekDates(offset = 0) {
   const now = new Date();
@@ -12002,12 +12041,12 @@ async function renderTimeTracking() {
   const effectiveStaffId = timeTrackingSelectedStaffId || (loggedInUser ? loggedInUser.id : null);
 
   try {
-    const canSeeDeductions = loggedInUser && ['Verwaltung', 'Buchhaltung', 'Admin'].includes(loggedInUser.permission_level);
+    const canSeeDeductions = isAdmin(); // Ueberstunden-Korrekturen: nur Admin (Vorgabe 2026-07-14)
     const promises = {
       status: api(`/api/time/status`),
       entries: api(`/api/time/entries?staff_id=${effectiveStaffId}&from=${fromStr}&to=${toStr}`),
       overtime: api(`/api/time/overtime?staff_id=${effectiveStaffId}`),
-      vacation: isFahrer() ? Promise.resolve([]) : api(`/api/vacation?staff_id=${effectiveStaffId}&status=Genehmigt`),
+      vacation: isFahrer() ? Promise.resolve([]) : api(`/api/vacation?staff_id=${effectiveStaffId}&status=Genehmigt`), // Bemo: Fahrer-Rolle hat keinen Zugriff auf /api/vacation
       staff: (isAdmin() || isVerwaltung() || isBuchhaltung()) ? api('/api/staff') : Promise.resolve([]),
       deductions: canSeeDeductions ? api(`/api/overtime-deductions?staff_id=${effectiveStaffId}`) : Promise.resolve([])
     };
@@ -12043,11 +12082,35 @@ async function renderTimeTracking() {
       }
     });
 
+    // Eigene Zeiterfassung deaktiviert (time_tracking_active=0) -> kein Stempeln/Wochenansicht.
+    // Verwalter koennen ueber die Auswahl trotzdem andere Mitarbeiter einsehen.
+    const viewingOwn = !timeTrackingSelectedStaffId || (loggedInUser && timeTrackingSelectedStaffId === loggedInUser.id);
+    if (viewingOwn && loggedInUser && loggedInUser.time_tracking_active === 0) {
+      let staffDropdown = '';
+      if (isAdmin() || isVerwaltung() || isBuchhaltung()) {
+        const allStaff = staffList.filter(s => s.active && !s.hidden_in_planning && s.time_tracking_active !== 0);
+        staffDropdown = `<div class="form-group" style="margin-bottom:16px;max-width:340px;">
+          <label>Mitarbeiter</label>
+          <select id="time-staff-select" onchange="changeTimeTrackingStaff(this.value)">
+            <option value="">- Mitarbeiter wählen -</option>
+            ${allStaff.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('')}
+          </select>
+        </div>`;
+      }
+      main.innerHTML = `
+        <div class="page-header"><h2>Zeiterfassung</h2>${isFahrer() ? '<button class="btn btn-secondary btn-sm" onclick="openChangePasswordModal()">&#9881; Passwort ändern</button>' : ''}</div>
+        ${staffDropdown}
+        <div class="card" style="text-align:center;padding:40px;">
+          <p style="font-size:16px;color:var(--text-muted);margin:0;">Die Zeiterfassung ist für dieses Konto deaktiviert.</p>
+        </div>`;
+      return;
+    }
+
     // No entry_date → show hint instead of time tracking
     if (overtime.no_entry_date) {
       let staffDropdown = '';
       if (isAdmin() || isVerwaltung() || isBuchhaltung()) {
-        const allStaff = staffList.filter(s => s.active);
+        const allStaff = staffList.filter(s => s.active && !s.hidden_in_planning && s.time_tracking_active !== 0);
         staffDropdown = `<div class="form-group" style="margin-bottom:16px;">
           <label>Mitarbeiter</label>
           <select id="time-staff-select" onchange="changeTimeTrackingStaff(this.value)">
@@ -12056,7 +12119,7 @@ async function renderTimeTracking() {
         </div>`;
       }
       main.innerHTML = `
-        <div class="page-header"><h2>Zeiterfassung</h2></div>
+        <div class="page-header"><h2>Zeiterfassung</h2>${isFahrer() ? '<button class="btn btn-secondary btn-sm" onclick="openChangePasswordModal()">&#9881; Passwort ändern</button>' : ''}</div>
         ${staffDropdown}
         <div class="card" style="text-align:center;padding:40px;">
           <p style="font-size:16px;color:var(--text-muted);margin:0;">Kein Eintrittsdatum hinterlegt.</p>
@@ -12068,7 +12131,7 @@ async function renderTimeTracking() {
     const dayNames = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 
     // Build week table rows using per-day data from overtime response
-    const weeklyHours = overtime.weekly_hours || 40;
+    const weeklyHours = overtime.weekly_hours != null ? overtime.weekly_hours : 40; // 0 = kein Soll (Minijobber)
     const workDaysArr = (overtime.work_days || '1,2,3,4,5').split(',').map(Number);
 
     // Find the matching week in overtime.weeks (by week_start = Monday of current view)
@@ -12088,7 +12151,7 @@ async function renderTimeTracking() {
       weekTargetMinutes += dayTargetMinutes;
 
       const absence = absenceMap[dateStr] || null;
-      const holidayName = holidays.get(dateStr) || null;
+      const holidayName = overtime.ignore_holidays ? null : (holidays.get(dateStr) || null);
       let absenceType = null;
       if (absence) {
         if (absence.type === 'Urlaub' && absence.half_day) absenceType = 'Halber Urlaubstag';
@@ -12103,6 +12166,7 @@ async function renderTimeTracking() {
       else if (absenceType === 'Urlaub') rowBg = 'background:rgba(30,64,175,0.15);';
       else if (absenceType === 'Halber Urlaubstag') rowBg = 'background:rgba(96,165,250,0.15);';
       else if (absenceType === 'Feiertag') rowBg = 'background:rgba(234,179,8,0.15);';
+      else if (absenceType === 'Sonstige Abwesenheit') rowBg = 'background:rgba(107,114,128,0.13);';
 
       let firstStart = '', lastEnd = '', dayWorkMinutes = 0, pauseMinutes = 0;
       if (dayEntries.length > 0) {
@@ -12110,12 +12174,28 @@ async function renderTimeTracking() {
         const completedEntries = dayEntries.filter(e => e.end_time);
         const lastEndRaw = completedEntries.length > 0 ? completedEntries[completedEntries.length - 1].end_time : '';
         lastEnd = lastEndRaw ? lastEndRaw.slice(0, 5) : '';
+        // Tag mit expliziter Pause: break_minutes am Arbeitsblock ist Phantom-Pause -> ignorieren.
+        const dayHasPause = dayEntries.some((pe, k) => {
+          if (pe.notes === '__pausenblock__') return true;
+          if (pe.notes === '__pause__' && pe.end_time) { const nx = dayEntries[k + 1]; if (nx) return calcWorkMinutes(pe.end_time, nx.start_time, 0) <= 0; }
+          return false;
+        });
         dayEntries.forEach((e, j) => {
           const hasEnd = e.end_time && e.end_time.length >= 5;
-          if (hasEnd) dayWorkMinutes += calcWorkMinutes(e.start_time, e.end_time, e.break_minutes || 0);
-          if (e.notes === '__pause__' && hasEnd && j < dayEntries.length - 1) {
-            const gap = calcWorkMinutes(e.end_time, dayEntries[j + 1].start_time, 0);
-            if (gap > 0) pauseMinutes += gap;
+          if (!hasEnd) return;
+          const minutes = calcWorkMinutes(e.start_time, e.end_time, dayHasPause ? 0 : (e.break_minutes || 0));
+          const isPauseMarker = e.notes === '__pause__';
+          const isPauseBlock = e.notes === '__pausenblock__';
+          const next = dayEntries[j + 1];
+          const gapMins = next ? calcWorkMinutes(e.end_time, next.start_time, 0) : 0;
+          // Dedizierter Pausenblock: expliziter Marker ODER (Alt-Daten) buendiger __pause__.
+          if (isPauseBlock || (isPauseMarker && next && gapMins <= 0)) {
+            pauseMinutes += minutes;
+          } else {
+            // Arbeitsblock (auch gestempelter __pause__-Block: Spanne = Arbeit).
+            dayWorkMinutes += minutes;
+            // Gestempelte Pause: Luecke bis zum naechsten Eintrag ist die Pause.
+            if (isPauseMarker && next && gapMins > 0) pauseMinutes += gapMins;
           }
         });
       }
@@ -12219,7 +12299,7 @@ async function renderTimeTracking() {
         <div class="form-group" style="margin-bottom:16px;">
           <label>Mitarbeiter</label>
           <select id="time-staff-select" onchange="changeTimeTrackingStaff(this.value)">
-            ${staffList.filter(s => s.active).map(s => `<option value="${s.id}" ${s.id === effectiveStaffId ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}
+            ${staffList.filter(s => s.active && !s.hidden_in_planning && s.time_tracking_active !== 0).map(s => `<option value="${s.id}" ${s.id === effectiveStaffId ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}
           </select>
         </div>`;
     }
@@ -12227,23 +12307,6 @@ async function renderTimeTracking() {
     // Overtime display
     const totalOT = overtime.total_overtime_minutes || 0;
     const otColor = totalOT >= 0 ? 'var(--success)' : 'var(--danger)';
-
-    // Optional: Auswertung fuer einen ausgewaehlten Zeitraum (Anzeigen-Button hat _otRangeFrom/_otRangeTo gesetzt).
-    // Summiert pro Tag target_minutes und actual_minutes aus den bereits geladenen overtime.weeks-Daten.
-    let otRangeStats = null;
-    if (_otRangeFrom && _otRangeTo) {
-      let soll = 0;
-      let ist = 0;
-      (overtime.weeks || []).forEach(w => {
-        Object.entries(w.days || {}).forEach(([dateStr, d]) => {
-          if (dateStr >= _otRangeFrom && dateStr <= _otRangeTo) {
-            soll += d.target_minutes || 0;
-            ist += d.actual_minutes || 0;
-          }
-        });
-      });
-      otRangeStats = { soll, ist, diff: ist - soll };
-    }
 
     const isMobile = isMobileView();
 
@@ -12331,6 +12394,7 @@ async function renderTimeTracking() {
     main.innerHTML = `
       <div class="page-header">
         <h2>Zeiterfassung</h2>
+        ${isFahrer() ? '<button class="btn btn-secondary btn-sm" onclick="openChangePasswordModal()">&#9881; Passwort ändern</button>' : ''}
       </div>
 
       ${stampHtml}
@@ -12346,47 +12410,49 @@ async function renderTimeTracking() {
         </div>
       `}
 
+      ${isAdmin() ? `
       <div class="card" style="margin-top:16px;">
         <div class="card-header">
           <h3>Überstundenkonto</h3>
         </div>
-        <div style="padding:14px 16px 22px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;border-bottom:1px solid var(--border);">
+        <div style="padding:14px 16px 18px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;border-bottom:1px solid var(--border);">
           <div class="form-group" style="margin:0;">
-            <label style="font-size:12px;">Von</label>
-            <input type="date" id="ot-range-from" value="${_otRangeFrom}" style="padding:5px 8px;">
+            <label style="font-size:11px;">Von</label>
+            <input type="date" id="ot-range-from" value="${_otRangeFrom}" style="padding:4px 6px;" onchange="_otRangeFrom = this.value">
           </div>
           <div class="form-group" style="margin:0;">
-            <label style="font-size:12px;">Bis</label>
-            <input type="date" id="ot-range-to" value="${_otRangeTo}" style="padding:5px 8px;">
+            <label style="font-size:11px;">Bis</label>
+            <input type="date" id="ot-range-to" value="${_otRangeTo}" style="padding:4px 6px;" onchange="_otRangeTo = this.value">
           </div>
           <button class="btn btn-primary btn-sm" onclick="applyOvertimeRange()">Anzeigen</button>
           <button class="btn btn-secondary btn-sm" onclick="resetOvertimeRange()">Zurücksetzen</button>
         </div>
-        ${otRangeStats ? `
-        <div style="padding:20px 16px 16px;">
-          <div style="display:flex;gap:${isMobile ? '14' : '32'}px;justify-content:center;flex-wrap:wrap;text-align:center;">
-            <div>
-              <div style="font-size:${isMobile ? '20' : '24'}px;font-weight:700;color:var(--text-muted);">${formatDuration(otRangeStats.soll)}</div>
-              <div style="color:var(--text-muted);font-size:13px;margin-top:2px;">Arbeitsstunden Soll</div>
-            </div>
-            <div>
-              <div style="font-size:${isMobile ? '20' : '24'}px;font-weight:700;">${formatDuration(otRangeStats.ist)}</div>
-              <div style="color:var(--text-muted);font-size:13px;margin-top:2px;">Geleistete Arbeitsstunden</div>
-            </div>
-            <div>
-              <div style="font-size:${isMobile ? '20' : '24'}px;font-weight:700;color:${otRangeStats.diff >= 0 ? 'var(--success)' : 'var(--danger)'};">${(otRangeStats.diff >= 0 ? '+' : '') + formatDuration(otRangeStats.diff)}</div>
-              <div style="color:var(--text-muted);font-size:13px;margin-top:2px;">Überstunden</div>
-            </div>
-          </div>
-          <div style="text-align:center;color:var(--text-muted);font-size:12px;margin-top:10px;">Zeitraum: ${formatDate(_otRangeFrom)} – ${formatDate(_otRangeTo)}</div>
-        </div>
-        ` : `
-        <div style="text-align:center;padding:20px 12px 16px;">
-          <div style="font-size:${isMobile ? '26' : '32'}px;font-weight:700;color:${otColor};">${(totalOT >= 0 ? '+' : '') + formatDuration(totalOT)}</div>
-          <div style="color:var(--text-muted);margin-top:4px;">Laufender Saldo</div>
-        </div>
-        `}
-      </div>
+        ${(() => {
+          const rangeActive = _otRangeFrom && _otRangeTo;
+          if (rangeActive) {
+            const r = calcOvertimeForRange(overtime, _otRangeFrom, _otRangeTo);
+            const diffColor = r.diff >= 0 ? 'var(--success)' : 'var(--danger)';
+            return `<div style="display:flex;justify-content:space-around;flex-wrap:wrap;gap:14px;padding:20px 14px 14px;">
+              <div style="text-align:center;min-width:110px;">
+                <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Soll</div>
+                <div style="font-size:${isMobile ? '20' : '24'}px;font-weight:700;">${formatDuration(r.target)}</div>
+              </div>
+              <div style="text-align:center;min-width:110px;">
+                <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Geleistet</div>
+                <div style="font-size:${isMobile ? '20' : '24'}px;font-weight:700;">${formatDuration(r.actual)}</div>
+              </div>
+              <div style="text-align:center;min-width:110px;">
+                <div style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Überstunden</div>
+                <div style="font-size:${isMobile ? '20' : '24'}px;font-weight:700;color:${diffColor};">${(r.diff >= 0 ? '+' : '') + formatDuration(r.diff)}</div>
+              </div>
+            </div>`;
+          }
+          return `<div style="text-align:center;padding:20px 12px 14px;">
+            <div style="font-size:${isMobile ? '26' : '32'}px;font-weight:700;color:${otColor};">${(totalOT >= 0 ? '+' : '') + formatDuration(totalOT)}</div>
+            <div style="color:var(--text-muted);margin-top:4px;">Laufender Saldo</div>
+          </div>`;
+        })()}
+      </div>` : ''}
 
       ${!isMobile && canSeeDeductions ? `
       <div class="card" style="margin-top:16px;">
@@ -12451,8 +12517,8 @@ function openOvertimeDeductionForm(staffId, editId, editDate, editMinutes, editR
         <input type="date" id="ot-ded-date" value="${editDate || today}" required>
       </div>
       <div class="form-group">
-        <label>Stunden * <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(positiv = Gutschrift, negativ = Abzug)</span></label>
-        <input type="number" id="ot-ded-hours" step="0.5" value="${editMinutes ? (editMinutes / 60).toFixed(1) : ''}" required placeholder="z.B. -8 oder +4">
+        <label>Stunden * <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(positiv = Gutschrift, negativ = Abzug — wird direkt aufs Überstundenkonto addiert)</span></label>
+        <input type="number" id="ot-ded-hours" step="0.5" value="${editMinutes ? (editMinutes / 60).toFixed(1) : ''}" required placeholder="z.B. 8 oder -4">
       </div>
       <div class="form-group">
         <label>Begründung</label>
@@ -12477,10 +12543,10 @@ async function saveOvertimeDeduction(e, staffId, editId) {
   try {
     if (editId) {
       await api(`/api/overtime-deductions/${editId}`, { method: 'PUT', body: { deduction_date: date, minutes, reason } });
-      showToast('Korrektur aktualisiert');
+      showToast('Abzug aktualisiert');
     } else {
       await api('/api/overtime-deductions', { method: 'POST', body: { staff_id: staffId, deduction_date: date, minutes, reason } });
-      showToast('Korrektur hinzugefügt');
+      showToast('Abzug hinzugefügt');
     }
     closeModal();
     renderTimeTracking();
@@ -12495,11 +12561,10 @@ function editOvertimeDeduction(id, date, minutes, reason) {
 }
 
 async function deleteOvertimeDeduction(id) {
-  const ok = await showConfirm('Korrektur löschen?', 'Soll diese Überstunden-Korrektur wirklich gelöscht werden?', { danger: true, yesLabel: 'Ja, löschen' });
-  if (!ok) return;
+  if (!confirm('Abzug wirklich löschen?')) return;
   try {
     await api(`/api/overtime-deductions/${id}`, { method: 'DELETE' });
-    showToast('Korrektur gelöscht');
+    showToast('Abzug gelöscht');
     renderTimeTracking();
   } catch (err) {
     showToast('Fehler: ' + err.message, 'error');
@@ -12538,32 +12603,11 @@ function startStampElapsedTimer(startTime) {
 async function silentRefreshTimeTracking() {
   if (currentPage !== 'time-tracking') return;
   if (document.getElementById('modal-overlay')?.classList.contains('active')) return;
-  // Auto-Refresh aussetzen wenn der User gerade dabei ist, einen Zeitraum im Ueberstundenkonto einzugeben.
-  // Sonst plaettet der 10-Sekunden-Refresh die noch nicht angewendete Eingabe (Von-/Bis-Felder werden geleert).
-  const fromEl = document.getElementById('ot-range-from');
-  const toEl = document.getElementById('ot-range-to');
-  if (document.activeElement === fromEl || document.activeElement === toEl) return;
-  if (fromEl && fromEl.value && fromEl.value !== _otRangeFrom) return;
-  if (toEl && toEl.value && toEl.value !== _otRangeTo) return;
+  // Refresh skippen, wenn gerade ein Eingabefeld den Fokus hat — sonst geht
+  // die Tipp-Eingabe beim Re-Render verloren.
+  const active = document.activeElement;
+  if (active && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName)) return;
   try { await renderTimeTracking(); } catch(e) {}
-}
-
-// Wendet den Zeitraum-Filter im Ueberstundenkonto an. Validiert grob und triggert
-// renderTimeTracking — die Range-Auswertung selbst passiert dort aus _otRangeFrom/_otRangeTo.
-function applyOvertimeRange() {
-  const from = document.getElementById('ot-range-from')?.value || '';
-  const to = document.getElementById('ot-range-to')?.value || '';
-  if (!from || !to) { showToast('Bitte Von und Bis auswählen', 'error'); return; }
-  if (from > to) { showToast('„Von" muss vor „Bis" liegen', 'error'); return; }
-  _otRangeFrom = from;
-  _otRangeTo = to;
-  renderTimeTracking();
-}
-
-function resetOvertimeRange() {
-  _otRangeFrom = '';
-  _otRangeTo = '';
-  renderTimeTracking();
 }
 
 async function doStamp() {
@@ -12598,24 +12642,46 @@ async function openDayDetailModal(staffId, dateStr) {
     const dayName = d.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
     const canEdit = isAdmin() || isVerwaltung() || isBuchhaltung();
 
-    // Build display rows: work entries from DB + pause rows from gaps
+    // Build display rows: Pause-Eintraege werden als Pause angezeigt, Arbeit als Arbeit
     const displayRows = [];
     let totalWorkMinutes = 0;
     let totalPauseMinutes = 0;
 
+    // __pause__ hat ZWEI Bedeutungen (gleicher Marker, unterschiedliche Quelle):
+    //  - Stempelung: der __pause__-Eintrag ist der beendete ARBEITS-block, die Pause
+    //    ist die LUECKE bis zum naechsten Eintrag (Modell "Stempel").
+    //  - Manuell/Auto-Split: der __pause__-Eintrag liegt BUENDIG zwischen zwei
+    //    Eintraegen und seine eigene Spanne IST die Pause (Modell "manuell").
+    // Unterscheidung am einzigen verlaesslichen Merkmal: gibt es nach dem Eintrag
+    // eine Luecke (Stempel) oder ist er buendig (manuell)?
+    // Tag mit expliziter Pause: break_minutes am Arbeitsblock ist Phantom-Pause -> ignorieren.
+    const dayHasPause = entries.some((pe, k) => {
+      if (pe.notes === '__pausenblock__') return true;
+      if (pe.notes === '__pause__' && pe.end_time) { const nx = entries[k + 1]; if (nx) return calcWorkMinutes(pe.end_time, nx.start_time, 0) <= 0; }
+      return false;
+    });
     entries.forEach((e, i) => {
       const hasEnd = e.end_time && e.end_time.length >= 5;
-      const mins = hasEnd ? calcWorkMinutes(e.start_time, e.end_time, e.break_minutes || 0) : 0;
-      totalWorkMinutes += mins;
-      displayRows.push({ type: 'work', start: e.start_time, end: e.end_time, mins, notes: e.notes === '__pause__' ? '' : (e.notes || ''), id: e.id });
+      const mins = hasEnd ? calcWorkMinutes(e.start_time, e.end_time, dayHasPause ? 0 : (e.break_minutes || 0)) : 0;
+      const isPauseMarker = e.notes === '__pause__';
+      const isPauseBlock = e.notes === '__pausenblock__';
+      const next = entries[i + 1];
+      const gapMins = (hasEnd && next) ? calcWorkMinutes(e.end_time, next.start_time, 0) : 0;
+      // Dedizierter Pausenblock: expliziter Marker ODER (Alt-Daten) buendiger __pause__.
+      const isDedicatedPause = isPauseBlock || (isPauseMarker && next && gapMins <= 0);
 
-      // If entry ended with pause and there's a next entry, insert pause gap row
-      if (e.notes === '__pause__' && e.end_time && i < entries.length - 1) {
-        const nextStart = entries[i + 1].start_time;
-        const pauseMins = calcWorkMinutes(e.end_time, nextStart, 0);
-        if (pauseMins > 0) {
-          totalPauseMinutes += pauseMins;
-          displayRows.push({ type: 'pause', start: e.end_time, end: nextStart, mins: pauseMins, notes: '', id: e.id });
+      if (isDedicatedPause) {
+        // Manueller Pausenblock: eigene Spanne = Pause, als echter Eintrag editierbar
+        totalPauseMinutes += mins;
+        displayRows.push({ type: 'pause', start: e.start_time, end: e.end_time, mins, notes: '', id: e.id, editable: true });
+      } else {
+        // Arbeitsblock (auch ein gestempelter __pause__-Block: Spanne = Arbeit)
+        totalWorkMinutes += mins;
+        displayRows.push({ type: 'work', start: e.start_time, end: e.end_time, mins, notes: (isPauseMarker || isPauseBlock) ? '' : (e.notes || ''), id: e.id, editable: true });
+        // Gestempelte Pause: Luecke bis zum naechsten Eintrag als (nicht editierbare) Pause-Zeile
+        if (isPauseMarker && hasEnd && next && gapMins > 0) {
+          totalPauseMinutes += gapMins;
+          displayRows.push({ type: 'pause', start: e.end_time, end: next.start_time, mins: gapMins, notes: '', id: null, editable: false });
         }
       }
     });
@@ -12640,7 +12706,7 @@ async function openDayDetailModal(staffId, dateStr) {
               <span style="font-size:13px;font-weight:600;color:${isPause ? 'var(--warning, #e67e22)' : 'var(--success)'};">${isPause ? 'Pause' : 'Arbeit'} · ${r.mins > 0 ? formatDuration(r.mins) : '—'}</span>
             </div>
             ${r.notes ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${escapeHtml(r.notes)}</div>` : ''}
-            ${canEdit && !isPause ? `<div style="display:flex;gap:8px;margin-top:8px;">
+            ${canEdit && r.editable ? `<div style="display:flex;gap:8px;margin-top:8px;">
               <button class="btn btn-sm btn-secondary" onclick="editTimeEntry(${r.id}, ${staffId}, '${dateStr}')" style="flex:1;">Bearbeiten</button>
               <button class="btn btn-sm btn-danger" onclick="deleteTimeEntry(${r.id}, ${staffId}, '${dateStr}')" style="flex:1;">Löschen</button>
             </div>` : ''}
@@ -12663,8 +12729,8 @@ async function openDayDetailModal(staffId, dateStr) {
             <td>${r.mins > 0 ? formatDuration(r.mins) : '—'}</td>
             <td>${escapeHtml(r.notes)}</td>
             ${canEdit ? `<td>
-              <button class="btn btn-sm btn-secondary" onclick="editTimeEntry(${r.id}, ${staffId}, '${dateStr}')">Bearbeiten</button>
-              ${canEdit ? `<button class="btn btn-sm btn-danger" onclick="deleteTimeEntry(${r.id}, ${staffId}, '${dateStr}')">Löschen</button>` : ''}
+              ${r.editable ? `<button class="btn btn-sm btn-secondary" onclick="editTimeEntry(${r.id}, ${staffId}, '${dateStr}')">Bearbeiten</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteTimeEntry(${r.id}, ${staffId}, '${dateStr}')">Löschen</button>` : '<span style="color:var(--text-muted);">–</span>'}
             </td>` : ''}
           </tr>`;
         });
@@ -12675,8 +12741,9 @@ async function openDayDetailModal(staffId, dateStr) {
     }
 
     if (canEdit) {
-      html += `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;display:flex;gap:8px;${isMobile ? 'flex-direction:column;' : ''}">
+      html += `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;display:flex;gap:8px;flex-wrap:wrap;${isMobile ? 'flex-direction:column;' : ''}">
         <button class="btn btn-primary btn-sm" onclick="addManualTimeEntry(${staffId}, '${dateStr}')" ${isMobile ? 'style="width:100%;"' : ''}>+ Manuell hinzufügen</button>
+        <button class="btn btn-sm" onclick="addManualTimeEntry(${staffId}, '${dateStr}', {type:'pause', start:'13:00', end:'13:30'})" style="background:var(--warning,#e67e22);border-color:var(--warning,#e67e22);color:#fff;${isMobile ? 'width:100%;' : ''}">Pause hinzufügen</button>
         <button class="btn btn-success btn-sm" onclick="createStandardDay(${staffId}, '${dateStr}')" style="font-weight:700;${isMobile ? 'width:100%;' : ''}">Standardtag (8–17 Uhr)</button>
       </div>`;
     }
@@ -12690,14 +12757,24 @@ async function openDayDetailModal(staffId, dateStr) {
 async function editTimeEntry(entryId, staffId, dateStr) {
   try {
     const entries = await api(`/api/time/entries?staff_id=${staffId}&from=${dateStr}&to=${dateStr}`);
-    const entry = entries.find(e => e.id === entryId);
+    const idx = entries.findIndex(e => e.id === entryId);
+    const entry = idx >= 0 ? entries[idx] : null;
     if (!entry) return showToast('Eintrag nicht gefunden', 'error');
 
-    const isPause = entry.notes === '__pause__';
+    // Art bestimmen wie in der Anzeige: expliziter Pausenblock ODER (Alt-Daten)
+    // buendiger __pause__ -> Pause; gestempelter __pause__ mit Luecke danach -> Arbeit.
+    const next = entries[idx + 1];
+    const gapMins = (entry.end_time && next) ? calcWorkMinutes(entry.end_time, next.start_time, 0) : 0;
+    const isPause = entry.notes === '__pausenblock__' || (entry.notes === '__pause__' && next && gapMins <= 0);
+    // Gestempelter Arbeitsblock mit Pause-Marker: Marker beim Speichern erhalten,
+    // damit die zugehoerige Luecken-Pause nicht verloren geht.
+    const isStampedWork = entry.notes === '__pause__' && !isPause;
+    const isMarker = entry.notes === '__pause__' || entry.notes === '__pausenblock__';
     const startHHMM = (entry.start_time || '').slice(0, 5);
     const endHHMM = (entry.end_time || '').slice(0, 5);
     const html = `
       <form onsubmit="saveTimeEntry(event, ${entryId}, ${staffId}, '${dateStr}')">
+        <input type="hidden" name="was_stamped_work" value="${isStampedWork ? '1' : '0'}">
         <div class="form-row">
           <div class="form-group">
             <label>Datum</label>
@@ -12723,7 +12800,7 @@ async function editTimeEntry(entryId, staffId, dateStr) {
         </div>
         <div class="form-group">
           <label>Notizen</label>
-          <textarea name="notes" rows="2">${escapeHtml(isPause ? '' : (entry.notes || ''))}</textarea>
+          <textarea name="notes" rows="2">${escapeHtml(isMarker ? '' : (entry.notes || ''))}</textarea>
         </div>
         <div class="form-actions">
           <button type="submit" class="btn btn-primary">Speichern</button>
@@ -12743,6 +12820,10 @@ async function saveTimeEntry(e, entryId, staffId, dateStr) {
     const isPauseType = form.entry_type.value === 'pause';
     const startVal = form.start_time.value;
     const endVal = form.end_time.value;
+    const typed = form.notes.value.trim();
+    const wasStampedWork = form.was_stamped_work && form.was_stamped_work.value === '1';
+    // Pause -> eigener Marker; gestempelter Arbeitsblock ohne neue Notiz -> Marker erhalten.
+    const notesOut = isPauseType ? '__pausenblock__' : ((wasStampedWork && !typed) ? '__pause__' : typed);
     await api(`/api/time/entries/${entryId}`, {
       method: 'PUT',
       body: {
@@ -12750,7 +12831,7 @@ async function saveTimeEntry(e, entryId, staffId, dateStr) {
         start_time: startVal && startVal.length === 5 ? startVal + ':00' : startVal,
         end_time: endVal ? (endVal.length === 5 ? endVal + ':00' : endVal) : '',
         break_minutes: 0,
-        notes: isPauseType ? '__pause__' : form.notes.value.trim()
+        notes: notesOut
       }
     });
     showToast('Eintrag aktualisiert');
@@ -12760,7 +12841,11 @@ async function saveTimeEntry(e, entryId, staffId, dateStr) {
   }
 }
 
-function addManualTimeEntry(staffId, dateStr) {
+function addManualTimeEntry(staffId, dateStr, prefill) {
+  // prefill (optional): { type:'pause'|'work', start:'HH:MM', end:'HH:MM' } - z.B. fuer den
+  // "Pause hinzufuegen"-Button, der Art=Pause + 13:00-13:30 vorbelegt (nur noch Anlegen klicken).
+  const pf = prefill || {};
+  const isPause = pf.type === 'pause';
   const html = `
     <form onsubmit="createManualTimeEntry(event, ${staffId}, '${dateStr}')">
       <div class="form-row">
@@ -12771,19 +12856,19 @@ function addManualTimeEntry(staffId, dateStr) {
         <div class="form-group">
           <label>Art</label>
           <select name="entry_type" required>
-            <option value="work">Arbeitszeit</option>
-            <option value="pause">Pause</option>
+            <option value="work"${isPause ? '' : ' selected'}>Arbeitszeit</option>
+            <option value="pause"${isPause ? ' selected' : ''}>Pause</option>
           </select>
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label>Start</label>
-          <input type="time" name="start_time" required>
+          <input type="time" name="start_time" value="${pf.start || ''}" required>
         </div>
         <div class="form-group">
           <label>Ende</label>
-          <input type="time" name="end_time">
+          <input type="time" name="end_time" value="${pf.end || ''}">
         </div>
       </div>
       <div class="form-group">
@@ -12795,7 +12880,7 @@ function addManualTimeEntry(staffId, dateStr) {
         <button type="button" class="btn btn-secondary" onclick="openDayDetailModal(${staffId}, '${dateStr}')">Zurück</button>
       </div>
     </form>`;
-  openModal('Manueller Zeiteintrag', html);
+  openModal(isPause ? 'Pause hinzufügen' : 'Manueller Zeiteintrag', html);
 }
 
 async function createManualTimeEntry(e, staffId, dateStr) {
@@ -12813,7 +12898,7 @@ async function createManualTimeEntry(e, staffId, dateStr) {
         start_time: startVal && startVal.length === 5 ? startVal + ':00' : startVal,
         end_time: endVal ? (endVal.length === 5 ? endVal + ':00' : endVal) : '',
         break_minutes: 0,
-        notes: isPause ? '__pause__' : form.notes.value.trim()
+        notes: isPause ? '__pausenblock__' : form.notes.value.trim()
       }
     });
     showToast('Eintrag erstellt');
