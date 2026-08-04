@@ -798,6 +798,13 @@ app.put('/api/staff/:id/vacation-days', (req, res) => {
   const staffId = Number(req.params.id);
   const { yearDays } = req.body; // Array of {year, days}
   if (!Array.isArray(yearDays)) return res.status(400).json({ error: 'yearDays muss ein Array sein' });
+  // Halbe Urlaubstage sind erlaubt, aber nur in 0,5-Schritten (z.B. 30 oder 30,5).
+  for (const { year, days } of yearDays) {
+    const n = Number(days);
+    if (!isFinite(n) || n < 0 || n > 365 || Math.round(n * 2) !== n * 2) {
+      return res.status(400).json({ error: `Urlaubstage ${year}: nur ganze oder halbe Tage zwischen 0 und 365 erlaubt` });
+    }
+  }
   yearDays.forEach(({ year, days }) => {
     const existing = queryOne('SELECT id FROM staff_vacation_days WHERE staff_id = ? AND year = ?', [staffId, year]);
     if (existing) {

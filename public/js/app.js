@@ -3222,8 +3222,8 @@ async function openStaffForm(id) {
     yearInputsHtml += `
       <div style="display:flex;align-items:center;gap:6px;">
         <label style="min-width:42px;font-size:13px;margin:0;">${y}</label>
-        <input type="number" name="vac_${y}" value="${val}" min="0" max="365" style="width:70px;padding:4px 6px;">
-        ${bonus > 0 ? `<span style="font-size:11px;color:var(--success);white-space:nowrap;">+${bonus} WB</span>` : ''}
+        <input type="text" inputmode="decimal" name="vac_${y}" value="${String(val).replace('.', ',')}" title="Halbe Tage möglich, z. B. 30,5" style="width:70px;padding:4px 6px;">
+        ${bonus > 0 ? `<span style="font-size:11px;color:var(--success);white-space:nowrap;">+${String(bonus).replace('.', ',')} WB</span>` : ''}
       </div>`;
   }
 
@@ -3459,15 +3459,27 @@ async function saveStaff(e, id) {
   const yearFrom = currentYear - 5;
   const yearTo = currentYear + 2;
 
-  // Collect per-year vacation days
+  // Collect per-year vacation days. Halbe Urlaubstage sind erlaubt (z.B. 30,5) —
+  // aber ausschliesslich in 0,5-Schritten. Alles andere (30,3) wird abgelehnt.
+  // Komma wird als Dezimaltrenner akzeptiert (DE-Tastatur).
   const yearDays = [];
   for (let y = yearFrom; y <= yearTo; y++) {
     const input = form.querySelector(`[name="vac_${y}"]`);
-    if (input) {
-      const raw = String(input.value).trim().replace(',', '.');
-      const n = parseInt(raw, 10);
-      yearDays.push({ year: y, days: (raw === '' || isNaN(n)) ? 30 : Math.max(n, 0) });
+    if (!input) continue;
+    const raw = String(input.value).trim().replace(',', '.');
+    if (raw === '') { yearDays.push({ year: y, days: 30 }); continue; }
+    const n = parseFloat(raw);
+    if (isNaN(n) || n < 0 || n > 365) {
+      showToast(`Urlaubstage ${y}: Bitte einen Wert zwischen 0 und 365 eingeben`, 'error');
+      input.focus();
+      return;
     }
+    if (Math.round(n * 2) !== n * 2) {
+      showToast(`Urlaubstage ${y}: nur ganze oder halbe Tage möglich (z. B. 30 oder 30,5)`, 'error');
+      input.focus();
+      return;
+    }
+    yearDays.push({ year: y, days: n });
   }
 
   const data = {
@@ -3479,7 +3491,7 @@ async function saveStaff(e, id) {
     has_calendar: document.getElementById('staff-has-calendar').checked ? 1 : 0,
     hidden_in_planning: document.getElementById('staff-hidden-in-planning')?.checked ? 1 : 0,
     calendar_visibility: ['Admin','Verwaltung','Buchhaltung','Benutzer'].filter(g => document.getElementById('cal-vis-' + g)?.checked).join(','),
-    vacation_days: yearDays.length > 0 ? yearDays.find(yd => yd.year === currentYear)?.days || 30 : 30,
+    vacation_days: yearDays.find(yd => yd.year === currentYear)?.days ?? 30,
     entry_date: form.entry_date.value,
     exit_date: form.exit_date.value,
     email: form.email.value.trim(),
@@ -3765,7 +3777,8 @@ async function renderVacation() {
           else if (e.entry_type === 'Weiterbildung') weiterbildungDays += wd;
         });
         const remaining = totalDays - urlaubDays;
-        const anspruchLabel = bonusDays > 0 ? `${baseDays} + ${bonusDays} Weiterbildung = ${totalDays}` : `${totalDays}`;
+        const deZahl = n => String(n).replace('.', ',');
+        const anspruchLabel = bonusDays > 0 ? `${deZahl(baseDays)} + ${deZahl(bonusDays)} Weiterbildung = ${deZahl(totalDays)}` : `${deZahl(totalDays)}`;
 
         statsHtml = `
           <div style="margin-bottom:14px;font-size:14px;line-height:1.8;color:var(--text-primary);">
