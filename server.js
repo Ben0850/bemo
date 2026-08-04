@@ -56,13 +56,21 @@ app.use(express.static(path.join(__dirname, 'public'), {
   }
 }));
 
-// Globale Sperre: "Benutzer"-Rolle darf NICHTS loeschen.
+// Ausnahmen von den globalen DELETE-Sperren: diese Pfade darf JEDE Benutzergruppe
+// loeschen (1:1 wie B&P). Wirkt auf beide Guards unten — sonst wuerde der Admin-only-
+// Guard Verwaltung/Buchhaltung trotz erlaubter Rolle abweisen.
+function _deleteOpenToAll(p) {
+  // Beteiligte aus einer Akte entfernen — für jede Benutzergruppe erlaubt
+  return /^\/api\/akten\/\d+\/beteiligte\/\d+$/.test(p);
+}
+
+// Globale Sperre: "Benutzer"-Rolle darf NICHTS loeschen (ausser _deleteOpenToAll).
 // Greift fuer alle DELETE-API-Endpoints (sowie POST/PUT auf invoice-payment-reversal etc.
 // werden nicht erfasst — bei Bedarf separat haerten).
 app.use((req, res, next) => {
   if (req.method === 'DELETE' && req.path.startsWith('/api/')) {
     const permission = req.headers['x-user-permission'];
-    if (permission === 'Benutzer') {
+    if (permission === 'Benutzer' && !_deleteOpenToAll(req.path)) {
       return res.status(403).json({ error: 'Benutzer dürfen keine Datensätze löschen' });
     }
   }
@@ -84,6 +92,7 @@ app.use((req, res, next) => {
   if (req.method === 'DELETE') {
     const permission = req.headers['x-user-permission'];
     if (permission !== 'Admin'
+        && !_deleteOpenToAll(req.path)
         && !req.path.startsWith('/api/calendar/')
         && !req.path.startsWith('/api/time/')
         && !req.path.startsWith('/api/files/')
@@ -2764,6 +2773,25 @@ app.put('/api/credit-notes/:id', (req, res) => {
   res.json({ message: 'Gutschrift aktualisiert' });
 });
 
+// Prüf-Status einer Gutschrift (klickbares Badge 'Prüfen'/'Erledigt' in der GS-Liste).
+// AUSSCHLIESSLICH die Gruppe Buchhaltung darf ihn setzen - dafür aber jederzeit,
+// auch bei finalisierten Gutschriften (bewusst KEINE Final-Sperre wie im PUT). 1:1 wie B&P.
+app.patch('/api/credit-notes/:id/pruef-status', (req, res) => {
+  if (req.headers['x-user-permission'] !== 'Buchhaltung') {
+    return res.status(403).json({ error: 'Nur die Buchhaltung darf den Prüf-Status ändern' });
+  }
+  const value = String((req.body || {}).pruef_status || '');
+  if (!['Prüfen', 'Erledigt'].includes(value)) {
+    return res.status(400).json({ error: 'Ungültiger Prüf-Status' });
+  }
+  ensureColumn('credit_notes', 'pruef_status', "TEXT DEFAULT 'Prüfen'");
+  const cn = queryOne('SELECT credit_number FROM credit_notes WHERE id = ?', [Number(req.params.id)]);
+  if (!cn) return res.status(404).json({ error: 'Gutschrift nicht gefunden' });
+  execute('UPDATE credit_notes SET pruef_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [value, Number(req.params.id)]);
+  logActivity(req, 'update', 'credit_note', Number(req.params.id), 'Gutschrift ' + (cn.credit_number || req.params.id), 'Prüf-Status: ' + value);
+  res.json({ message: 'Prüf-Status aktualisiert' });
+});
+
 app.delete('/api/credit-notes/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
@@ -3663,7 +3691,7 @@ app.delete('/api/rentals/:id', (req, res) => {
 
 // ===== TIME TRACKING =====
 
-// Beim Schliessen eines gestempelten Blocks (Ausstempeln, Pause-Stempeln, Auto-23:00):
+// Beim Schliessen eines gestempelten Blocks (Ausstempeln, Pause-Stempeln, Auto-23:45):
 // Waehrend der Block offen war, koennen fuer denselben Tag manuell Eintraege angelegt
 // worden sein (Pause ODER Arbeitszeit), die mitten im gestempelten Zeitraum liegen.
 // Der Split-/Ueberlappungs-Schutz beim manuellen Anlegen sieht offene Eintraege nicht
@@ -5168,10 +5196,7 @@ app.put('/api/akten/:id/beteiligte/:betId/schadennummer', (req, res) => {
 });
 
 app.delete('/api/akten/:id/beteiligte/:betId', (req, res) => {
-  const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
-    return res.status(403).json({ error: 'Keine Berechtigung' });
-  }
+  // Beteiligte dürfen von jeder Benutzergruppe entfernt werden (kein Rollen-Gate hier, 1:1 wie B&P).
   execute(
     'DELETE FROM akten_beteiligte WHERE id = ? AND akte_id = ?',
     [Number(req.params.betId), Number(req.params.id)]
@@ -5688,12 +5713,12 @@ function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// ===== Automatisches Ausstempeln um 23:00 (Berlin) =====
-// Kein Mitarbeiter arbeitet nach 23 Uhr. Vergisst jemand das Ausstempeln, bleibt sein
+// ===== Automatisches Ausstempeln um 23:45 (Berlin) =====
+// Kein Mitarbeiter arbeitet nach 23:45 Uhr. Vergisst jemand das Ausstempeln, bleibt sein
 // Eintrag offen (end_time = ''); der Status bleibt tage-uebergreifend "eingestempelt" und
 // ein spaeteres Ausstempeln schreibt eine falsche Endzeit auf den alten Eintrag. Deshalb
-// wird jeder noch eingestempelte Mitarbeiter taeglich um 23:00 automatisch ausgestempelt -
-// exakt so, als haette er sich selbst ausgestempelt: nur end_time = '23:00' setzen,
+// wird jeder noch eingestempelte Mitarbeiter taeglich um 23:45 automatisch ausgestempelt -
+// exakt so, als haette er sich selbst ausgestempelt: nur end_time = '23:45' setzen,
 // Notizen unveraendert, keine Sondermarkierung. Da der Eintrag damit abgeschlossen ist,
 // ist die naechste Stempelung wieder ein Einstempeln.
 function autoCloseOpenTimeEntries() {
@@ -5703,14 +5728,14 @@ function autoCloseOpenTimeEntries() {
     let closed = 0;
     for (const e of open) {
       execute(
-        "UPDATE time_entries SET end_time = '23:00', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE time_entries SET end_time = '23:45', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         [e.id]
       );
       // Waehrend der offenen Stempelung manuell eingetragene Pausen/Arbeitszeiten herausschneiden
       splitClosedStampBlock(e.id);
       closed++;
     }
-    console.log(`[auto-clockout] ${closed} offene(r) Zeiteintrag/-eintraege um 23:00 geschlossen`);
+    console.log(`[auto-clockout] ${closed} offene(r) Zeiteintrag/-eintraege um 23:45 geschlossen`);
   } catch (err) {
     console.error('[auto-clockout] Fehler:', err && err.message);
   }
@@ -5728,15 +5753,15 @@ function msUntilNextBerlin(hour, minute) {
 }
 
 function scheduleAutoClockout() {
-  const delay = msUntilNextBerlin(23, 0);
+  const delay = msUntilNextBerlin(23, 45);
   setTimeout(() => {
     autoCloseOpenTimeEntries();
     scheduleAutoClockout(); // fuer den Folgetag neu planen
   }, delay);
-  console.log(`[auto-clockout] naechster Lauf in ${(delay / 3600000).toFixed(1)}h (23:00 Berlin)`);
+  console.log(`[auto-clockout] naechster Lauf in ${(delay / 3600000).toFixed(1)}h (23:45 Berlin)`);
 }
 
-// Sicherheitsnetz beim Start: Falls der 23:00-Lauf verpasst wurde (z.B. Deploy/Neustart um 23:00),
+// Sicherheitsnetz beim Start: Falls der 23:45-Lauf verpasst wurde (z.B. Deploy/Neustart um 23:45),
 // offene Eintraege VON FRUEHEREN TAGEN nachtraeglich schliessen. Heutige offene Eintraege sind
 // laufende Sitzungen und bleiben unangetastet.
 function autoCloseStaleEntries() {
@@ -5747,7 +5772,7 @@ function autoCloseStaleEntries() {
     let closed = 0;
     for (const e of stale) {
       execute(
-        "UPDATE time_entries SET end_time = '23:00', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE time_entries SET end_time = '23:45', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         [e.id]
       );
       // Waehrend der offenen Stempelung manuell eingetragene Pausen/Arbeitszeiten herausschneiden
@@ -5764,7 +5789,7 @@ function autoCloseStaleEntries() {
 getDb().then(() => {
   app.listen(PORT, HOST, () => {
     console.log(`Bemo-Verwaltung läuft auf http://${HOST}:${PORT} [${process.env.NODE_ENV || 'development'}]`);
-    // Taeglich um 23:00 (Berlin) alle offenen Zeiteintraege automatisch schliessen,
+    // Taeglich um 23:45 (Berlin) alle offenen Zeiteintraege automatisch schliessen,
     // damit vergessenes Ausstempeln nicht zu falschen/fehlenden Arbeitszeiten fuehrt.
     autoCloseStaleEntries();
     scheduleAutoClockout();

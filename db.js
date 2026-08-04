@@ -572,6 +572,10 @@ async function getDb() {
   try { db.run("ALTER TABLE staff ADD COLUMN ignore_holidays INTEGER DEFAULT 0"); } catch(e) {}
   try { db.run("ALTER TABLE staff ADD COLUMN time_tracking_active INTEGER DEFAULT 1"); } catch(e) {}
 
+  // Prüf-Status fuer Gutschriften (nur Buchhaltung aenderbar): 'Prüfen' (Standard) / 'Erledigt'
+  // (1:1 wie B&P und TUeV: Spalte pruef_status)
+  try { db.run("ALTER TABLE credit_notes ADD COLUMN pruef_status TEXT DEFAULT 'Prüfen'"); } catch(e) {}
+
   // Einmal-Migration (Bemo-Variante des TUeV 'pause_marker_split_v1'): Die neue (TUeV-)
   // Zeiterfassungs-Logik behandelt einen '__pause__'-Eintrag, der BUENDIG am naechsten
   // Eintrag liegt (keine Luecke danach), als dedizierten Pausenblock. In Bemo gab es

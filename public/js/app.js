@@ -8816,6 +8816,7 @@ async function renderCreditNotes() {
                 <th>Netto</th>
                 <th>Brutto</th>
                 <th>Status</th>
+                <th>Prüfung</th>
                 <th>Aktionen</th>
               </tr>
               <tr class="filter-row">
@@ -8829,6 +8830,13 @@ async function renderCreditNotes() {
                   <select id="cn-filter-status" onchange="applyCreditFilters()" class="filter-input">
                     <option value="">Alle</option>
                     ${CREDIT_STATUSES.map(s => `<option value="${s}">${s}</option>`).join('')}
+                  </select>
+                </td>
+                <td>
+                  <select id="cn-filter-pruef" onchange="applyCreditFilters()" class="filter-input">
+                    <option value="">Alle</option>
+                    <option value="Prüfen">Prüfen</option>
+                    <option value="Erledigt">Erledigt</option>
                   </select>
                 </td>
                 <td></td>
@@ -8852,6 +8860,7 @@ function applyCreditFilters() {
   const customer = (document.getElementById('cn-filter-customer')?.value || '').trim().toLowerCase();
   const zahlart  = (document.getElementById('cn-filter-zahlart')?.value  || '').trim().toLowerCase();
   const status   = (document.getElementById('cn-filter-status')?.value   || '');
+  const pruef    = (document.getElementById('cn-filter-pruef')?.value    || '');
 
   function matchesDate(creditDate) {
     if (!dateStr) return true;
@@ -8872,6 +8881,7 @@ function applyCreditFilters() {
     if (customer && !(cn.customer_name || '').toLowerCase().includes(customer)) return false;
     if (zahlart  && !(cn.payment_method || '').toLowerCase().includes(zahlart)) return false;
     if (status   && cn.status !== status)                                     return false;
+    if (pruef    && (cn.pruef_status || 'Prüfen') !== pruef)                  return false;
     return true;
   });
 
@@ -8892,13 +8902,13 @@ function applyCreditFilters() {
           <td colspan="4" style="text-align:right;padding:10px 12px;">Summe (${filtered.length} Gutschrift${filtered.length !== 1 ? 'en' : ''}):</td>
           <td style="white-space:nowrap;padding:10px 12px;">${fmt(sumNet)}&nbsp;&euro;</td>
           <td style="white-space:nowrap;padding:10px 12px;">${fmt(sumGross)}&nbsp;&euro;</td>
-          <td colspan="2"></td>
+          <td colspan="3"></td>
         </tr>`;
     }
   }
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px;">Keine Gutschriften gefunden.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px;">Keine Gutschriften gefunden.</td></tr>`;
     return;
   }
 
@@ -8911,11 +8921,40 @@ function applyCreditFilters() {
       <td style="white-space:nowrap;">${Number(cn.total_net).toFixed(2)}&nbsp;&euro;</td>
       <td style="white-space:nowrap;">${Number(cn.total_gross).toFixed(2)}&nbsp;&euro;</td>
       <td>${getCreditStatusBadge(cn.status)}</td>
+      <td>${_cnPruefCell(cn)}</td>
       <td style="white-space:nowrap;">
         <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); window.open('/api/credit-notes/${cn.id}/pdf','_blank')">PDF</button>
       </td>
     </tr>
   `).join('');
+}
+
+// Prüf-Status-Zelle: Badge gelb = 'Prüfen', grün = 'Erledigt'. NUR fuer die Gruppe
+// Buchhaltung ist das Badge klickbar und schaltet per Klick auf den jeweils anderen
+// Wert um (jederzeit, auch bei finalisierten Gutschriften - der Server erzwingt
+// beides ebenfalls). Alle anderen Gruppen sehen nur das statische Badge. (1:1 wie B&P)
+function _cnPruefCell(cn) {
+  const val = cn.pruef_status || 'Prüfen';
+  const badge = `<span class="badge ${val === 'Erledigt' ? 'badge-green' : 'badge-yellow'}">${escapeHtml(val)}</span>`;
+  if (loggedInUser && loggedInUser.permission_level === 'Buchhaltung') {
+    const next = val === 'Erledigt' ? 'Prüfen' : 'Erledigt';
+    return `<span style="cursor:pointer;display:inline-block;" title="Klicken: auf '${next}' setzen"
+      onclick="event.stopPropagation(); updateCreditPruefStatus(${cn.id}, '${next}')">${badge}</span>`;
+  }
+  return badge;
+}
+
+async function updateCreditPruefStatus(id, value) {
+  try {
+    await api('/api/credit-notes/' + id + '/pruef-status', { method: 'PATCH', body: { pruef_status: value } });
+    const cn = _allCreditNotes.find(c => c.id === id);
+    if (cn) cn.pruef_status = value;
+    showToast('Prüf-Status gespeichert');
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+  // Neu rendern, damit Filter und Badge/Auswahl konsistent sind (bei Fehler: Wert zurückgesetzt).
+  applyCreditFilters();
 }
 
 // --- New Credit Note Modal ---
@@ -16685,7 +16724,7 @@ async function renderAkteDetail(id) {
 
       betTabs += `<button class="beteiligte-tab${isFirst ? ' active' : ''}" data-bet="${tabKey}" onclick="switchBeteiligteTab('${tabKey}')">
         <strong>${escapeHtml(artLabel)}</strong><span class="bet-tab-name">: ${escapeHtml(tabName.trim())}</span>
-        ${canEdit ? '<span class="bet-remove" title="Entfernen" onclick="event.stopPropagation();removeBeteiligter(' + b.id + ')">&times;</span>' : ''}
+        ${loggedInUser ? '<span class="bet-remove" title="Entfernen" onclick="event.stopPropagation();removeBeteiligter(' + b.id + ')">&times;</span>' : ''}
       </button>`;
 
       let panelContent = '';
