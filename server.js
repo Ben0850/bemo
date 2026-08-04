@@ -4183,7 +4183,10 @@ app.get('/api/time/overtime', (req, res) => {
 
     // Calculate actual worked minutes for this day
     let dayActualMinutes = 0;
-    const dayEntries = entryByDate[dateStr] || [];
+    // Tage VOR dem Eintrittsdatum zaehlen gar nicht: weder Soll noch Ist. Die Schleife
+    // beginnt am Montag der Eintrittswoche - ohne diesen Filter wuerden gestempelte
+    // Zeiten aus der Zeit vor dem Eintritt als reines Plus im Saldo landen (Fix 2026-08-03).
+    const dayEntries = beforeEntry ? [] : (entryByDate[dateStr] || []);
     // Enthaelt der Tag eine explizite Pause (manueller Pausenblock oder buendiger
     // __pause__-Block), ist ein break_minutes an einem Arbeitsblock eine Phantom-Pause
     // (doppelt gezaehlt) -> dann ignorieren. Schuetzt den Saldo auch gegen Altdaten.
