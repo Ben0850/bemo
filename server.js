@@ -3806,10 +3806,9 @@ function _splitOpenEntryForPause(staffId, entryDate, pauseStart, pauseEnd) {
 
 // Manueller Pausenblock teilt bestehende ABGESCHLOSSENE Arbeitsbloecke am selben Tag auf.
 // excludeId: eigener Eintrag beim Bearbeiten (PUT), sonst null.
-// Wichtig: Sobald eine explizite Pause einen Arbeitsblock beschneidet oder teilt, wird dessen
-// implizite break_minutes (z.B. die 60 Min aus "Standardtag") auf 0 gesetzt. Sonst zaehlt die
-// Pause doppelt - einmal als eigener Pausenblock, einmal als break_minutes im Restblock - und
-// dem Mitarbeiter geht Arbeitszeit verloren (Fix 2026-07-14).
+// break_minutes bleibt dabei UNANGETASTET (1:1 wie B&P): ein Standardtag (8-17, 60 Min)
+// behaelt seine implizite Pause auch nach dem Split - eine zusaetzlich eingetragene
+// Pause verringert die Arbeitszeit also zusaetzlich (8h - Pause), statt die 60 Min zu ersetzen.
 function _splitWorkBlocksForPause(staffId, entryDate, pauseStart, pauseEnd, excludeId) {
   const overlaps = queryAll(
     `SELECT * FROM time_entries
@@ -3826,14 +3825,14 @@ function _splitWorkBlocksForPause(staffId, entryDate, pauseStart, pauseEnd, excl
       execute('DELETE FROM time_entries WHERE id = ?', [e.id]);
     } else if (e.start_time >= pauseStart) {
       // Arbeit startet innerhalb der Pause: Start nach Pausenende verschieben
-      execute('UPDATE time_entries SET start_time = ?, break_minutes = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseEnd, e.id]);
+      execute('UPDATE time_entries SET start_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseEnd, e.id]);
     } else if (e.end_time <= pauseEnd) {
       // Arbeit endet innerhalb der Pause: Ende auf Pausenstart vorziehen
-      execute('UPDATE time_entries SET end_time = ?, break_minutes = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseStart, e.id]);
+      execute('UPDATE time_entries SET end_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseStart, e.id]);
     } else {
-      // Pause komplett innerhalb der Arbeit: aufteilen in zwei Bloecke (beide ohne break_minutes)
+      // Pause komplett innerhalb der Arbeit: aufteilen in zwei Bloecke (neuer rechter Block ohne break)
       const originalEnd = e.end_time;
-      execute('UPDATE time_entries SET end_time = ?, break_minutes = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseStart, e.id]);
+      execute('UPDATE time_entries SET end_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [pauseStart, e.id]);
       execute(
         `INSERT INTO time_entries (staff_id, entry_date, start_time, end_time, break_minutes, notes) VALUES (?, ?, ?, ?, ?, ?)`,
         [e.staff_id, e.entry_date, pauseEnd, originalEnd, 0, e.notes || '']
@@ -3843,9 +3842,88 @@ function _splitWorkBlocksForPause(staffId, entryDate, pauseStart, pauseEnd, excl
 }
 
 // POST /api/time/stamp – Ein-/Ausstempeln/Pause
+// Einmalige Kompensation (Rollout 2026-08-06, Entscheidung Ben): Bemo zaehlte break_minutes
+// an Tagen mit expliziter Pause als Phantom-Pause NICHT mit (dayHasExplicitPause-Filter).
+// Die vereinheitlichte Lackdoktor-Rechnung zieht break_minutes IMMER ab - damit historische
+// Salden exakt gleich bleiben, werden break_minutes an genau diesen Alt-Tagen auf 0 gesetzt.
+// MUSS vor migrateTimeGapsOnce laufen (die fuellt Luecken mit Pausenbloecken und wuerde den
+// Filter-Zustand verfaelschen).
+function migrateBreakPhantomCompensationOnce() {
+  try {
+    if (queryOne("SELECT value FROM settings WHERE key = 'break_phantom_compensation_v1'")) return;
+    const all = queryAll('SELECT * FROM time_entries ORDER BY staff_id, entry_date, start_time');
+    const byDay = new Map();
+    for (const e of all) { const k = e.staff_id + '|' + e.entry_date; if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(e); }
+    let zeroed = 0;
+    for (const list of byDay.values()) {
+      const hasExplicitPause = list.some((pe, pidx) => {
+        if (pe.notes === '__pausenblock__') return true;
+        if (pe.notes === '__pause__' && pe.end_time) {
+          const nx = list[pidx + 1];
+          if (nx) return ((_ttToMin(nx.start_time) || 0) - (_ttToMin(pe.end_time) || 0)) <= 0;
+        }
+        return false;
+      });
+      if (!hasExplicitPause) continue;
+      for (const e of list) {
+        if (e.notes === '__pausenblock__') continue;
+        if ((e.break_minutes || 0) > 0) { execute('UPDATE time_entries SET break_minutes = 0 WHERE id = ?', [e.id]); zeroed++; }
+      }
+    }
+    execute("INSERT INTO settings (key, value) VALUES ('break_phantom_compensation_v1', '1')");
+    console.log('[zeiterfassung] Kompensation Phantom-Pausen: break_minutes bei ' + zeroed + ' Eintraegen genullt (Salden bleiben unveraendert)');
+  } catch (e) { console.error('migrateBreakPhantomCompensationOnce failed:', e && e.message); }
+}
+
+// Einmalige Migration (Vorgabe Ben 2026-08-06): historische Stempel-Luecken schliessen.
+// Die Luecken-als-Pause-Regel gilt erst seit ihrem Deploy - Alt-Tage haben noch offene
+// Luecken. Gleiche Logik wie beim Wieder-Einstempeln: Luecken >= 1 Minute zwischen
+// Eintraegen desselben Tages werden Pausenbloecke. __pause__-Marker werden dabei ins
+// explizite Modell ueberfuehrt: mit Luecke dahinter = Arbeitsblock (Marker weg), buendig
+// (Alt-Daten) = eigener Pausenblock ('__pausenblock__'). Ein Marker OHNE Folgeeintrag
+// (Mitarbeiter gerade in Pause) bleibt unangetastet, ebenso Mini-Luecken unter 1 Minute.
+function migrateTimeGapsOnce() {
+  try {
+    if (queryOne("SELECT value FROM settings WHERE key = 'time_gaps_migrated_v1'")) return;
+    const all = queryAll('SELECT * FROM time_entries ORDER BY staff_id, entry_date, start_time');
+    const byDay = new Map();
+    for (const e of all) {
+      const k = e.staff_id + '|' + e.entry_date;
+      if (!byDay.has(k)) byDay.set(k, []);
+      byDay.get(k).push(e);
+    }
+    let filled = 0, converted = 0;
+    for (const list of byDay.values()) {
+      for (let i = 0; i < list.length - 1; i++) {
+        const cur = list[i], next = list[i + 1];
+        if (!cur.end_time) continue; // laufender Eintrag: keine Luecke definierbar
+        const gapMin = (_ttToMin(next.start_time) || 0) - (_ttToMin(cur.end_time) || 0);
+        if (gapMin >= 1) {
+          execute("INSERT INTO time_entries (staff_id, entry_date, start_time, end_time, break_minutes, notes) VALUES (?, ?, ?, ?, 0, '__pausenblock__')",
+            [cur.staff_id, cur.entry_date, cur.end_time, next.start_time]);
+          filled++;
+        }
+        if (cur.notes === '__pause__') {
+          if (gapMin >= 1) { execute("UPDATE time_entries SET notes = '' WHERE id = ?", [cur.id]); converted++; }
+          else if (gapMin <= 0) { execute("UPDATE time_entries SET notes = '__pausenblock__' WHERE id = ?", [cur.id]); converted++; }
+        }
+      }
+    }
+    execute("INSERT INTO settings (key, value) VALUES ('time_gaps_migrated_v1', '1')");
+    console.log(`[zeiterfassung] Migration Stempel-Luecken: ${filled} Luecke(n) als Pause gefuellt, ${converted} __pause__-Marker ueberfuehrt`);
+  } catch (e) { console.error('migrateTimeGapsOnce failed:', e && e.message); }
+}
+
+// Zeiterfassung fuer diesen Mitarbeiter deaktiviert? (staff.time_tracking_active = 0)
+function _timeTrackingDisabled(staffId) {
+  const st = queryOne('SELECT time_tracking_active FROM staff WHERE id = ?', [Number(staffId)]);
+  return !!(st && st.time_tracking_active === 0);
+}
+
 app.post('/api/time/stamp', (req, res) => {
   const staffId = Number(req.headers['x-user-id']);
   if (!staffId) return res.status(400).json({ error: 'Kein Benutzer' });
+  if (_timeTrackingDisabled(staffId)) return res.status(403).json({ error: 'Die Zeiterfassung ist für diesen Mitarbeiter deaktiviert.' });
   const { action } = req.body || {}; // 'pause' or undefined
 
   const today = berlinToday();
@@ -3866,6 +3944,23 @@ app.post('/api/time/stamp', (req, res) => {
     res.json({ status: isPause ? 'paused' : 'stamped_out', entry: updated });
   } else {
     // Stamp in
+    // Luecke seit dem letzten Ausstempeln HEUTE automatisch als Pause eintragen (Vorgabe Ben
+    // 2026-08-06): Ausstempeln + spaeter am selben Tag wieder Einstempeln = Zwischenzeit ist
+    // Pause. Ein __pause__-markierter Block wird dabei ins explizite Modell ueberfuehrt
+    // (Marker weg, Luecke = eigener Pausenblock) - sonst wuerde der Arbeitsblock durch den
+    // buendigen Anschluss von der Anzeige-Heuristik als Pause fehlklassifiziert.
+    // Mini-Luecken unter 1 Minute (z.B. versehentliches Doppel-Stempeln) bleiben unberuecksichtigt.
+    const lastToday = queryOne("SELECT * FROM time_entries WHERE staff_id = ? AND entry_date = ? AND end_time != '' ORDER BY end_time DESC LIMIT 1", [staffId, today]);
+    if (lastToday && lastToday.end_time < currentTime) {
+      const gapMin = (_ttToMin(currentTime) || 0) - (_ttToMin(lastToday.end_time) || 0);
+      if (gapMin >= 1) {
+        execute("INSERT INTO time_entries (staff_id, entry_date, start_time, end_time, break_minutes, notes) VALUES (?, ?, ?, ?, 0, '__pausenblock__')",
+          [staffId, today, lastToday.end_time, currentTime]);
+        if (lastToday.notes === '__pause__') {
+          execute("UPDATE time_entries SET notes = '', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [lastToday.id]);
+        }
+      }
+    }
     const result = execute('INSERT INTO time_entries (staff_id, entry_date, start_time, end_time) VALUES (?, ?, ?, ?)',
       [staffId, today, currentTime, '']);
     const entry = queryOne('SELECT * FROM time_entries WHERE id = ?', [result.lastId]);
@@ -3877,6 +3972,9 @@ app.post('/api/time/stamp', (req, res) => {
 app.get('/api/time/status', (req, res) => {
   const staffId = Number(req.headers['x-user-id']);
   if (!staffId) return res.status(400).json({ error: 'Kein Benutzer' });
+  if (_timeTrackingDisabled(staffId)) {
+    return res.json({ stamped_in: false, current_entry: null, on_pause: false, last_entry: null, time_tracking_disabled: true });
+  }
 
   const today = berlinToday();
   const openEntry = queryOne('SELECT * FROM time_entries WHERE staff_id = ? AND end_time = ?', [staffId, '']);
@@ -3932,6 +4030,7 @@ app.post('/api/time/entries', (req, res) => {
   }
   const targetStaffId = Number(staff_id) || userId;
   if (!entry_date || !start_time) return res.status(400).json({ error: 'Datum und Startzeit sind Pflichtfelder' });
+  if (_timeTrackingDisabled(targetStaffId)) return res.status(403).json({ error: 'Die Zeiterfassung ist für diesen Mitarbeiter deaktiviert.' });
 
   // Ueberlappungs-Check fuer Arbeitseintraege: zwei Arbeitsblocks zur selben Zeit nicht erlaubt.
   // Pausen (gestempelt '__pause__' ODER manueller Block '__pausenblock__') sind keine Arbeit
@@ -3991,6 +4090,7 @@ app.put('/api/time/entries/:id', (req, res) => {
   if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung, Einträge zu bearbeiten' });
   }
+  if (_timeTrackingDisabled(entry.staff_id)) return res.status(403).json({ error: 'Die Zeiterfassung ist für diesen Mitarbeiter deaktiviert.' });
 
   const { start_time, end_time, break_minutes, notes, entry_date } = req.body;
   // Ueberlappungs-Check fuer Arbeitseintraege (id != self)
@@ -4056,6 +4156,85 @@ app.delete('/api/time/entries/:id', (req, res) => {
   res.json({ message: 'Eintrag gelöscht' });
 });
 
+// PUT /api/time/day – kompletten Tag ERSETZEN (Entwurfs-Speichern aus dem Tagesdetail-Fenster).
+// Vorgabe Ben 2026-08-05: Das Fenster arbeitet als lokaler Entwurf, beim Schliessen kommt der
+// ganze Tag in einem Rutsch. Der Server prueft die Schluessigkeit selbst nochmal (Ende > Start,
+// keine Ueberschneidungen, max. 1 laufender Eintrag) und ersetzt dann ALLE Eintraege des Tages.
+// rows: [{type:'work'|'pause', start_time, end_time (''=laufend), break_minutes, notes}]
+app.put('/api/time/day', (req, res) => {
+  const permission = req.headers['x-user-permission'];
+  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) {
+    return res.status(403).json({ error: 'Keine Berechtigung, Zeiteinträge zu bearbeiten' });
+  }
+  const { staff_id, entry_date, rows } = req.body || {};
+  const targetStaffId = Number(staff_id);
+  if (!targetStaffId || !entry_date) return res.status(400).json({ error: 'staff_id und entry_date sind Pflichtfelder' });
+  if (!Array.isArray(rows)) return res.status(400).json({ error: 'rows muss ein Array sein' });
+  if (_timeTrackingDisabled(targetStaffId)) return res.status(403).json({ error: 'Die Zeiterfassung ist für diesen Mitarbeiter deaktiviert.' });
+
+  // Schluessigkeits-Pruefung (Spiegel der Client-Pruefung - der Server ist die letzte Instanz).
+  const problems = [];
+  const lbl = r => String(r.start_time || '').slice(0, 5) + '–' + (r.end_time ? String(r.end_time).slice(0, 5) : 'läuft');
+  const art = r => r.type === 'pause' ? 'Pause' : 'Arbeitszeit';
+  let openCount = 0;
+  for (const r of rows) {
+    const s = _ttToMin(r.start_time);
+    if (s == null) { problems.push('Eintrag ohne gültige Startzeit.'); continue; }
+    if (!r.end_time) {
+      openCount++;
+      if (r.type === 'pause') problems.push('Pause ohne Ende (' + lbl(r) + ') ist nicht möglich.');
+    } else {
+      const e = _ttToMin(r.end_time);
+      if (e == null || e <= s) problems.push('Ende muss nach Start liegen (' + art(r) + ' ' + lbl(r) + ').');
+    }
+  }
+  if (openCount > 1) problems.push('Mehrere laufende Einträge ohne Endzeit.');
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      const a = rows[i], b = rows[j];
+      const aS = _ttToMin(a.start_time), bS = _ttToMin(b.start_time);
+      const aE = a.end_time ? _ttToMin(a.end_time) : 1440;
+      const bE = b.end_time ? _ttToMin(b.end_time) : 1440;
+      if (aS == null || bS == null || aE == null || bE == null) continue;
+      if (aS < bE && aE > bS) problems.push(art(a) + ' ' + lbl(a) + ' überschneidet sich mit ' + art(b) + ' ' + lbl(b) + '.');
+    }
+  }
+  if (problems.length) return res.status(409).json({ error: problems.join(' ') });
+
+  // Luecken zwischen den Zeilen automatisch als Pause fuellen (Vorgabe Ben 2026-08-06) -
+  // dieselbe Regel wie beim Wieder-Einstempeln am selben Tag. Ab 1 Minute Luecke.
+  const sorted = [...rows].sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
+  const finalRows = [];
+  let gapsFilled = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    finalRows.push(sorted[i]);
+    const cur = sorted[i], nxt = sorted[i + 1];
+    if (!nxt || !cur.end_time) continue;
+    const gapMin = (_ttToMin(nxt.start_time) || 0) - (_ttToMin(cur.end_time) || 0);
+    if (gapMin >= 1) {
+      finalRows.push({ type: 'pause', start_time: cur.end_time, end_time: nxt.start_time, break_minutes: 0, notes: '' });
+      gapsFilled++;
+    }
+  }
+
+  // Tag ersetzen: alle bisherigen Eintraege des Tages raus, Entwurfszeilen rein.
+  // (Pausenzeilen als '__pausenblock__'; ein laufender Eintrag behaelt end_time = ''.)
+  execute('DELETE FROM time_entries WHERE staff_id = ? AND entry_date = ?', [targetStaffId, entry_date]);
+  for (const r of finalRows) {
+    execute(
+      'INSERT INTO time_entries (staff_id, entry_date, start_time, end_time, break_minutes, notes) VALUES (?, ?, ?, ?, ?, ?)',
+      [targetStaffId, entry_date, r.start_time, r.end_time || '', Number(r.break_minutes) || 0, r.type === 'pause' ? '__pausenblock__' : (String(r.notes || ''))]
+    );
+  }
+  try {
+    execute(
+      'INSERT INTO activity_log (user_id, username, action, entity_type, entity_id, entity_label, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [Number(req.headers['x-user-id']) || null, String(req.headers['x-user-name'] || ''), 'zeiterfassung_tag_ersetzt', 'time_day', targetStaffId, entry_date, finalRows.length + ' Einträge' + (gapsFilled ? ' (' + gapsFilled + ' Lücke(n) als Pause gefüllt)' : ''), `${berlinToday()} ${berlinTime()}`]
+    );
+  } catch (e) {}
+  res.json({ message: 'Tag gespeichert', count: finalRows.length, gapsFilled });
+});
+
 // GET /api/time/overtime – Ueberstundenkonto (tagesaktuell)
 app.get('/api/time/overtime', (req, res) => {
   const userId = Number(req.headers['x-user-id']);
@@ -4071,6 +4250,11 @@ app.get('/api/time/overtime', (req, res) => {
   const entryDate = staff ? (staff.entry_date || '') : '';
   const exitDate = staff ? (staff.exit_date || '') : '';
   const ignoreHolidays = staff ? !!staff.ignore_holidays : false; // Feiertage als normale Arbeitstage werten
+
+  // Zeiterfassung fuer diesen Mitarbeiter deaktiviert -> komplett raus (kein Konto, keine Wochen).
+  if (_timeTrackingDisabled(staffId)) {
+    return res.json({ weekly_hours: weeklyHours, work_days: workDaysStr, time_tracking_disabled: true, total_overtime_minutes: 0, weeks: [] });
+  }
 
   // No entry_date → no time tracking possible
   if (!entryDate) {
@@ -4222,21 +4406,6 @@ app.get('/api/time/overtime', (req, res) => {
     // beginnt am Montag der Eintrittswoche - ohne diesen Filter wuerden gestempelte
     // Zeiten aus der Zeit vor dem Eintritt als reines Plus im Saldo landen (Fix 2026-08-03).
     const dayEntries = beforeEntry ? [] : (entryByDate[dateStr] || []);
-    // Enthaelt der Tag eine explizite Pause (manueller Pausenblock oder buendiger
-    // __pause__-Block), ist ein break_minutes an einem Arbeitsblock eine Phantom-Pause
-    // (doppelt gezaehlt) -> dann ignorieren. Schuetzt den Saldo auch gegen Altdaten.
-    const dayHasExplicitPause = dayEntries.some((pe, pidx) => {
-      if (pe.notes === '__pausenblock__') return true;
-      if (pe.notes === '__pause__' && pe.end_time) {
-        const nx = dayEntries[pidx + 1];
-        if (nx) {
-          const [nh, nm] = nx.start_time.split(':').map(Number);
-          const [ph, pm] = pe.end_time.split(':').map(Number);
-          return (nh * 60 + nm) - (ph * 60 + pm) <= 0;
-        }
-      }
-      return false;
-    });
     dayEntries.forEach((e, idx) => {
       // Manueller Pausenblock zaehlt nie als Arbeit.
       if (e.notes === '__pausenblock__') return;
@@ -4255,7 +4424,7 @@ app.get('/api/time/overtime', (req, res) => {
       }
       const [sh, sm] = e.start_time.split(':').map(Number);
       const [eh, em] = e.end_time.split(':').map(Number);
-      const worked = (eh * 60 + em) - (sh * 60 + sm) - (dayHasExplicitPause ? 0 : (e.break_minutes || 0));
+      const worked = (eh * 60 + em) - (sh * 60 + sm) - (e.break_minutes || 0);
       if (worked > 0) dayActualMinutes += worked;
     });
 
@@ -5800,6 +5969,9 @@ getDb().then(() => {
     // damit vergessenes Ausstempeln nicht zu falschen/fehlenden Arbeitszeiten fuehrt.
     autoCloseStaleEntries();
     scheduleAutoClockout();
+    // Einmalig (Rollout): erst Phantom-Pausen-Kompensation, DANN Stempel-Luecken fuellen.
+    migrateBreakPhantomCompensationOnce();
+    migrateTimeGapsOnce();
   });
 }).catch(err => {
   console.error('Datenbankfehler:', err);

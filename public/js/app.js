@@ -360,6 +360,10 @@ function openModal(title, bodyHtml, extraClass) {
 }
 
 function closeModal() {
+  // Tagesdetail-Entwurf (Zeiterfassung): X bedeutet ABBRECHEN (Vorgabe Ben 2026-08-06) -
+  // bei ungespeicherten Aenderungen fragt dayDraftCancel nach, setzt das Flag zurueck
+  // und ruft closeModal danach erneut auf. Speichern nur ueber den Speichern-Button.
+  if (_dayDraftActive) { dayDraftCancel(); return; }
   document.getElementById('modal-overlay').classList.remove('active');
   document.getElementById('modal').className = 'modal';
   // Beteiligten-Auto-Add Flag immer zuruecksetzen — saveCustomer hat sich vorher einen lokalen Snapshot gezogen
@@ -12226,16 +12230,10 @@ async function renderTimeTracking() {
         const completedEntries = dayEntries.filter(e => e.end_time);
         const lastEndRaw = completedEntries.length > 0 ? completedEntries[completedEntries.length - 1].end_time : '';
         lastEnd = lastEndRaw ? lastEndRaw.slice(0, 5) : '';
-        // Tag mit expliziter Pause: break_minutes am Arbeitsblock ist Phantom-Pause -> ignorieren.
-        const dayHasPause = dayEntries.some((pe, k) => {
-          if (pe.notes === '__pausenblock__') return true;
-          if (pe.notes === '__pause__' && pe.end_time) { const nx = dayEntries[k + 1]; if (nx) return calcWorkMinutes(pe.end_time, nx.start_time, 0) <= 0; }
-          return false;
-        });
         dayEntries.forEach((e, j) => {
           const hasEnd = e.end_time && e.end_time.length >= 5;
           if (!hasEnd) return;
-          const minutes = calcWorkMinutes(e.start_time, e.end_time, dayHasPause ? 0 : (e.break_minutes || 0));
+          const minutes = calcWorkMinutes(e.start_time, e.end_time, e.break_minutes || 0);
           const isPauseMarker = e.notes === '__pause__';
           const isPauseBlock = e.notes === '__pausenblock__';
           const next = dayEntries[j + 1];
@@ -12462,7 +12460,7 @@ async function renderTimeTracking() {
         </div>
       `}
 
-      ${isAdmin() ? `
+      ${(isAdmin() || isVerwaltung() || isBuchhaltung()) ? `
       <div class="card" style="margin-top:16px;">
         <div class="card-header">
           <h3>Überstundenkonto</h3>
@@ -12687,223 +12685,221 @@ function changeTimeTrackingStaff(staffId) {
   renderTimeTracking();
 }
 
+// ===== Tagesdetail-Fenster als ENTWURF (Vorgabe Ben 2026-08-05) =====
+// Solange das Fenster offen ist, wird NICHTS in der DB geaendert: alle Aktionen (Hinzufuegen,
+// Bearbeiten, Loeschen, Pause, Standardtag) arbeiten auf einem lokalen Entwurf. Erst beim
+// Schliessen wird der Tag geprueft (Ende > Start, keine Ueberschneidungen, max. 1 laufender
+// Eintrag) und dann in EINEM Rutsch gespeichert (PUT /api/time/day ersetzt alle Eintraege des
+// Tages); das anschliessende Neu-Rendern der Zeiterfassung rechnet Wochen-/Saldo-Werte neu.
+// Abweichung von der TUEV-Vorlage (dort schrieb jede Aktion sofort in die DB und die
+// Pausen-Split-Logik lief serverseitig) - siehe NACHBAU.md.
+let _dayDraft = null;       // { staffId, dateStr, dayName, rows:[{type,start,end,notes,breakMinutes}], dirty }
+let _dayDraftActive = false;
+
+function _draftToMin(t) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t || ''));
+  return m ? (Number(m[1]) * 60 + Number(m[2])) : null;
+}
+function _draftNorm(t) { // 'HH:MM' -> 'HH:MM:00'
+  if (!t) return '';
+  return t.length === 5 ? t + ':00' : t;
+}
+
 async function openDayDetailModal(staffId, dateStr) {
   try {
     const entries = await api(`/api/time/entries?staff_id=${staffId}&from=${dateStr}&to=${dateStr}`);
     const d = new Date(dateStr + 'T00:00:00');
     const dayName = d.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
-    const canEdit = isAdmin() || isVerwaltung() || isBuchhaltung();
 
-    // Build display rows: Pause-Eintraege werden als Pause angezeigt, Arbeit als Arbeit
-    const displayRows = [];
-    let totalWorkMinutes = 0;
-    let totalPauseMinutes = 0;
-
-    // __pause__ hat ZWEI Bedeutungen (gleicher Marker, unterschiedliche Quelle):
-    //  - Stempelung: der __pause__-Eintrag ist der beendete ARBEITS-block, die Pause
-    //    ist die LUECKE bis zum naechsten Eintrag (Modell "Stempel").
-    //  - Manuell/Auto-Split: der __pause__-Eintrag liegt BUENDIG zwischen zwei
-    //    Eintraegen und seine eigene Spanne IST die Pause (Modell "manuell").
-    // Unterscheidung am einzigen verlaesslichen Merkmal: gibt es nach dem Eintrag
-    // eine Luecke (Stempel) oder ist er buendig (manuell)?
-    // Tag mit expliziter Pause: break_minutes am Arbeitsblock ist Phantom-Pause -> ignorieren.
-    const dayHasPause = entries.some((pe, k) => {
-      if (pe.notes === '__pausenblock__') return true;
-      if (pe.notes === '__pause__' && pe.end_time) { const nx = entries[k + 1]; if (nx) return calcWorkMinutes(pe.end_time, nx.start_time, 0) <= 0; }
-      return false;
-    });
+    // DB-Eintraege in Entwurfszeilen uebersetzen. __pause__ hat ZWEI Bedeutungen (gleicher
+    // Marker, unterschiedliche Quelle): gestempelter ARBEITS-Block, dessen Pause die LUECKE
+    // bis zum naechsten Eintrag ist - oder (Alt-Daten) buendiger manueller Pausenblock.
+    // Der Entwurf normalisiert beides ins explizite Modell: Arbeitszeilen + eigene Pausenzeilen.
+    const rows = [];
     entries.forEach((e, i) => {
       const hasEnd = e.end_time && e.end_time.length >= 5;
-      const mins = hasEnd ? calcWorkMinutes(e.start_time, e.end_time, dayHasPause ? 0 : (e.break_minutes || 0)) : 0;
       const isPauseMarker = e.notes === '__pause__';
       const isPauseBlock = e.notes === '__pausenblock__';
       const next = entries[i + 1];
       const gapMins = (hasEnd && next) ? calcWorkMinutes(e.end_time, next.start_time, 0) : 0;
-      // Dedizierter Pausenblock: expliziter Marker ODER (Alt-Daten) buendiger __pause__.
       const isDedicatedPause = isPauseBlock || (isPauseMarker && next && gapMins <= 0);
-
       if (isDedicatedPause) {
-        // Manueller Pausenblock: eigene Spanne = Pause, als echter Eintrag editierbar
-        totalPauseMinutes += mins;
-        displayRows.push({ type: 'pause', start: e.start_time, end: e.end_time, mins, notes: '', id: e.id, editable: true });
+        rows.push({ type: 'pause', start: e.start_time, end: e.end_time, notes: '', breakMinutes: 0 });
       } else {
-        // Arbeitsblock (auch ein gestempelter __pause__-Block: Spanne = Arbeit)
-        totalWorkMinutes += mins;
-        displayRows.push({ type: 'work', start: e.start_time, end: e.end_time, mins, notes: (isPauseMarker || isPauseBlock) ? '' : (e.notes || ''), id: e.id, editable: true });
-        // Gestempelte Pause: Luecke bis zum naechsten Eintrag als (nicht editierbare) Pause-Zeile
+        rows.push({ type: 'work', start: e.start_time, end: hasEnd ? e.end_time : '', notes: (isPauseMarker || isPauseBlock) ? '' : (e.notes || ''), breakMinutes: e.break_minutes || 0 });
         if (isPauseMarker && hasEnd && next && gapMins > 0) {
-          totalPauseMinutes += gapMins;
-          displayRows.push({ type: 'pause', start: e.end_time, end: next.start_time, mins: gapMins, notes: '', id: null, editable: false });
+          rows.push({ type: 'pause', start: e.end_time, end: next.start_time, notes: '', breakMinutes: 0 });
         }
       }
     });
-
-    const isMobile = isMobileView();
-
-    let html = `<div style="margin-bottom:16px;display:flex;gap:${isMobile ? '12' : '24'}px;flex-wrap:wrap;">
-      <div style="color:var(--text-muted);font-size:${isMobile ? '13' : '14'}px;">Arbeitszeit: <strong style="color:var(--success);">${formatDuration(totalWorkMinutes)}</strong></div>
-      <div style="color:var(--text-muted);font-size:${isMobile ? '13' : '14'}px;">Pausenzeit: <strong style="color:var(--warning, #e67e22);">${formatDuration(totalPauseMinutes)}</strong></div>
-    </div>`;
-
-    if (displayRows.length > 0) {
-      if (isMobile) {
-        // Mobile: card layout
-        displayRows.forEach(r => {
-          const isPause = r.type === 'pause';
-          const borderColor = isPause ? 'var(--warning, #e67e22)' : 'var(--success)';
-          const bgColor = isPause ? 'rgba(230,126,34,0.06)' : '';
-          html += `<div style="border-left:4px solid ${borderColor};${bgColor ? 'background:' + bgColor + ';' : ''}padding:10px 12px;margin-bottom:6px;border-radius:0 var(--radius) var(--radius) 0;border:1px solid var(--border);border-left:4px solid ${borderColor};">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-weight:700;font-size:14px;">${r.start.slice(0,5)} – ${r.end ? r.end.slice(0,5) : '<span style="color:var(--warning);">läuft</span>'}</span>
-              <span style="font-size:13px;font-weight:600;color:${isPause ? 'var(--warning, #e67e22)' : 'var(--success)'};">${isPause ? 'Pause' : 'Arbeit'} · ${r.mins > 0 ? formatDuration(r.mins) : '—'}</span>
-            </div>
-            ${r.notes ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${escapeHtml(r.notes)}</div>` : ''}
-            ${canEdit && r.editable ? `<div style="display:flex;gap:8px;margin-top:8px;">
-              <button class="btn btn-sm btn-secondary" onclick="editTimeEntry(${r.id}, ${staffId}, '${dateStr}')" style="flex:1;">Bearbeiten</button>
-              <button class="btn btn-sm btn-danger" onclick="deleteTimeEntry(${r.id}, ${staffId}, '${dateStr}')" style="flex:1;">Löschen</button>
-            </div>` : ''}
-          </div>`;
-        });
-      } else {
-        // Desktop: table layout
-        html += `<table style="width:100%;font-size:13px;">
-          <thead><tr><th>Start</th><th>Ende</th><th>Art</th><th>Gesamtzeit</th><th>Notizen</th>${canEdit ? '<th>Aktionen</th>' : ''}</tr></thead>
-          <tbody>`;
-        displayRows.forEach(r => {
-          const isPause = r.type === 'pause';
-          const artLabel = isPause
-            ? '<span style="color:var(--warning, #e67e22);font-weight:600;">Pause</span>'
-            : '<span style="color:var(--success);font-weight:600;">Arbeitszeit</span>';
-          html += `<tr${isPause ? ' style="background:rgba(230,126,34,0.06);"' : ''}>
-            <td>${r.start}</td>
-            <td>${r.end || '<span class="badge badge-yellow">läuft</span>'}</td>
-            <td>${artLabel}</td>
-            <td>${r.mins > 0 ? formatDuration(r.mins) : '—'}</td>
-            <td>${escapeHtml(r.notes)}</td>
-            ${canEdit ? `<td>
-              ${r.editable ? `<button class="btn btn-sm btn-secondary" onclick="editTimeEntry(${r.id}, ${staffId}, '${dateStr}')">Bearbeiten</button>
-              <button class="btn btn-sm btn-danger" onclick="deleteTimeEntry(${r.id}, ${staffId}, '${dateStr}')">Löschen</button>` : '<span style="color:var(--text-muted);">–</span>'}
-            </td>` : ''}
-          </tr>`;
-        });
-        html += '</tbody></table>';
-      }
-    } else {
-      html += '<div class="empty-state" style="padding:20px;"><p>Keine Einträge für diesen Tag.</p></div>';
-    }
-
-    if (canEdit) {
-      html += `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;display:flex;gap:8px;flex-wrap:wrap;${isMobile ? 'flex-direction:column;' : ''}">
-        <button class="btn btn-primary btn-sm" onclick="addManualTimeEntry(${staffId}, '${dateStr}')" ${isMobile ? 'style="width:100%;"' : ''}>+ Manuell hinzufügen</button>
-        <button class="btn btn-sm" onclick="addManualTimeEntry(${staffId}, '${dateStr}', {type:'pause', start:'13:00', end:'13:30'})" style="background:var(--warning,#e67e22);border-color:var(--warning,#e67e22);color:#fff;${isMobile ? 'width:100%;' : ''}">Pause hinzufügen</button>
-        <button class="btn btn-success btn-sm" onclick="createStandardDay(${staffId}, '${dateStr}')" style="font-weight:700;${isMobile ? 'width:100%;' : ''}">Standardtag (8–17 Uhr)</button>
-      </div>`;
-    }
-
-    openModal(dayName, html);
+    _dayDraft = { staffId: Number(staffId), dateStr, dayName, rows, dirty: false };
+    _dayDraftActive = true;
+    renderDayDraftModal();
   } catch (err) {
     showToast(err.message, 'error');
   }
 }
 
-async function editTimeEntry(entryId, staffId, dateStr) {
-  try {
-    const entries = await api(`/api/time/entries?staff_id=${staffId}&from=${dateStr}&to=${dateStr}`);
-    const idx = entries.findIndex(e => e.id === entryId);
-    const entry = idx >= 0 ? entries[idx] : null;
-    if (!entry) return showToast('Eintrag nicht gefunden', 'error');
+// Zeilen chronologisch sortiert, mit Original-Index fuer die Aktions-Buttons.
+function _dayDraftSorted() {
+  return _dayDraft.rows.map((r, idx) => ({ r, idx })).sort((a, b) => String(a.r.start).localeCompare(String(b.r.start)));
+}
 
-    // Art bestimmen wie in der Anzeige: expliziter Pausenblock ODER (Alt-Daten)
-    // buendiger __pause__ -> Pause; gestempelter __pause__ mit Luecke danach -> Arbeit.
-    const next = entries[idx + 1];
-    const gapMins = (entry.end_time && next) ? calcWorkMinutes(entry.end_time, next.start_time, 0) : 0;
-    const isPause = entry.notes === '__pausenblock__' || (entry.notes === '__pause__' && next && gapMins <= 0);
-    // Gestempelter Arbeitsblock mit Pause-Marker: Marker beim Speichern erhalten,
-    // damit die zugehoerige Luecken-Pause nicht verloren geht.
-    const isStampedWork = entry.notes === '__pause__' && !isPause;
-    const isMarker = entry.notes === '__pause__' || entry.notes === '__pausenblock__';
-    const startHHMM = (entry.start_time || '').slice(0, 5);
-    const endHHMM = (entry.end_time || '').slice(0, 5);
-    const html = `
-      <form onsubmit="saveTimeEntry(event, ${entryId}, ${staffId}, '${dateStr}')">
-        <input type="hidden" name="was_stamped_work" value="${isStampedWork ? '1' : '0'}">
-        <div class="form-row">
-          <div class="form-group">
-            <label>Datum</label>
-            <input type="date" name="entry_date" value="${entry.entry_date}" required>
+function renderDayDraftModal(errorHtml) {
+  const { dayName } = _dayDraft;
+  const canEdit = isAdmin() || isVerwaltung() || isBuchhaltung();
+  const sorted = _dayDraftSorted();
+  let totalWorkMinutes = 0, totalPauseMinutes = 0;
+  sorted.forEach(({ r }) => {
+    const mins = r.end ? calcWorkMinutes(r.start, r.end, r.type === 'work' ? (r.breakMinutes || 0) : 0) : 0;
+    if (r.type === 'pause') totalPauseMinutes += mins; else totalWorkMinutes += mins;
+  });
+  const isMobile = isMobileView();
+
+  let html = `${errorHtml || ''}<div style="margin-bottom:16px;display:flex;gap:${isMobile ? '12' : '24'}px;flex-wrap:wrap;">
+    <div style="color:var(--text-muted);font-size:${isMobile ? '13' : '14'}px;">Arbeitszeit: <strong style="color:var(--success);">${formatDuration(totalWorkMinutes)}</strong></div>
+    <div style="color:var(--text-muted);font-size:${isMobile ? '13' : '14'}px;">Pausenzeit: <strong style="color:var(--warning, #e67e22);">${formatDuration(totalPauseMinutes)}</strong></div>
+  </div>`;
+
+  if (sorted.length > 0) {
+    if (isMobile) {
+      // Mobile: card layout
+      sorted.forEach(({ r, idx }) => {
+        const isPause = r.type === 'pause';
+        const mins = r.end ? calcWorkMinutes(r.start, r.end, r.type === 'work' ? (r.breakMinutes || 0) : 0) : 0;
+        const borderColor = isPause ? 'var(--warning, #e67e22)' : 'var(--success)';
+        const bgColor = isPause ? 'rgba(230,126,34,0.06)' : '';
+        html += `<div style="border-left:4px solid ${borderColor};${bgColor ? 'background:' + bgColor + ';' : ''}padding:10px 12px;margin-bottom:6px;border-radius:0 var(--radius) var(--radius) 0;border:1px solid var(--border);border-left:4px solid ${borderColor};">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-weight:700;font-size:14px;">${r.start.slice(0,5)} – ${r.end ? r.end.slice(0,5) : '<span style="color:var(--warning);">läuft</span>'}</span>
+            <span style="font-size:13px;font-weight:600;color:${isPause ? 'var(--warning, #e67e22)' : 'var(--success)'};">${isPause ? 'Pause' : 'Arbeit'} · ${mins > 0 ? formatDuration(mins) : '—'}</span>
           </div>
-          <div class="form-group">
-            <label>Art</label>
-            <select name="entry_type" required>
-              <option value="work"${!isPause ? ' selected' : ''}>Arbeitszeit</option>
-              <option value="pause"${isPause ? ' selected' : ''}>Pause</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Start</label>
-            <input type="time" name="start_time" value="${startHHMM}" required>
-          </div>
-          <div class="form-group">
-            <label>Ende</label>
-            <input type="time" name="end_time" value="${endHHMM}">
-          </div>
+          ${r.notes ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">${escapeHtml(r.notes)}</div>` : ''}
+          ${canEdit ? `<div style="display:flex;gap:8px;margin-top:8px;">
+            <button class="btn btn-sm btn-secondary" onclick="editTimeEntry(${idx})" style="flex:1;">Bearbeiten</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteTimeEntry(${idx})" style="flex:1;">Löschen</button>
+          </div>` : ''}
+        </div>`;
+      });
+    } else {
+      // Desktop: table layout
+      html += `<table style="width:100%;font-size:13px;">
+        <thead><tr><th>Start</th><th>Ende</th><th>Art</th><th>Gesamtzeit</th><th>Notizen</th>${canEdit ? '<th>Aktionen</th>' : ''}</tr></thead>
+        <tbody>`;
+      sorted.forEach(({ r, idx }) => {
+        const isPause = r.type === 'pause';
+        const mins = r.end ? calcWorkMinutes(r.start, r.end, r.type === 'work' ? (r.breakMinutes || 0) : 0) : 0;
+        const artLabel = isPause
+          ? '<span style="color:var(--warning, #e67e22);font-weight:600;">Pause</span>'
+          : '<span style="color:var(--success);font-weight:600;">Arbeitszeit</span>';
+        html += `<tr${isPause ? ' style="background:rgba(230,126,34,0.06);"' : ''}>
+          <td>${r.start}</td>
+          <td>${r.end || '<span class="badge badge-yellow">läuft</span>'}</td>
+          <td>${artLabel}</td>
+          <td>${mins > 0 ? formatDuration(mins) : '—'}</td>
+          <td>${escapeHtml(r.notes)}</td>
+          ${canEdit ? `<td>
+            <button class="btn btn-sm btn-secondary" onclick="editTimeEntry(${idx})">Bearbeiten</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteTimeEntry(${idx})">Löschen</button>
+          </td>` : ''}
+        </tr>`;
+      });
+      html += '</tbody></table>';
+    }
+  } else {
+    html += '<div class="empty-state" style="padding:20px;"><p>Keine Einträge für diesen Tag.</p></div>';
+  }
+
+  if (canEdit) {
+    html += `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;display:flex;gap:8px;flex-wrap:wrap;${isMobile ? 'flex-direction:column;' : ''}">
+      <button class="btn btn-primary btn-sm" onclick="addManualTimeEntry()" ${isMobile ? 'style="width:100%;"' : ''}>+ Manuell hinzufügen</button>
+      <button class="btn btn-sm" onclick="addManualTimeEntry({type:'pause', start:'13:00', end:'13:30'})" style="background:var(--warning,#e67e22);border-color:var(--warning,#e67e22);color:#fff;${isMobile ? 'width:100%;' : ''}">Pause hinzufügen</button>
+      <button class="btn btn-success btn-sm" onclick="createStandardDay()" style="font-weight:700;${isMobile ? 'width:100%;' : ''}">Standardtag (8–17 Uhr)</button>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:var(--text-muted);">Änderungen werden erst mit „Speichern" geprüft und übernommen - „Abbrechen" (oder X) verwirft sie.</div>
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;display:flex;gap:8px;${isMobile ? 'flex-direction:column;' : 'justify-content:flex-end;'}">
+      <button class="btn btn-secondary" onclick="dayDraftCancel()" ${isMobile ? 'style="width:100%;"' : ''}>Abbrechen</button>
+      <button class="btn btn-primary" onclick="dayDraftSave()" ${isMobile ? 'style="width:100%;"' : ''}>Speichern</button>
+    </div>`;
+  }
+
+  openModal(dayName, html);
+}
+
+function editTimeEntry(idx) {
+  const r = _dayDraft.rows[idx];
+  if (!r) return showToast('Eintrag nicht gefunden', 'error');
+  const startHHMM = (r.start || '').slice(0, 5);
+  const endHHMM = (r.end || '').slice(0, 5);
+  const html = `
+    <form onsubmit="saveTimeEntry(event, ${idx})">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Datum</label>
+          <input type="date" value="${_dayDraft.dateStr}" disabled>
         </div>
         <div class="form-group">
-          <label>Notizen</label>
-          <textarea name="notes" rows="2">${escapeHtml(isMarker ? '' : (entry.notes || ''))}</textarea>
+          <label>Art</label>
+          <select name="entry_type" required>
+            <option value="work"${r.type !== 'pause' ? ' selected' : ''}>Arbeitszeit</option>
+            <option value="pause"${r.type === 'pause' ? ' selected' : ''}>Pause</option>
+          </select>
         </div>
-        <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Speichern</button>
-          <button type="button" class="btn btn-secondary" onclick="openDayDetailModal(${staffId}, '${dateStr}')">Zurück</button>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Start</label>
+          <input type="time" name="start_time" value="${startHHMM}" required>
         </div>
-      </form>`;
-    openModal('Zeiteintrag bearbeiten', html);
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
+        <div class="form-group">
+          <label>Ende</label>
+          <input type="time" name="end_time" value="${endHHMM}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Notizen</label>
+        <textarea name="notes" rows="2">${escapeHtml(r.type === 'pause' ? '' : (r.notes || ''))}</textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Übernehmen</button>
+        <button type="button" class="btn btn-secondary" onclick="renderDayDraftModal()">Zurück</button>
+      </div>
+    </form>`;
+  openModal('Zeiteintrag bearbeiten', html);
 }
 
-async function saveTimeEntry(e, entryId, staffId, dateStr) {
+function saveTimeEntry(e, idx) {
   e.preventDefault();
   const form = e.target;
-  try {
-    const isPauseType = form.entry_type.value === 'pause';
-    const startVal = form.start_time.value;
-    const endVal = form.end_time.value;
-    const typed = form.notes.value.trim();
-    const wasStampedWork = form.was_stamped_work && form.was_stamped_work.value === '1';
-    // Pause -> eigener Marker; gestempelter Arbeitsblock ohne neue Notiz -> Marker erhalten.
-    const notesOut = isPauseType ? '__pausenblock__' : ((wasStampedWork && !typed) ? '__pause__' : typed);
-    await api(`/api/time/entries/${entryId}`, {
-      method: 'PUT',
-      body: {
-        entry_date: form.entry_date.value,
-        start_time: startVal && startVal.length === 5 ? startVal + ':00' : startVal,
-        end_time: endVal ? (endVal.length === 5 ? endVal + ':00' : endVal) : '',
-        break_minutes: 0,
-        notes: notesOut
-      }
-    });
-    showToast('Eintrag aktualisiert');
-    openDayDetailModal(staffId, form.entry_date.value);
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
+  const isPause = form.entry_type.value === 'pause';
+  const start = _draftNorm(form.start_time.value);
+  const end = form.end_time.value ? _draftNorm(form.end_time.value) : '';
+  if (!start) return showToast('Startzeit ist Pflichtfeld', 'error');
+  if (isPause && !end) return showToast('Eine Pause braucht ein Ende', 'error');
+  const old = _dayDraft.rows[idx];
+  const row = {
+    type: isPause ? 'pause' : 'work',
+    start, end,
+    notes: isPause ? '' : form.notes.value.trim(),
+    breakMinutes: (!isPause && old && old.type === 'work') ? (old.breakMinutes || 0) : 0
+  };
+  _dayDraft.rows[idx] = row;
+  if (isPause) _draftSplitWorkAroundPause(row);
+  _dayDraft.dirty = true;
+  renderDayDraftModal();
 }
 
-function addManualTimeEntry(staffId, dateStr, prefill) {
+function addManualTimeEntry(prefill) {
   // prefill (optional): { type:'pause'|'work', start:'HH:MM', end:'HH:MM' } - z.B. fuer den
   // "Pause hinzufuegen"-Button, der Art=Pause + 13:00-13:30 vorbelegt (nur noch Anlegen klicken).
   const pf = prefill || {};
   const isPause = pf.type === 'pause';
   const html = `
-    <form onsubmit="createManualTimeEntry(event, ${staffId}, '${dateStr}')">
+    <form onsubmit="createManualTimeEntry(event)">
       <div class="form-row">
         <div class="form-group">
           <label>Datum</label>
-          <input type="date" name="entry_date" value="${dateStr}" required>
+          <input type="date" value="${_dayDraft.dateStr}" disabled>
         </div>
         <div class="form-group">
           <label>Art</label>
@@ -12928,67 +12924,137 @@ function addManualTimeEntry(staffId, dateStr, prefill) {
         <textarea name="notes" rows="2"></textarea>
       </div>
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Anlegen</button>
-        <button type="button" class="btn btn-secondary" onclick="openDayDetailModal(${staffId}, '${dateStr}')">Zurück</button>
+        <button type="submit" class="btn btn-primary">Übernehmen</button>
+        <button type="button" class="btn btn-secondary" onclick="renderDayDraftModal()">Zurück</button>
       </div>
     </form>`;
   openModal(isPause ? 'Pause hinzufügen' : 'Manueller Zeiteintrag', html);
 }
 
-async function createManualTimeEntry(e, staffId, dateStr) {
+function createManualTimeEntry(e) {
   e.preventDefault();
   const form = e.target;
   const isPause = form.entry_type.value === 'pause';
-  try {
-    const startVal = form.start_time.value;
-    const endVal = form.end_time.value;
-    await api('/api/time/entries', {
-      method: 'POST',
-      body: {
-        staff_id: staffId,
-        entry_date: form.entry_date.value,
-        start_time: startVal && startVal.length === 5 ? startVal + ':00' : startVal,
-        end_time: endVal ? (endVal.length === 5 ? endVal + ':00' : endVal) : '',
-        break_minutes: 0,
-        notes: isPause ? '__pausenblock__' : form.notes.value.trim()
-      }
-    });
-    showToast('Eintrag erstellt');
-    openDayDetailModal(staffId, form.entry_date.value);
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
+  const start = _draftNorm(form.start_time.value);
+  const end = form.end_time.value ? _draftNorm(form.end_time.value) : '';
+  if (!start) return showToast('Startzeit ist Pflichtfeld', 'error');
+  if (isPause && !end) return showToast('Eine Pause braucht ein Ende', 'error');
+  const row = { type: isPause ? 'pause' : 'work', start, end, notes: isPause ? '' : form.notes.value.trim(), breakMinutes: 0 };
+  _dayDraft.rows.push(row);
+  if (isPause) _draftSplitWorkAroundPause(row);
+  _dayDraft.dirty = true;
+  renderDayDraftModal();
 }
 
-async function createStandardDay(staffId, dateStr) {
-  try {
-    await api('/api/time/entries', {
-      method: 'POST',
-      body: {
-        staff_id: staffId,
-        entry_date: dateStr,
-        start_time: '08:00:00',
-        end_time: '17:00:00',
-        break_minutes: 60,
-        notes: ''
-      }
-    });
-    showToast('Standardtag (8–17 Uhr, 1h Pause) erstellt');
-    openDayDetailModal(staffId, dateStr);
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
+function createStandardDay() {
+  _dayDraft.rows.push({ type: 'work', start: '08:00:00', end: '17:00:00', notes: '', breakMinutes: 60 });
+  _dayDraft.dirty = true;
+  renderDayDraftModal();
 }
 
-async function deleteTimeEntry(entryId, staffId, dateStr) {
+function deleteTimeEntry(idx) {
   if (!confirm('Zeiteintrag wirklich löschen?')) return;
+  _dayDraft.rows.splice(idx, 1);
+  _dayDraft.dirty = true;
+  renderDayDraftModal();
+}
+
+// Eine Pausenzeile schneidet ueberlappende ARBEITS-Zeilen im Entwurf zurecht (sichtbar,
+// bevor irgendetwas gespeichert wird): trimmen, aufteilen oder entfernen. Linker Teil behaelt
+// break_minutes, rechter Teil startet ohne (1:1 wie die bisherige Server-Split-Logik).
+// Ein laufender Block (ohne Ende) wird bei Pausenbeginn geschlossen, der Rest laeuft ab
+// Pausenende offen weiter.
+function _draftSplitWorkAroundPause(pauseRow) {
+  const ps = _draftToMin(pauseRow.start), pe = _draftToMin(pauseRow.end);
+  if (ps == null || pe == null || pe <= ps) return;
+  const out = [];
+  _dayDraft.rows.forEach(r => {
+    if (r === pauseRow || r.type !== 'work') { out.push(r); return; }
+    const s = _draftToMin(r.start);
+    const e = r.end ? _draftToMin(r.end) : 1440; // laufender Block: gedanklich bis Tagesende
+    if (s == null || e <= ps || s >= pe) { out.push(r); return; }   // keine Ueberschneidung
+    if (s < ps) out.push({ type: 'work', start: r.start, end: pauseRow.start, notes: r.notes, breakMinutes: r.breakMinutes || 0 });
+    if (e > pe) out.push({ type: 'work', start: pauseRow.end, end: r.end, notes: r.notes, breakMinutes: s < ps ? 0 : (r.breakMinutes || 0) });
+    // s >= ps && e <= pe: Arbeit liegt komplett in der Pause -> entfaellt
+  });
+  _dayDraft.rows = out;
+}
+
+// Schluessigkeits-Pruefung des Entwurfs (beim Schliessen): Ende > Start, hoechstens ein
+// laufender Eintrag, keine Pause ohne Ende, keine Ueberschneidungen (laufend = bis Tagesende).
+function _validateDayDraft() {
+  const problems = [];
+  const rows = _dayDraftSorted().map(x => x.r);
+  const lbl = r => String(r.start).slice(0, 5) + '–' + (r.end ? String(r.end).slice(0, 5) : 'läuft');
+  const art = r => r.type === 'pause' ? 'Pause' : 'Arbeitszeit';
+  let openCount = 0;
+  rows.forEach(r => {
+    const s = _draftToMin(r.start);
+    if (s == null) { problems.push('Eintrag ohne gültige Startzeit.'); return; }
+    if (!r.end) {
+      openCount++;
+      if (r.type === 'pause') problems.push('Pause ohne Ende (' + lbl(r) + ') ist nicht möglich.');
+    } else {
+      const e = _draftToMin(r.end);
+      if (e == null || e <= s) problems.push('Ende muss nach Start liegen (' + art(r) + ' ' + lbl(r) + ').');
+    }
+  });
+  if (openCount > 1) problems.push('Mehrere laufende Einträge ohne Endzeit.');
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      const a = rows[i], b = rows[j];
+      const aS = _draftToMin(a.start), bS = _draftToMin(b.start);
+      const aE = a.end ? _draftToMin(a.end) : 1440;
+      const bE = b.end ? _draftToMin(b.end) : 1440;
+      if (aS == null || bS == null || aE == null || bE == null) continue;
+      if (aS < bE && aE > bS) problems.push(art(a) + ' ' + lbl(a) + ' überschneidet sich mit ' + art(b) + ' ' + lbl(b) + '.');
+    }
+  }
+  return problems;
+}
+
+// Speichern-Button: ohne Aenderungen einfach zu; sonst pruefen und den Tag speichern.
+async function dayDraftSave() {
+  if (!_dayDraft || !_dayDraft.dirty) {
+    _dayDraft = null; _dayDraftActive = false;
+    closeModal();
+    return;
+  }
+  const problems = _validateDayDraft();
+  if (problems.length) {
+    const errorHtml = `<div style="background:rgba(220,38,38,0.08);border:1px solid var(--danger);border-radius:8px;padding:12px 14px;margin-bottom:14px;">
+      <strong style="color:var(--danger);">Der Tag ist nicht schlüssig - bitte korrigieren:</strong>
+      <ul style="margin:8px 0 0 18px;color:var(--danger);font-size:13px;">${problems.map(p => '<li>' + escapeHtml(p) + '</li>').join('')}</ul>
+    </div>`;
+    renderDayDraftModal(errorHtml);
+    return;
+  }
   try {
-    await api(`/api/time/entries/${entryId}`, { method: 'DELETE' });
-    showToast('Eintrag gelöscht');
-    openDayDetailModal(staffId, dateStr);
+    const rows = _dayDraftSorted().map(x => ({
+      type: x.r.type,
+      start_time: x.r.start,
+      end_time: x.r.end || '',
+      break_minutes: x.r.breakMinutes || 0,
+      notes: x.r.type === 'pause' ? '' : (x.r.notes || '')
+    }));
+    const result = await api('/api/time/day', { method: 'PUT', body: { staff_id: _dayDraft.staffId, entry_date: _dayDraft.dateStr, rows } });
+    showToast(result && result.gapsFilled > 0 ? 'Tag gespeichert - ' + result.gapsFilled + ' Lücke(n) automatisch als Pause eingetragen' : 'Tag gespeichert');
+    _dayDraft = null; _dayDraftActive = false;
+    closeModal(); // rendert die Zeiterfassung neu -> Wochentabelle + Saldo aktualisieren sich
   } catch (err) {
     showToast(err.message, 'error');
   }
+}
+
+// Abbrechen-Button und X: bei ungespeicherten Aenderungen erst nachfragen, dann verwerfen.
+// Beim naechsten Oeffnen des Tages laedt der Entwurf wieder frisch aus der DB - alles wie vorher.
+function dayDraftCancel() {
+  if (_dayDraft && _dayDraft.dirty) {
+    if (!confirm('Es gibt ungespeicherte Änderungen. Wirklich verwerfen? Der Tag bleibt dann unverändert.')) return;
+    showToast('Änderungen verworfen');
+  }
+  _dayDraft = null; _dayDraftActive = false;
+  closeModal();
 }
 
 // ===== PAGE: Vermietung (Rental) =====
