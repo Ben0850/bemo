@@ -61,7 +61,11 @@ app.use(express.static(path.join(__dirname, 'public'), {
 // Guard Verwaltung/Buchhaltung trotz erlaubter Rolle abweisen.
 function _deleteOpenToAll(p) {
   // Beteiligte aus einer Akte entfernen — für jede Benutzergruppe erlaubt
-  return /^\/api\/akten\/\d+\/beteiligte\/\d+$/.test(p);
+  return /^\/api\/akten\/\d+\/beteiligte\/\d+$/.test(p)
+    // Einzelne Rechnungs-/Gutschrift-POSITIONEN: gehoeren zum Erstellen (Tippfehler korrigieren).
+    // Das Loeschen der GANZEN Rechnung/Gutschrift bleibt bewusst Verwaltung/Buchhaltung/Admin.
+    || /^\/api\/invoice-items\/\d+$/.test(p)
+    || /^\/api\/credit-note-items\/\d+$/.test(p);
 }
 
 // Globale Sperre: "Benutzer"-Rolle darf NICHTS loeschen (ausser _deleteOpenToAll).
@@ -1943,7 +1947,7 @@ const DEFAULT_INVOICE_INTRO_TEXT = 'Unfallersatz Mietwagenrechnung\nAbrechnung e
 app.post('/api/invoices', (req, res) => {
   // AUTH-02: Nur Verwaltung, Buchhaltung, Admin dürfen Rechnungen erstellen
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+  if (!['Verwaltung', 'Buchhaltung', 'Admin', 'Benutzer'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   // Defensiv: neue Spalten garantieren (falls Migration nicht durchgelaufen ist)
@@ -1990,7 +1994,7 @@ app.post('/api/invoices', (req, res) => {
 app.put('/api/invoices/:id', (req, res) => {
   // AUTH-02: Nur Verwaltung, Buchhaltung, Admin dürfen Rechnungen bearbeiten
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+  if (!['Verwaltung', 'Buchhaltung', 'Admin', 'Benutzer'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   // Defensiv: neue Spalten garantieren
@@ -2095,7 +2099,7 @@ app.delete('/api/invoices/:id', (req, res) => {
 // Alle Vorlagen einer Gruppe in eine Rechnung einfuegen (in sort_order-Reihenfolge)
 app.post('/api/invoices/:id/insert-group', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+  if (!['Verwaltung', 'Buchhaltung', 'Admin', 'Benutzer'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   const invoiceId = Number(req.params.id);
@@ -2133,7 +2137,7 @@ app.post('/api/invoices/:id/insert-group', (req, res) => {
 app.post('/api/invoices/:id/items', (req, res) => {
   // AUTH-02: Gleiche Berechtigung wie invoice create/update
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+  if (!['Verwaltung', 'Buchhaltung', 'Admin', 'Benutzer'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   const invoiceId = Number(req.params.id);
@@ -2164,7 +2168,7 @@ app.post('/api/invoices/:id/items', (req, res) => {
 app.put('/api/invoice-items/:id', (req, res) => {
   // AUTH-02: Gleiche Berechtigung wie invoice create/update
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+  if (!['Verwaltung', 'Buchhaltung', 'Admin', 'Benutzer'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   // Lock-Check: Rechnung muss im Entwurf sein
@@ -2200,7 +2204,7 @@ function renumberInvoiceItemPositions(invoiceId) {
 
 app.delete('/api/invoice-items/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  if (!['Admin', 'Verwaltung', 'Buchhaltung', 'Benutzer'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   // Lock-Check: Rechnung muss im Entwurf sein
   const parent = queryOne('SELECT i.status FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id WHERE it.id = ?', [Number(req.params.id)]);
   if (parent && parent.status && parent.status !== 'Entwurf') {
@@ -2220,7 +2224,7 @@ app.delete('/api/invoice-items/:id', (req, res) => {
 // defensiv durch, damit auch bei zuvor luckenhaften Nummern alles 1..N bleibt.
 app.post('/api/invoice-items/:id/move', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  if (!['Admin', 'Verwaltung', 'Buchhaltung', 'Benutzer'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const id = Number(req.params.id);
   const direction = req.body && req.body.direction;
   if (!['up', 'down'].includes(direction)) return res.status(400).json({ error: 'Ungueltige Richtung' });
@@ -2729,7 +2733,7 @@ app.get('/api/credit-notes/:id', (req, res) => {
 
 app.post('/api/credit-notes', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+  if (!['Verwaltung', 'Buchhaltung', 'Admin', 'Benutzer'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   const { customer_id, vermittler_id, credit_date, due_date, service_date, payment_method, notes, bank_account_id } = req.body;
@@ -2762,7 +2766,7 @@ app.post('/api/credit-notes', (req, res) => {
 
 app.put('/api/credit-notes/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+  if (!['Verwaltung', 'Buchhaltung', 'Admin', 'Benutzer'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   const existing = queryOne('SELECT credit_number, status FROM credit_notes WHERE id = ?', [Number(req.params.id)]);
@@ -2815,7 +2819,7 @@ app.delete('/api/credit-notes/:id', (req, res) => {
 // Credit Note Items
 app.post('/api/credit-notes/:id/items', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+  if (!['Verwaltung', 'Buchhaltung', 'Admin', 'Benutzer'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   const creditId = Number(req.params.id);
@@ -2841,7 +2845,7 @@ app.post('/api/credit-notes/:id/items', (req, res) => {
 
 app.put('/api/credit-note-items/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Verwaltung', 'Buchhaltung', 'Admin'].includes(permission)) {
+  if (!['Verwaltung', 'Buchhaltung', 'Admin', 'Benutzer'].includes(permission)) {
     return res.status(403).json({ error: 'Keine Berechtigung' });
   }
   const parentRow = queryOne('SELECT cn.status FROM credit_notes cn JOIN credit_note_items i ON i.credit_note_id = cn.id WHERE i.id = ?', [Number(req.params.id)]);
@@ -2872,7 +2876,7 @@ function renumberCreditNoteItemPositions(creditId) {
 
 app.delete('/api/credit-note-items/:id', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  if (!['Admin', 'Verwaltung', 'Buchhaltung', 'Benutzer'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const item = queryOne('SELECT credit_note_id FROM credit_note_items WHERE id = ?', [Number(req.params.id)]);
   if (!item) return res.status(404).json({ error: 'Position nicht gefunden' });
   const parent = queryOne('SELECT status FROM credit_notes WHERE id = ?', [item.credit_note_id]);
@@ -2886,7 +2890,7 @@ app.delete('/api/credit-note-items/:id', (req, res) => {
 // Verschiebt eine Gutschrift-Position eine Stelle nach oben oder unten.
 app.post('/api/credit-note-items/:id/move', (req, res) => {
   const permission = req.headers['x-user-permission'];
-  if (!['Admin', 'Verwaltung', 'Buchhaltung'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
+  if (!['Admin', 'Verwaltung', 'Buchhaltung', 'Benutzer'].includes(permission)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const id = Number(req.params.id);
   const direction = req.body && req.body.direction;
   if (!['up', 'down'].includes(direction)) return res.status(400).json({ error: 'Ungueltige Richtung' });

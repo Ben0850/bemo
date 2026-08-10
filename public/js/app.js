@@ -62,11 +62,15 @@ function isFinance() {
     loggedInUser.permission_level === 'Admin'
   );
 }
+// Rechnungen und Gutschriften ERSTELLEN/BEARBEITEN (inkl. Positionen und Finalisieren).
+// Seit 2026-08-06 auch fuer die Rolle "Benutzer" freigegeben. Das LOESCHEN ganzer
+// Rechnungen/Gutschriften bleibt davon unberuehrt (siehe isFinance).
 function canEditInvoice() {
   return loggedInUser && (
     loggedInUser.permission_level === 'Verwaltung' ||
     loggedInUser.permission_level === 'Buchhaltung' ||
-    loggedInUser.permission_level === 'Admin'
+    loggedInUser.permission_level === 'Admin' ||
+    loggedInUser.permission_level === 'Benutzer'
   );
 }
 
@@ -8316,7 +8320,7 @@ function renderInvoiceItemsTable(items, invoiceId, canEdit) {
       <td>${Number(item.total_net).toFixed(2)} &euro;</td>
       ${canEdit ? `<td style="white-space:nowrap;">
         <button class="btn btn-sm btn-secondary" onclick="editInvoiceItemRow(${item.id}, ${invoiceId})">Bearbeiten</button>
-        ${isFinance() ? `<button class="btn btn-sm btn-danger" onclick="deleteInvoiceItem(${item.id}, ${invoiceId})">Löschen</button>` : ''}
+        ${canEditInvoice() ? `<button class="btn btn-sm btn-danger" onclick="deleteInvoiceItem(${item.id}, ${invoiceId})">Löschen</button>` : ''}
       </td>
       <td style="white-space:nowrap;text-align:center;">
         <button class="btn btn-sm btn-secondary" onclick="moveInvoiceItem(${item.id}, ${invoiceId}, 'up')" ${isFirst ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="Nach oben">&uarr;</button>
@@ -9266,7 +9270,7 @@ function renderCreditItemsTable(items, creditId, canEdit) {
       <td>${Number(item.total_net).toFixed(2)} &euro;</td>
       ${canEdit ? `<td style="white-space:nowrap;">
         <button class="btn btn-sm btn-secondary" onclick="editCreditItemRow(${item.id}, ${creditId})">Bearbeiten</button>
-        ${isFinance() ? `<button class="btn btn-sm btn-danger" onclick="deleteCreditItem(${item.id}, ${creditId})">Löschen</button>` : ''}
+        ${canEditInvoice() ? `<button class="btn btn-sm btn-danger" onclick="deleteCreditItem(${item.id}, ${creditId})">Löschen</button>` : ''}
       </td>
       <td style="white-space:nowrap;text-align:center;">
         <button class="btn btn-sm btn-secondary" onclick="moveCreditItem(${item.id}, ${creditId}, 'up')" ${isFirst ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="Nach oben">&uarr;</button>
