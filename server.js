@@ -2707,11 +2707,13 @@ function recalcCreditTotals(creditId) {
     [totalNet, totalGross, totalVat, creditId]);
 }
 
-app.get('/api/credit-notes', (req, res) => {
+app.get('/api/credit-notes', async (req, res) => {
   const { status, search } = req.query;
+  // LEFT JOIN (nicht INNER): Gutschriften an einen Vermittler haben customer_id = NULL und
+  // fehlten mit INNER JOIN komplett in der Liste (unsichtbar, obwohl angelegt).
   let sql = `SELECT cn.*,
     CASE WHEN c.customer_type IN ('Firmenkunde','Werkstatt') THEN c.company_name ELSE c.last_name || ', ' || c.first_name END as customer_name
-    FROM credit_notes cn JOIN customers c ON cn.customer_id = c.id WHERE 1=1`;
+    FROM credit_notes cn LEFT JOIN customers c ON cn.customer_id = c.id WHERE 1=1`;
   const params = [];
   if (status) { sql += ' AND cn.status = ?'; params.push(status); }
   if (search) {
@@ -2720,15 +2722,39 @@ app.get('/api/credit-notes', (req, res) => {
     params.push(term, term, term, term);
   }
   sql += ' ORDER BY cn.credit_date DESC, cn.id DESC';
-  res.json(queryAll(sql, params));
+  const rows = queryAll(sql, params);
+
+  // Empfaengernamen fuer Vermittler-Gutschriften nachtragen. Die Vermittler liegen in der
+  // externen Stammdaten-API — daher EIN Sammelabruf statt eines Calls pro Zeile.
+  if (rows.some(r => !r.customer_name && r.vermittler_id)) {
+    const alle = await fetchStammdatenById('/api/vermittler');
+    if (Array.isArray(alle)) {
+      const byId = new Map(alle.map(v => [Number(v.id), v]));
+      rows.forEach(r => {
+        if (!r.customer_name && r.vermittler_id) {
+          const v = byId.get(Number(r.vermittler_id));
+          if (v) r.customer_name = v.name || v.firma || v.company_name || '';
+        }
+      });
+    }
+  }
+  res.json(rows);
 });
 
-app.get('/api/credit-notes/:id', (req, res) => {
+app.get('/api/credit-notes/:id', async (req, res) => {
+  // LEFT JOIN (nicht INNER): Eine Gutschrift darf laut POST auch NUR an einen Vermittler
+  // gehen (customer_id = NULL). Mit INNER JOIN lieferte die Query dann keine Zeile und die
+  // fertig angelegte Gutschrift war mit "Gutschrift nicht gefunden" nicht mehr aufrufbar.
   const cn = queryOne(`SELECT cn.*, c.first_name, c.last_name, c.company_name, c.customer_type, c.street, c.zip, c.city, c.email, c.phone
-    FROM credit_notes cn JOIN customers c ON cn.customer_id = c.id WHERE cn.id = ?`, [Number(req.params.id)]);
+    FROM credit_notes cn LEFT JOIN customers c ON cn.customer_id = c.id WHERE cn.id = ?`, [Number(req.params.id)]);
   if (!cn) return res.status(404).json({ error: 'Gutschrift nicht gefunden' });
   const items = queryAll('SELECT * FROM credit_note_items WHERE credit_note_id = ? ORDER BY position, id', [Number(req.params.id)]);
-  res.json({ ...cn, items });
+  // Vermittler-Daten (extern aus Stammdaten-API), falls die Gutschrift an einen Vermittler geht
+  let vermittler_obj = null;
+  if (cn.vermittler_id) {
+    vermittler_obj = await fetchStammdatenById(`/api/vermittler/${cn.vermittler_id}`);
+  }
+  res.json({ ...cn, items, vermittler_obj });
 });
 
 app.post('/api/credit-notes', (req, res) => {
@@ -2910,13 +2936,28 @@ app.post('/api/credit-note-items/:id/move', (req, res) => {
 });
 
 // Credit Note PDF
-app.get('/api/credit-notes/:id/pdf', (req, res) => {
+app.get('/api/credit-notes/:id/pdf', async (req, res) => {
+  // LEFT JOIN: Gutschriften an einen Vermittler haben keinen Kunden (customer_id = NULL).
   const cn = queryOne(
     `SELECT cn.*, c.first_name, c.last_name, c.company_name, c.customer_type, c.street, c.zip, c.city
-     FROM credit_notes cn JOIN customers c ON cn.customer_id = c.id WHERE cn.id = ?`,
+     FROM credit_notes cn LEFT JOIN customers c ON cn.customer_id = c.id WHERE cn.id = ?`,
     [Number(req.params.id)]
   );
   if (!cn) return res.status(404).json({ error: 'Gutschrift nicht gefunden' });
+  // Ohne Kunde ist der Vermittler der Empfaenger: dessen Stammdaten in dieselben Felder
+  // legen, damit der Adressblock unveraendert weiterfunktioniert.
+  if (!cn.customer_id && cn.vermittler_id) {
+    const v = await fetchStammdatenById(`/api/vermittler/${cn.vermittler_id}`);
+    if (v) {
+      cn.customer_type = 'Firmenkunde';
+      cn.company_name = v.name || '';
+      cn.first_name = '';
+      cn.last_name = '';
+      cn.street = v.strasse || '';
+      cn.zip = v.plz || '';
+      cn.city = v.ort || '';
+    }
+  }
   const items = queryAll('SELECT * FROM credit_note_items WHERE credit_note_id = ? ORDER BY position, id', [Number(req.params.id)]);
 
   // GoBD: Firmendaten aus Snapshot der Gutschrift verwenden (eingefroren bei Erstellung)

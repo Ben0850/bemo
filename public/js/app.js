@@ -9168,9 +9168,19 @@ async function renderCreditNoteDetail(id) {
     // jede PUT/POST/DELETE auf finalisierte GS mit 403 ab.
     const locked = isCreditNoteLocked(cn);
     const canEditContent = canEdit && !locked;
-    const customerName = (cn.customer_type === 'Firmenkunde' || cn.customer_type === 'Werkstatt')
-      ? escapeHtml(cn.company_name)
-      : escapeHtml(cn.last_name) + ', ' + escapeHtml(cn.first_name);
+    // Empfaenger ist entweder ein Kunde ODER ein Vermittler (dann ist customer_id leer).
+    const isVermittlerGS = !cn.customer_id && cn.vermittler_id;
+    const v = cn.vermittler_obj || {};
+    const customerName = isVermittlerGS
+      ? (escapeHtml(v.name || '') || 'Vermittler #' + cn.vermittler_id)
+      : ((cn.customer_type === 'Firmenkunde' || cn.customer_type === 'Werkstatt')
+          ? escapeHtml(cn.company_name)
+          : escapeHtml(cn.last_name) + ', ' + escapeHtml(cn.first_name));
+    const empfStreet = isVermittlerGS ? escapeHtml(v.strasse || '') : escapeHtml(cn.street);
+    const empfZip    = isVermittlerGS ? escapeHtml(v.plz || '')     : escapeHtml(cn.zip);
+    const empfCity   = isVermittlerGS ? escapeHtml(v.ort || '')     : escapeHtml(cn.city);
+    const empfPhone  = isVermittlerGS ? escapeHtml(v.telefon || '') : escapeHtml(cn.phone);
+    const empfEmail  = isVermittlerGS ? escapeHtml(v.email || '')   : escapeHtml(cn.email);
 
     main.innerHTML = `
       <a class="back-link" onclick="navigate('gutschriften')">&#8592; Zurück zur Liste</a>
@@ -9187,12 +9197,12 @@ async function renderCreditNoteDetail(id) {
       </div>` : ''}
 
       <div class="card">
-        <div class="card-header"><h3>Kundendaten</h3></div>
+        <div class="card-header"><h3>${isVermittlerGS ? 'Vermittlerdaten' : 'Kundendaten'}</h3></div>
         <div class="customer-info-grid">
-          <div class="info-item"><div class="info-label">Kunde</div><div class="info-value">${customerName}</div></div>
-          <div class="info-item"><div class="info-label">Adresse</div><div class="info-value">${escapeHtml(cn.street)}<br>${escapeHtml(cn.zip)} ${escapeHtml(cn.city)}</div></div>
-          <div class="info-item"><div class="info-label">Telefon</div><div class="info-value">${escapeHtml(cn.phone)}</div></div>
-          <div class="info-item"><div class="info-label">E-Mail</div><div class="info-value">${escapeHtml(cn.email)}</div></div>
+          <div class="info-item"><div class="info-label">${isVermittlerGS ? 'Vermittler' : 'Kunde'}</div><div class="info-value">${customerName}</div></div>
+          <div class="info-item"><div class="info-label">Adresse</div><div class="info-value">${empfStreet}<br>${empfZip} ${empfCity}</div></div>
+          <div class="info-item"><div class="info-label">Telefon</div><div class="info-value">${empfPhone}</div></div>
+          <div class="info-item"><div class="info-label">E-Mail</div><div class="info-value">${empfEmail}</div></div>
         </div>
       </div>
 
