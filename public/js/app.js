@@ -3779,8 +3779,11 @@ async function renderVacation() {
           const effEnd = e.end_date < yEnd ? e.end_date : yEnd;
           if (effStart > effEnd) return;
           const days = getVacationDaysInRange(effStart, effEnd, hCurrent);
-          const wd = e.half_day ? 0.5 : countWorkdays(days, hCurrent);
-          if (e.entry_type === 'Urlaub') urlaubDays += wd;
+          // 'Halber Urlaubstag' ist die alte Speicherform (siehe normalizeVacationType im
+          // Server) - hier abgefangen, damit halbe Tage in jedem Fall als Urlaub zaehlen.
+          const isHalf = e.half_day || e.entry_type === 'Halber Urlaubstag';
+          const wd = isHalf ? 0.5 : countWorkdays(days, hCurrent);
+          if (e.entry_type === 'Urlaub' || e.entry_type === 'Halber Urlaubstag') urlaubDays += wd;
           else if (e.entry_type === 'Krankheit') krankheitDays += wd;
           else if (e.entry_type === 'Weiterbildung') weiterbildungDays += wd;
         });
@@ -4456,14 +4459,16 @@ async function renderVacationRequests(filters) {
         <tbody>
         ${tableRequests.map(e => {
           const days = getVacationDaysInRange(e.start_date, e.end_date, holidays);
-          const wd = e.entry_type === 'Weiterbildung' ? days.length : countWorkdays(days, holidays);
+          const isHalfReq = e.half_day || e.entry_type === 'Halber Urlaubstag';
+          const wd = isHalfReq ? 0.5 : (e.entry_type === 'Weiterbildung' ? days.length : countWorkdays(days, holidays));
+          const reqType = isHalfReq ? 'Halber Urlaubstag' : e.entry_type;
           const statusColor = e.status === 'Beantragt' ? 'badge-yellow' : e.status === 'Genehmigt' ? 'badge-green' : 'badge-red';
           return `<tr>
             <td><strong>${escapeHtml(e.staff_name)}</strong></td>
-            <td>${escapeHtml(e.entry_type)}</td>
+            <td>${escapeHtml(reqType)}</td>
             <td>${formatDate(e.start_date)}</td>
             <td>${formatDate(e.end_date)}</td>
-            <td>${wd}</td>
+            <td>${String(wd).replace('.', ',')}</td>
             <td>${escapeHtml(e.notes || '')}</td>
             <td><span class="badge ${statusColor}">${escapeHtml(e.status)}</span></td>
             ${admin ? `<td style="white-space:nowrap;">

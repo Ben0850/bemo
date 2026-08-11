@@ -1720,14 +1720,54 @@ app.get('/api/vacation', (req, res) => {
   res.json(queryAll(sql, params));
 });
 
+// Ein halber Urlaubstag ist Urlaub mit half_day = 1. Der Urlaubsantrag hat ihn frueher als
+// eigenen entry_type 'Halber Urlaubstag' gespeichert - der zaehlte dann nirgends als Urlaub
+// und wurde im Planer als ganzer Tag gezeichnet. Jeder Schreibweg wird hier vereinheitlicht.
+function normalizeVacationType(entry_type, half_day) {
+  if (entry_type === 'Halber Urlaubstag') return { entry_type: 'Urlaub', half_day: 1 };
+  return { entry_type: entry_type || 'Urlaub', half_day: half_day ? 1 : 0 };
+}
+
+// Niemand kann zweimal gleichzeitig abwesend sein: ueberlappende Eintraege werden abgelehnt.
+// Krankheit ist bewusst ausgenommen - krank im Urlaub ist ein realer Vorgang und muss
+// erfassbar bleiben. Abgelehnte Antraege blockieren nicht.
+function findVacationOverlap(staffId, entryType, startDate, endDate, excludeId, newStatus) {
+  if (entryType === 'Krankheit') return null;
+  // Ein abgelehnter Eintrag belegt keinen Zeitraum - sonst liesse sich ein bereits
+  // vorhandener ueberlappender Antrag nicht einmal mehr ablehnen.
+  if (newStatus === 'Abgelehnt') return null;
+  if (!staffId || !startDate || !endDate) return null;
+  const rows = queryAll(
+    `SELECT v.*, s.name AS staff_name FROM vacation_entries v
+     LEFT JOIN staff s ON s.id = v.staff_id
+     WHERE v.staff_id = ? AND v.status != 'Abgelehnt' AND v.entry_type != 'Krankheit'
+       AND v.start_date <= ? AND v.end_date >= ?
+     ORDER BY v.start_date`,
+    [Number(staffId), endDate, startDate]
+  );
+  return rows.find(r => !excludeId || r.id !== Number(excludeId)) || null;
+}
+
+function vacationOverlapMessage(conflict) {
+  const wer = conflict.staff_name || 'Der Mitarbeiter';
+  const was = conflict.half_day ? 'einen halben Urlaubstag' : `einen Eintrag "${conflict.entry_type}"`;
+  const zeitraum = conflict.start_date === conflict.end_date
+    ? `am ${formatDateDE(conflict.start_date)}`
+    : `vom ${formatDateDE(conflict.start_date)} bis ${formatDateDE(conflict.end_date)}`;
+  return `${wer} hat ${zeitraum} bereits ${was}. Überschneidungen sind nicht möglich.`;
+}
+
 app.post('/api/vacation', async (req, res) => {
-  const { staff_id, entry_type, start_date, end_date, notes, status, half_day } = req.body;
+  const { staff_id, start_date, end_date, notes, status } = req.body;
+  const { entry_type, half_day } = normalizeVacationType(req.body.entry_type, req.body.half_day);
   if (!staff_id || !start_date || !end_date) return res.status(400).json({ error: 'Mitarbeiter, Start- und Enddatum sind Pflichtfelder' });
   const callerPermission = req.headers['x-user-permission'];
   const callerId = Number(req.headers['x-user-id']);
   if (callerPermission !== 'Admin' && callerPermission !== 'Verwaltung' && Number(staff_id) !== callerId) {
     return res.status(403).json({ error: 'Du darfst nur für dich selbst einen Antrag stellen' });
   }
+  const conflict = findVacationOverlap(staff_id, entry_type, start_date, end_date, null, status);
+  if (conflict) return res.status(400).json({ error: vacationOverlapMessage(conflict) });
   const result = execute('INSERT INTO vacation_entries (staff_id, entry_type, start_date, end_date, notes, status, half_day) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [Number(staff_id), entry_type || 'Urlaub', start_date, end_date, notes || '', status || 'Genehmigt', half_day ? 1 : 0]);
 
@@ -1767,7 +1807,10 @@ ${notes ? `<strong>Anmerkung:</strong> ${notes}` : ''}</p>
 });
 
 app.put('/api/vacation/:id', async (req, res) => {
-  const { staff_id, entry_type, start_date, end_date, notes, status, half_day } = req.body;
+  const { staff_id, start_date, end_date, notes, status } = req.body;
+  const { entry_type, half_day } = normalizeVacationType(req.body.entry_type, req.body.half_day);
+  const conflict = findVacationOverlap(staff_id, entry_type, start_date, end_date, req.params.id, status);
+  if (conflict) return res.status(400).json({ error: vacationOverlapMessage(conflict) });
   execute('UPDATE vacation_entries SET staff_id=?, entry_type=?, start_date=?, end_date=?, notes=?, status=?, half_day=? WHERE id=?',
     [Number(staff_id), entry_type || 'Urlaub', start_date, end_date, notes || '', status || 'Genehmigt', half_day ? 1 : 0, Number(req.params.id)]);
 

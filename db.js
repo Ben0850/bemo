@@ -324,6 +324,11 @@ async function getDb() {
   try { db.run("ALTER TABLE vacation_entries ADD COLUMN status TEXT DEFAULT 'Genehmigt'"); } catch(e) {}
   try { db.run("ALTER TABLE vacation_entries ADD COLUMN payment_status INTEGER DEFAULT 0"); } catch(e) {}
   try { db.run("ALTER TABLE vacation_entries ADD COLUMN half_day INTEGER DEFAULT 0"); } catch(e) {}
+  // Halbe Urlaubstage vereinheitlichen: der Urlaubsantrag hat sie als eigenen entry_type
+  // 'Halber Urlaubstag' gespeichert. Dadurch zaehlten sie nirgends als Urlaub (weder in
+  // "Verplant" noch im Resturlaub) und wurden im Planer als ganzer Tag eingefaerbt.
+  // Kanonische Form ist Urlaub mit half_day = 1.
+  try { db.run("UPDATE vacation_entries SET entry_type = 'Urlaub', half_day = 1 WHERE entry_type = 'Halber Urlaubstag'"); } catch(e) {}
   try { db.run("ALTER TABLE calendar_appointments ADD COLUMN assigned_staff_id INTEGER DEFAULT NULL"); } catch(e) {}
   try { db.run("ALTER TABLE customers ADD COLUMN contact_person TEXT DEFAULT ''"); } catch(e) {}
   try { db.run("ALTER TABLE customers ADD COLUMN contact_phone TEXT DEFAULT ''"); } catch(e) {}
