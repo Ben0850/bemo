@@ -541,6 +541,10 @@ async function getDb() {
   // Performance-Indizes (PAY-DB-04)
   db.run(`CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice_date ON invoice_payments(invoice_id, payment_date)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_invoice_payments_bank_account ON invoice_payments(bank_account_id)`);
+  // Beschleunigt die korrelierte last_station-Subquery je Kunde (GET /api/customers)
+  // und die Kundensuche ueber Kennzeichen/Hersteller - vorher Full-Scan je Kunde
+  // (in der TUEV-App bei ~3500 Kunden Faktor 10, dort seit 2026-08-11 produktiv).
+  db.run(`CREATE INDEX IF NOT EXISTS idx_vehicles_customer_updated ON vehicles(customer_id, updated_at)`);
 
   // vat_rate per item for GoBD reproducibility (DB column needed for Phase 5 PDF)
   try { db.run("ALTER TABLE invoice_items ADD COLUMN vat_rate REAL DEFAULT 0.19"); } catch(e) {}
