@@ -27,4 +27,20 @@ jobs:
             echo "Container Health: $STATUS"
             [ "$STATUS" = "healthy" ] || { echo "Health check failed!"; exit 1; }
             docker network connect tuev-verwaltung_internal bemo-app 2>/dev/null || true
+            # Nginx loest Container-IPs nur beim Start/Reload auf. Nach dem Neuerstellen
+            # des App-Containers deshalb neu laden, sonst drohen 502 durch veraltete IPs
+            # (Vorfall 2026-08-12). nginx -t vorab: bei kaputter Config kein Reload-Versuch,
+            # Nginx laeuft sicher mit alter Config weiter. Warnung statt Abbruch - die App
+            # selbst ist an dieser Stelle bereits healthy.
+            if docker exec tuev-nginx nginx -t >/dev/null 2>&1 && docker exec tuev-nginx nginx -s reload; then
+              echo "Nginx neu geladen (Upstream-IPs aktualisiert)."
+            else
+              echo "Nginx-Reload fehlgeschlagen, 2. Versuch in 5s..."
+              sleep 5
+              if docker exec tuev-nginx nginx -t >/dev/null 2>&1 && docker exec tuev-nginx nginx -s reload; then
+                echo "Nginx neu geladen (2. Versuch)."
+              else
+                echo "WARNUNG: Nginx-Reload fehlgeschlagen - Config pruefen: docker exec tuev-nginx nginx -t"
+              fi
+            fi
             echo "Deployment erfolgreich!"
