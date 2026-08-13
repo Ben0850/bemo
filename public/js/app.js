@@ -12973,6 +12973,30 @@ function createStandardDay() {
 
 function deleteTimeEntry(idx) {
   if (!confirm('Zeiteintrag wirklich löschen?')) return;
+  const row = _dayDraft.rows[idx];
+  // Pause loeschen = die Zeit wird wieder ARBEIT (Vorgabe Ben 2026-08-12): buendig
+  // angrenzende Arbeitsbloecke wachsen ueber die Pausenspanne bzw. verschmelzen zu
+  // EINEM Block. Sonst bliebe ein Loch, das beim Speichern wieder als Pause gefuellt
+  // wuerde. Vergleich minutengenau (_draftToMin ignoriert Sekunden).
+  if (row && row.type === 'pause' && row.end) {
+    const ps = _draftToMin(row.start), pe = _draftToMin(row.end);
+    _dayDraft.rows.splice(idx, 1);
+    const prev = _dayDraft.rows.find(r => r.type === 'work' && r.end && _draftToMin(r.end) === ps);
+    const next = _dayDraft.rows.find(r => r.type === 'work' && _draftToMin(r.start) === pe);
+    if (prev && next) {
+      prev.end = next.end; // '' (laufender Block) bleibt dabei erhalten
+      prev.notes = [prev.notes, next.notes].filter(Boolean).join('; ');
+      prev.breakMinutes = (prev.breakMinutes || 0) + (next.breakMinutes || 0);
+      _dayDraft.rows.splice(_dayDraft.rows.indexOf(next), 1);
+    } else if (prev) {
+      prev.end = row.end;
+    } else if (next) {
+      next.start = row.start;
+    }
+    _dayDraft.dirty = true;
+    renderDayDraftModal();
+    return;
+  }
   _dayDraft.rows.splice(idx, 1);
   _dayDraft.dirty = true;
   renderDayDraftModal();
