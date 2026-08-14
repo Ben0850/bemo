@@ -12966,7 +12966,13 @@ function createManualTimeEntry(e) {
 }
 
 function createStandardDay() {
-  _dayDraft.rows.push({ type: 'work', start: '08:00:00', end: '17:00:00', notes: '', breakMinutes: 60 });
+  // Standardtag = sichtbare Bloecke (Vorgabe Ben 2026-08-14): Arbeit 8-12, Pause 12-13,
+  // Arbeit 13-17 = 8h. Frueher EIN Block 8-17 mit unsichtbarem break_minutes=60
+  // (B&P-Altlast): der Pauschalabzug kollidierte mit dem expliziten Pausenblock-System
+  // (Doppelabzug nach Split, fehlende Stunde ohne sichtbare Pause).
+  _dayDraft.rows.push({ type: 'work', start: '08:00:00', end: '12:00:00', notes: '', breakMinutes: 0 });
+  _dayDraft.rows.push({ type: 'pause', start: '12:00:00', end: '13:00:00', notes: '', breakMinutes: 0 });
+  _dayDraft.rows.push({ type: 'work', start: '13:00:00', end: '17:00:00', notes: '', breakMinutes: 0 });
   _dayDraft.dirty = true;
   renderDayDraftModal();
 }
