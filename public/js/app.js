@@ -12903,7 +12903,23 @@ function saveTimeEntry(e, idx) {
     breakMinutes: (!isPause && old && old.type === 'work') ? (old.breakMinutes || 0) : 0
   };
   _dayDraft.rows[idx] = row;
-  if (isPause) _draftSplitWorkAroundPause(row);
+  if (isPause) {
+    // Pause bearbeitet = buendig angrenzende Arbeitsbloecke folgen den neuen Grenzen
+    // (Vorgabe Ben 2026-08-14): sonst bliebe beim Verkuerzen ein Loch, das beim
+    // Speichern wieder als Pause gefuellt wuerde. Spiegelbild der Loesch-Regel,
+    // Vergleich minutengenau (_draftToMin ignoriert Sekunden).
+    if (old && old.type === 'pause' && old.end) {
+      const os = _draftToMin(old.start), oe = _draftToMin(old.end);
+      const prev = _dayDraft.rows.find(r => r !== row && r.type === 'work' && r.end && _draftToMin(r.end) === os);
+      const next = _dayDraft.rows.find(r => r !== row && r.type === 'work' && _draftToMin(r.start) === oe);
+      if (prev) prev.end = row.start;
+      if (next) next.start = row.end;
+    }
+    _draftSplitWorkAroundPause(row);
+    // Von der Pause komplett ueberdeckte (leergeschrumpfte) Arbeitsbloecke entfernen
+    _dayDraft.rows = _dayDraft.rows.filter(r =>
+      r === row || r.type !== 'work' || !r.end || _draftToMin(r.end) > _draftToMin(r.start));
+  }
   _dayDraft.dirty = true;
   renderDayDraftModal();
 }
